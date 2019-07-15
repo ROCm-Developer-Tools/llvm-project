@@ -50,6 +50,7 @@ class ObjCRuntime;
 
 namespace driver {
 
+class Compilation;
 class Driver;
 class InputInfo;
 class SanitizerArgs;

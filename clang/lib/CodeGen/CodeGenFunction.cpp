@@ -1097,7 +1097,15 @@ QualType CodeGenFunction::BuildFunctionArgList(GlobalDecl GD,
           getTypes().inheritingCtorHasParams(Inherited, GD.getCtorType());
 
   if (PassedParams) {
+    bool is_amd_global =
+        ((CGM.getTriple().getArch() == llvm::Triple::amdgcn) &&
+         getLangOpts().CUDAIsDevice && FD->hasAttr<CUDAGlobalAttr>());
+
     for (auto *Param : FD->parameters()) {
+      // for amdgcn kernel functions, mark nonscalars in cuda_device memory
+      if (is_amd_global && Param->getType()->isPointerType())
+        Param->setType(getContext().getAddrSpaceQualType(Param->getType(),
+                                                         LangAS::cuda_device));
       Args.push_back(Param);
       if (!Param->hasAttr<PassObjectSizeAttr>())
         continue;

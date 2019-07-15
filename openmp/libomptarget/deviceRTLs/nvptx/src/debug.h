@@ -71,7 +71,7 @@
 #ifndef OMPTARGET_NVPTX_DEBUG
 #define OMPTARGET_NVPTX_DEBUG LD_SET_NONE
 #elif OMPTARGET_NVPTX_DEBUG
-#warning debug is used, not good for measurements
+//#warning debug is used, not good for measurements
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////

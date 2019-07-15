@@ -404,6 +404,7 @@ int target_data_end(DeviceTy &Device, int32_t arg_num, void **args_base,
           int rt = Device.data_retrieve(HstPtrBegin, TgtPtrBegin, data_size);
           if (rt != OFFLOAD_SUCCESS) {
             DP("Copying data from device failed.\n");
+            fprintf(stderr, "Copying data from device failed.\n");
             return OFFLOAD_FAIL;
           }
         }
@@ -451,7 +452,9 @@ int target_data_end(DeviceTy &Device, int32_t arg_num, void **args_base,
         int rt = Device.deallocTgtPtr(HstPtrBegin, data_size, ForceDelete);
         if (rt != OFFLOAD_SUCCESS) {
           DP("Deallocating data from device failed.\n");
-          return OFFLOAD_FAIL;
+          fprintf(stderr, "Deallocating data map from device failed.\n");
+          // This is not a fatal issue, so we just warn user
+          //  return OFFLOAD_FAIL;
         }
       }
     }

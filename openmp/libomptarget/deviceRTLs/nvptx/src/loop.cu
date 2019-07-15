@@ -289,7 +289,7 @@ public:
       omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
       PRINT(LD_LOOP,
             "dispatch init (static chunk) : num threads = %d, ub =  %" PRId64
-            ", next lower bound = %llu, stride = %llu\n",
+            ", next lower bound = %lu, stride = %lu\n",
             (int)tnum,
             omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
             (unsigned long long)
@@ -321,7 +321,7 @@ public:
       omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
       PRINT(LD_LOOP,
             "dispatch init (static chunk) : num threads = %d, ub =  %" PRId64
-            ", next lower bound = %llu, stride = %llu\n",
+            ", next lower bound = %lu, stride = %lu\n",
             (int)tnum,
             omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
             (unsigned long long)
@@ -344,7 +344,7 @@ public:
       omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
       PRINT(LD_LOOP,
             "dispatch init (static nochunk) : num threads = %d, ub = %" PRId64
-            ", next lower bound = %llu, stride = %llu\n",
+            ", next lower bound = %lu, stride = %lu\n",
             (int)tnum,
             omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
             (unsigned long long)
@@ -366,7 +366,7 @@ public:
       }
       __kmpc_barrier(loc, threadId);
       PRINT(LD_LOOP,
-            "dispatch init (dyn) : num threads = %d, lb = %llu, ub = %" PRId64
+            "dispatch init (dyn) : num threads = %d, lb = %lu, ub = %" PRId64
             ", chunk %" PRIu64 "\n",
             (int)tnum,
             (unsigned long long)
@@ -792,8 +792,16 @@ EXTERN void __kmpc_reduce_conditional_lastprivate(kmp_Ident *loc, int32_t gtid,
     // Atomic max of iterations.
     uint64_t *varArray = (uint64_t *)array;
     uint64_t elem = varArray[i];
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
     (void)atomicMax((unsigned long long int *)Buffer,
                     (unsigned long long int)elem);
+#else
+    uint64_t old_value = *Buffer;
+    while (old_value < elem && !atomicCAS((unsigned long long *)Buffer,
+                                          (unsigned long long)old_value,
+                                          (unsigned long long)elem)) {
+    };
+#endif
 
     // Barrier.
     syncWorkersInGenericMode(NumThreads);
