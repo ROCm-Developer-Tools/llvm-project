@@ -74,6 +74,11 @@ private:
   /// function.
   void emitNonSPMDEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
 
+  void GenerateMetaData(CodeGenModule &CGM,
+                        const OMPExecutableDirective &D,
+                        llvm::Function *&OutlinedFn,
+                        bool isSPMD);
+
   /// Helper for generic variables globalization prolog.
   void emitGenericVarsProlog(CodeGenFunction &CGF, SourceLocation Loc,
                              bool WithSPMDCheck = false);

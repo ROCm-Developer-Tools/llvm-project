@@ -2909,7 +2909,11 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
 
   // Set the flag to prevent the implementation from emitting device exception
   // handling code for those requiring so.
-  if ((Opts.OpenMPIsDevice && T.isNVPTX()) || Opts.OpenCLCPlusPlus) {
+  /// FIXME This line is no longer in trunk. and we did not add it
+  //Opts.OpenMPHostCXXExceptions = Opts.Exceptions && Opts.CXXExceptions;
+  if ((Opts.OpenMPIsDevice &&
+       (T.isNVPTX() || T.getArch() == llvm::Triple::amdgcn)) ||
+      Opts.OpenCLCPlusPlus) {
     Opts.Exceptions = 0;
     Opts.CXXExceptions = 0;
   }
@@ -2942,11 +2946,27 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
             TT.getArch() == llvm::Triple::ppc64le ||
             TT.getArch() == llvm::Triple::nvptx ||
             TT.getArch() == llvm::Triple::nvptx64 ||
+            TT.getArch() == llvm::Triple::amdgcn ||
             TT.getArch() == llvm::Triple::x86 ||
             TT.getArch() == llvm::Triple::x86_64))
         Diags.Report(diag::err_drv_invalid_omp_target) << A->getValue(i);
       else
         Opts.OMPTargetTriples.push_back(TT);
+    }
+  } else {
+    if (Opts.OpenMP) {
+      // could use list --cuda-gpu-arch or --offload-arch
+      // to correctly generate triples
+      for (Arg *A : Args)
+        if (A->getOption().matches(options::OPT_cuda_gpu_arch_EQ)) {
+          // FIXME , need proper list of offload archs built one time because
+          // --offload-arch= could be followed by a --no-offload-arch=
+          if (StringRef(A->getValue()).startswith("gfx"))
+            Opts.OMPTargetTriples.push_back(llvm::Triple("amdgcn-amd-amdhsa"));
+          if (StringRef(A->getValue()).startswith("sm_"))
+            Opts.OMPTargetTriples.push_back(
+                llvm::Triple("nvptx64-nvidia-cuda"));
+        }
     }
   }
 
@@ -2962,12 +2982,14 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SYCLIsDevice = Args.hasArg(options::OPT_fsycl_is_device);
 
   // Set CUDA mode for OpenMP target NVPTX if specified in options
-  Opts.OpenMPCUDAMode = Opts.OpenMPIsDevice && T.isNVPTX() &&
+  Opts.OpenMPCUDAMode = Opts.OpenMPIsDevice &&
+                        (T.isNVPTX() || T.getArch() == llvm::Triple::amdgcn) &&
                         Args.hasArg(options::OPT_fopenmp_cuda_mode);
 
   // Set CUDA mode for OpenMP target NVPTX if specified in options
   Opts.OpenMPCUDAForceFullRuntime =
-      Opts.OpenMPIsDevice && T.isNVPTX() &&
+      Opts.OpenMPIsDevice &&
+      (T.isNVPTX() || T.getArch() == llvm::Triple::amdgcn) &&
       Args.hasArg(options::OPT_fopenmp_cuda_force_full_runtime);
 
   // Record whether the __DEPRECATED define was requested.

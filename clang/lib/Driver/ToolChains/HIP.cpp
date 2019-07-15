@@ -10,12 +10,14 @@
 #include "CommonArgs.h"
 #include "InputInfo.h"
 #include "clang/Basic/Cuda.h"
+#include "clang/Config/config.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 
 using namespace clang::driver;
 using namespace clang::driver::toolchains;
@@ -33,14 +35,16 @@ namespace {
 
 static void addBCLib(const Driver &D, const ArgList &Args,
                      ArgStringList &CmdArgs, ArgStringList LibraryPaths,
-                     StringRef BCName) {
+                     StringRef BCName, bool postClangLink) {
   StringRef FullName;
   for (std::string LibraryPath : LibraryPaths) {
     SmallString<128> Path(LibraryPath);
     llvm::sys::path::append(Path, BCName);
     FullName = Path;
+    // printf(" CHECKING for %s\n",FullName.str().c_str());
     if (llvm::sys::fs::exists(FullName)) {
-      CmdArgs.push_back("-mlink-builtin-bitcode");
+      if (postClangLink)
+        CmdArgs.push_back("-mlink-builtin-bitcode");
       CmdArgs.push_back(Args.MakeArgString(FullName));
       return;
     }
@@ -50,14 +54,99 @@ static void addBCLib(const Driver &D, const ArgList &Args,
 
 } // namespace
 
-const char *AMDGCN::Linker::constructLLVMLinkCommand(
-    Compilation &C, const JobAction &JA, const InputInfoList &Inputs,
+const char *AMDGCN::Linker::constructOmpExtraCmds(Compilation &C,
+    const JobAction &JA, const InputInfoList &Inputs,
     const ArgList &Args, StringRef SubArchName,
     StringRef OutputFilePrefix) const {
+
+  std::string TmpName;
+  TmpName = C.getDriver().isSaveTempsEnabled()
+                ? OutputFilePrefix.str() + "-select.bc"
+                : C.getDriver().GetTemporaryPath(
+                      OutputFilePrefix.str() + "-select", "bc");
+  const char *OutputFileName =
+      C.addTempFile(C.getArgs().MakeArgString(TmpName));
+  ArgStringList CmdArgs;
+  //CmdArgs.push_back("-v");
+  llvm::SmallVector<std::string, 10> BCLibs;
+  for (const auto &II : Inputs) {
+    if (II.isFilename())
+      CmdArgs.push_back(II.getFilename());
+  }
+
+  ArgStringList LibraryPaths;
+
+  // If device debugging turned on, get bc files from lib-debug dir
+  std::string lib_debug_path = FindDebugInLibraryPath();
+  if (!lib_debug_path.empty()) {
+    LibraryPaths.push_back(Args.MakeArgString(lib_debug_path + "/libdevice"));
+    LibraryPaths.push_back(Args.MakeArgString(lib_debug_path));
+  }
+
+  // Add compiler path libdevice last as lowest priority search
+  LibraryPaths.push_back(
+      Args.MakeArgString(C.getDriver().Dir + "/../lib/libdevice"));
+  LibraryPaths.push_back(Args.MakeArgString(C.getDriver().Dir + "/../lib"));
+
+  std::string GFXVersion = SubArchName.drop_front(3).str();
+
+  // FIXME: remove double link of hip aompextras, ockl 
+  if (Args.hasArg(options::OPT_cuda_device_only))
+    BCLibs.append(
+        {Args.MakeArgString("libomptarget-amdgcn-" + SubArchName + ".bc"),
+         Args.MakeArgString("libhostcall-amdgcn-" + SubArchName + ".bc"),
+         "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc" });
+  else
+    BCLibs.append(
+        {Args.MakeArgString("libomptarget-amdgcn-" + SubArchName + ".bc"),
+         Args.MakeArgString("libhostcall-amdgcn-" + SubArchName + ".bc"),
+         Args.MakeArgString("libaompextras-amdgcn-" + SubArchName + ".bc"),
+         "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc" });
+  for (auto Lib : BCLibs)
+    addBCLib(C.getDriver(), Args, CmdArgs, LibraryPaths, Lib,
+                      /* PostClang Link? */ false);
+
+  // This will find .a and .bc files that match naming convention.
+  AddStaticDeviceLibs(C, *this, JA, Inputs, Args, CmdArgs, "amdgcn",
+                      SubArchName, 
+                      /* bitcode SDL?*/ true,
+                      /* PostClang Link? */ false);
+
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(OutputFileName);
+  C.addCommand(llvm::make_unique<Command>(
+      JA, *this,
+      Args.MakeArgString(C.getDriver().Dir + "/clang-build-select-link"),
+      CmdArgs, Inputs));
+
+#if 0
+  // Save the output of our custom linker
+  {
+  ArgStringList cpArgs;
+  cpArgs.push_back(OutputFileName);
+  cpArgs.push_back("/tmp/select_out.bc");
+  C.addCommand(llvm::make_unique<Command>(
+      JA, *this, Args.MakeArgString("/bin/cp"), cpArgs, Inputs));
+  }
+#endif
+
+  return OutputFileName;
+}
+
+const char *AMDGCN::Linker::constructLLVMLinkCommand(
+    Compilation &C, const JobAction &JA, const InputInfoList &Inputs,
+    const ArgList &Args, StringRef SubArchName, StringRef OutputFilePrefix,
+    StringRef overrideInputsFile) const {
   ArgStringList CmdArgs;
   // Add the input bc's created by compile step.
-  for (const auto &II : Inputs)
-    CmdArgs.push_back(II.getFilename());
+  if (overrideInputsFile.empty()) {
+    for (const auto &II : Inputs)
+      if (II.isFilename())
+        CmdArgs.push_back(II.getFilename());
+  } else
+    CmdArgs.push_back(Args.MakeArgString(overrideInputsFile));
+
+  ArgStringList LibraryPaths;
 
   // Add an intermediate output file.
   CmdArgs.push_back("-o");
@@ -101,6 +190,17 @@ const char *AMDGCN::Linker::constructOptCommand(
     }
     OptArgs.push_back(Args.MakeArgString("-O" + OOpt));
   }
+
+   // Get the environment variable AOMP_OPT_ARGS and add opt to llc.
+  Optional<std::string> OptEnv =
+    llvm::sys::Process::GetEnv("AOMP_OPT_ARGS");
+  if (OptEnv.hasValue()) {
+    SmallVector<StringRef, 8> Envs;
+    SplitString(OptEnv.getValue(), Envs);
+    for (StringRef Env : Envs)
+      OptArgs.push_back(Args.MakeArgString(Env.trim()));
+  }
+
   OptArgs.push_back("-mtriple=amdgcn-amd-amdhsa");
   OptArgs.push_back(Args.MakeArgString("-mcpu=" + SubArchName));
 
@@ -129,10 +229,25 @@ const char *AMDGCN::Linker::constructLlcCommand(
   // FIXME: -disable-promote-alloca-to-lds is a workaround for issues in
   // AMDGPUPromoteAlloca pass which cause invalid memory access in PyTorch.
   // Remove this once the issue is fixed.
-  ArgStringList LlcArgs{InputFileName, "-mtriple=amdgcn-amd-amdhsa",
+  ArgStringList LlcArgs{InputFileName,
+                        "-mtriple=amdgcn-amd-amdhsa",
                         "-filetype=obj",
+                        "-mattr=-code-object-v3",
                         "-disable-promote-alloca-to-lds",
                         Args.MakeArgString("-mcpu=" + SubArchName)};
+
+  // Get the environment variable AOMP_LLC_ARGS and add opt to llc.
+  Optional<std::string> OptEnv =
+    llvm::sys::Process::GetEnv("AOMP_LLC_ARGS");
+  if (OptEnv.hasValue()) {
+    SmallVector<StringRef, 8> Envs;
+    SplitString(OptEnv.getValue(), Envs);
+    for (StringRef Env : Envs)
+      LlcArgs.push_back(Args.MakeArgString(Env.trim()));
+  }
+
+  if (Args.hasArg(options::OPT_v))
+    LlcArgs.push_back(Args.MakeArgString("-amdgpu-dump-hsa-metadata"));
 
   // Extract all the -m options
   std::vector<llvm::StringRef> Features;
@@ -234,12 +349,24 @@ void AMDGCN::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   assert(StringRef(SubArchName).startswith("gfx") && "Unsupported sub arch");
 
   // Prefix for temporary file name.
-  std::string Prefix =
-      llvm::sys::path::stem(Inputs[0].getFilename()).str() + "-" + SubArchName;
+  std::string Prefix;
+  for (const auto &II : Inputs)
+    if (II.isFilename())
+      Prefix =
+          llvm::sys::path::stem(II.getFilename()).str() + "-" + SubArchName;
+  assert(Prefix.length() && "no linker inputs are files ");
 
   // Each command outputs different files.
-  const char *LLVMLinkCommand =
-      constructLLVMLinkCommand(C, JA, Inputs, Args, SubArchName, Prefix);
+  bool DoOverride = true; // Always use custom linker
+  // If custom linking should only be done for openmp, replace 'true' with the
+  // expression: JA.getOffloadingDeviceKind() == Action::OFK_OpenMP
+
+  const char *overrideInputs =
+    DoOverride
+          ? constructOmpExtraCmds(C, JA, Inputs, Args, SubArchName, Prefix)
+          : "";
+  const char *LLVMLinkCommand = constructLLVMLinkCommand(
+      C, JA, Inputs, Args, SubArchName, Prefix, overrideInputs);
   const char *OptCommand = constructOptCommand(C, JA, Inputs, Args, SubArchName,
                                                Prefix, LLVMLinkCommand);
   const char *LlcCommand =
@@ -248,11 +375,15 @@ void AMDGCN::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 }
 
 HIPToolChain::HIPToolChain(const Driver &D, const llvm::Triple &Triple,
-                             const ToolChain &HostTC, const ArgList &Args)
-    : ToolChain(D, Triple, Args), HostTC(HostTC) {
+                           const ToolChain &HostTC, const ArgList &Args, 
+                           const Action::OffloadKind OK,
+                           const bool isHipAutomaticMode = false)
+
+    : ToolChain(D, Triple, Args), HostTC(HostTC), OK(OK) {
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
+  HIPAutomaticMode = isHipAutomaticMode;
 }
 
 void HIPToolChain::addClangTargetOptions(
@@ -264,7 +395,8 @@ void HIPToolChain::addClangTargetOptions(
   StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
   (void) GpuArch;
-  assert(DeviceOffloadingKind == Action::OFK_HIP &&
+  assert((DeviceOffloadingKind == Action::OFK_HIP || 
+          DeviceOffloadingKind == Action::OFK_OpenMP)  &&
          "Only HIP offloading kinds are supported for GPUs.");
 
   CC1Args.push_back("-target-cpu");
@@ -288,7 +420,8 @@ void HIPToolChain::addClangTargetOptions(
   // Default to "hidden" visibility, as object level linking will not be
   // supported for the foreseeable future.
   if (!DriverArgs.hasArg(options::OPT_fvisibility_EQ,
-                         options::OPT_fvisibility_ms_compat)) {
+                         options::OPT_fvisibility_ms_compat) &&
+      DeviceOffloadingKind != Action::OFK_OpenMP) {
     CC1Args.append({"-fvisibility", "hidden"});
     CC1Args.push_back("-fapply-global-visibility-to-externs");
   }
@@ -300,6 +433,18 @@ void HIPToolChain::addClangTargetOptions(
     LibraryPaths.push_back(DriverArgs.MakeArgString(Path));
 
   addDirectoryList(DriverArgs, LibraryPaths, "-L", "HIP_DEVICE_LIB_PATH");
+
+  // If device debugging turned on, add specially built bc files
+  std::string lib_debug_path = FindDebugInLibraryPath();
+  if (!lib_debug_path.empty()) {
+    LibraryPaths.push_back(DriverArgs.MakeArgString(lib_debug_path + "/libdevice"));
+    LibraryPaths.push_back(DriverArgs.MakeArgString(lib_debug_path));
+  }
+
+  // Add compiler path libdevice last as lowest priority search
+  LibraryPaths.push_back(
+      DriverArgs.MakeArgString(getDriver().Dir + "/../lib/libdevice"));
+  LibraryPaths.push_back(DriverArgs.MakeArgString(getDriver().Dir + "/../lib"));
 
   llvm::SmallVector<std::string, 10> BCLibs;
 
@@ -321,21 +466,26 @@ void HIPToolChain::addClangTargetOptions(
     else
       FlushDenormalControlBC = "oclc_daz_opt_off.amdgcn.bc";
 
-    llvm::StringRef WaveFrontSizeBC;
-    if (stoi(GFXVersion) < 1000)
-      WaveFrontSizeBC = "oclc_wavefrontsize64_on.amdgcn.bc";
-    else
-      WaveFrontSizeBC = "oclc_wavefrontsize64_off.amdgcn.bc";
+    // FIXME remove double link of aompextras and hip
+    if (DriverArgs.hasArg(options::OPT_cuda_device_only))
+      // FIXME: when building aompextras, we need to skip aompextras
+      BCLibs.append(
+          {"hip.amdgcn.bc", "opencl.amdgcn.bc", "ocml.amdgcn.bc",
+           "ockl.amdgcn.bc", "oclc_finite_only_off.amdgcn.bc",
+           FlushDenormalControlBC, "oclc_correctly_rounded_sqrt_on.amdgcn.bc",
+           "oclc_unsafe_math_off.amdgcn.bc", ISAVerBC });
 
-    BCLibs.append({"hip.amdgcn.bc", "opencl.amdgcn.bc", "ocml.amdgcn.bc",
-                   "ockl.amdgcn.bc", "oclc_finite_only_off.amdgcn.bc",
-                   FlushDenormalControlBC,
-                   "oclc_correctly_rounded_sqrt_on.amdgcn.bc",
-                   "oclc_unsafe_math_off.amdgcn.bc", ISAVerBC,
-                   WaveFrontSizeBC});
+    else
+      BCLibs.append(
+          {"hip.amdgcn.bc", "opencl.amdgcn.bc", "ocml.amdgcn.bc",
+           "ockl.amdgcn.bc", "oclc_finite_only_off.amdgcn.bc",
+           FlushDenormalControlBC, "oclc_correctly_rounded_sqrt_on.amdgcn.bc",
+           "oclc_unsafe_math_off.amdgcn.bc", ISAVerBC,
+           DriverArgs.MakeArgString("libaompextras-amdgcn-" + GpuArch + ".bc")});
   }
   for (auto Lib : BCLibs)
-    addBCLib(getDriver(), DriverArgs, CC1Args, LibraryPaths, Lib);
+    addBCLib(getDriver(), DriverArgs, CC1Args, LibraryPaths, Lib,
+                      /* PostClang Link? */ true);
 }
 
 llvm::opt::DerivedArgList *
@@ -383,6 +533,7 @@ HIPToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
     DAL->append(A);
   }
 
+
   if (!BoundArch.empty()) {
     DAL->eraseArg(options::OPT_march_EQ);
     DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), BoundArch);
@@ -407,12 +558,63 @@ HIPToolChain::GetCXXStdlibType(const ArgList &Args) const {
 
 void HIPToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
                                               ArgStringList &CC1Args) const {
+  // HCC2: Get includes from compiler installation
+  const Driver &D = HostTC.getDriver();
+  CC1Args.push_back("-internal-isystem");
+  CC1Args.push_back(DriverArgs.MakeArgString(D.Dir + "/../include"));
+
   HostTC.AddClangSystemIncludeArgs(DriverArgs, CC1Args);
+  // HIP headers need the cuda_wrappers in include path
+
+  CC1Args.push_back("-internal-isystem");
+  SmallString<128> P(HostTC.getDriver().ResourceDir);
+  llvm::sys::path::append(P, "include/cuda_wrappers");
+  CC1Args.push_back(DriverArgs.MakeArgString(P));
 }
 
 void HIPToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
                                                  ArgStringList &CC1Args) const {
   HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
+  if (HIPAutomaticMode) {
+    StringRef autohead = Args.getLastArgValue(options::OPT_hip_auto_headers_EQ);
+    if (autohead.empty() || autohead.equals("hip")) {
+      CC1Args.push_back("-include");
+      SmallString<128> P(HostTC.getDriver().ResourceDir);
+      llvm::sys::path::append(P, "/include/__clang_hip_automatic_hip.h");
+      CC1Args.push_back(Args.MakeArgString(P));
+    } else if (autohead.equals("cuda_open")) {
+      CC1Args.push_back("-include");
+      SmallString<128> P(HostTC.getDriver().ResourceDir);
+      llvm::sys::path::append(P, "/include/__clang_hip_automatic_cuda_open.h");
+      CC1Args.push_back(Args.MakeArgString(P));
+
+      CC1Args.push_back("-internal-isystem");
+      P = HostTC.getDriver().ResourceDir;
+      llvm::sys::path::append(P, "include/cuda_wrappers");
+      CC1Args.push_back(Args.MakeArgString(P));
+
+      CC1Args.push_back("-internal-isystem");
+      P = HostTC.getDriver().ResourceDir;
+      llvm::sys::path::append(P, "include/cuda_open");
+      CC1Args.push_back(Args.MakeArgString(P));
+    } else if (autohead.equals("cuda")) {
+      // Consider switch to cuda_open if no cuda sdk installed
+      CC1Args.push_back("-include");
+      SmallString<128> P(HostTC.getDriver().ResourceDir);
+      llvm::sys::path::append(P, "/include/__clang_hip_automatic_cuda.h");
+      CC1Args.push_back(Args.MakeArgString(P));
+
+      CC1Args.push_back("-internal-isystem");
+      P = HostTC.getDriver().ResourceDir;
+      llvm::sys::path::append(P, "include/cuda_wrappers");
+      CC1Args.push_back(Args.MakeArgString(P));
+
+      CC1Args.push_back("-internal-isystem");
+      CC1Args.push_back(Args.MakeArgString("/usr/local/cuda/include"));
+    } else
+      getDriver().Diag(diag::err_drv_hip_invalid_auto_header) << autohead;
+  } // end if( HIPAutomaticMode
+
 }
 
 void HIPToolChain::AddIAMCUIncludeArgs(const ArgList &Args,

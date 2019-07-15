@@ -76,7 +76,8 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
   set(LIBOMPTARGET_NVPTX_DEBUG FALSE CACHE BOOL
     "Activate NVPTX device RTL debug messages.")
   if(${LIBOMPTARGET_NVPTX_DEBUG})
-    set(CUDA_DEBUG -DOMPTARGET_NVPTX_DEBUG=-1 -g --ptxas-options=-v)
+    #set(CUDA_DEBUG -DOMPTARGET_NVPTX_DEBUG=-1 -g --ptxas-options=-v)
+    set(CUDA_DEBUG -DOMPTARGET_NVPTX_DEBUG=-1)
   endif()
 
   # NVPTX runtime library has to be statically linked. Dynamic linking is not
@@ -85,7 +86,7 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
   set(CUDA_SEPARABLE_COMPILATION ON)
 
   cuda_add_library(omptarget-nvptx STATIC ${cuda_src_files} ${omp_data_objects}
-      OPTIONS ${CUDA_ARCH} ${CUDA_DEBUG})
+      OPTIONS -std=c++11 ${CUDA_ARCH} ${CUDA_DEBUG})
 
   # Install device RTL under the lib destination folder.
   install(TARGETS omptarget-nvptx ARCHIVE DESTINATION "${OPENMP_INSTALL_LIBDIR}")
@@ -117,7 +118,7 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
     libomptarget_say("Building CUDA LLVM bitcode offloading device RTL.")
 
     # Set flags for LLVM Bitcode compilation.
-    set(bc_flags ${LIBOMPTARGET_NVPTX_SELECTED_CUDA_COMPILER_FLAGS})
+    set(bc_flags -std=c++11 ${LIBOMPTARGET_NVPTX_SELECTED_CUDA_COMPILER_FLAGS})
     if(${LIBOMPTARGET_NVPTX_DEBUG})
       set(bc_flags ${bc_flags} -DOMPTARGET_NVPTX_DEBUG=-1)
     else()
