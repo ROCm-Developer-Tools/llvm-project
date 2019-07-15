@@ -1,5 +1,5 @@
 /*
- * include/50/omp.h.var
+ * include/omp.h.var
  */
 
 
@@ -133,13 +133,13 @@
     extern void __KAI_KMPC_CONVENTION  omp_set_default_device (int);
     extern int  __KAI_KMPC_CONVENTION  omp_is_initial_device (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_num_devices (void);
-    extern int  __KAI_KMPC_CONVENTION  omp_get_device_num (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_num_teams (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_team_num (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_cancellation (void);
 
     /* OpenMP 4.5 */
     extern int   __KAI_KMPC_CONVENTION  omp_get_initial_device (void);
+    extern int   __KAI_KMPC_CONVENTION  omp_get_device_num (void);
     extern void* __KAI_KMPC_CONVENTION  omp_target_alloc(size_t, int);
     extern void  __KAI_KMPC_CONVENTION  omp_target_free(void *, int);
     extern int   __KAI_KMPC_CONVENTION  omp_target_is_present(void *, int);
