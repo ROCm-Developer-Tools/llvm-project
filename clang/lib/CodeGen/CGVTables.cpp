@@ -646,6 +646,10 @@ void CodeGenVTables::addVTableComponent(
       // Method is acceptable, continue processing as usual.
     }
 
+    // If this is OpenMP target, do not emit DTor on device side
+    if (CGM.getLangOpts().OpenMPIsDevice)
+      return builder.addNullPointer(CGM.Int8PtrTy);
+
     auto getSpecialVirtualFn = [&](StringRef name) {
       llvm::FunctionType *fnTy =
           llvm::FunctionType::get(CGM.VoidTy, /*isVarArg=*/false);

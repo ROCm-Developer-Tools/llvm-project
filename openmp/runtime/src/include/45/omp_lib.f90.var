@@ -239,6 +239,11 @@
             integer (kind=omp_integer_kind) omp_get_num_devices
           end function omp_get_num_devices
 
+          function omp_get_device_num() bind(c)
+            use omp_lib_kinds
+            integer (kind=omp_integer_kind) omp_get_device_num
+          end function omp_get_device_num
+
           function omp_get_num_teams() bind(c)
             use omp_lib_kinds
             integer (kind=omp_integer_kind) omp_get_num_teams

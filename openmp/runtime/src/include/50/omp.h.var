@@ -133,6 +133,7 @@
     extern void __KAI_KMPC_CONVENTION  omp_set_default_device (int);
     extern int  __KAI_KMPC_CONVENTION  omp_is_initial_device (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_num_devices (void);
+    extern int  __KAI_KMPC_CONVENTION  omp_get_device_num (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_num_teams (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_team_num (void);
     extern int  __KAI_KMPC_CONVENTION  omp_get_cancellation (void);
@@ -223,6 +224,14 @@
     } omp_control_tool_t;
 
     extern int __KAI_KMPC_CONVENTION omp_control_tool(int, int, void*);
+
+    extern int __KAI_KMPC_CONVENTION omp_ext_get_warp_id (void);
+    extern int __KAI_KMPC_CONVENTION omp_ext_get_lane_id (void);
+    extern int __KAI_KMPC_CONVENTION omp_ext_get_smid (void);
+    extern int __KAI_KMPC_CONVENTION omp_ext_is_spmd_mode (void);
+    extern int __KAI_KMPC_CONVENTION omp_ext_get_master_thread_id (void);
+    extern unsigned long long __KAI_KMPC_CONVENTION omp_ext_get_active_threads_mask (void);
+
 
     /* OpenMP 5.0 Memory Management */
     typedef uintptr_t omp_uintptr_t;

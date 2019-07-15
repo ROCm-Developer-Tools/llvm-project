@@ -264,6 +264,8 @@ int DeviceTy::deallocTgtPtr(void *HstPtrBegin, int64_t Size, bool ForceDelete) {
     }
     rc = OFFLOAD_SUCCESS;
   } else {
+    fprintf(stderr, "Section to delete (hst addr %p) does not exist in the allocated"
+       " memory\n", HstPtrBegin);
     DP("Section to delete (hst addr " DPxMOD ") does not exist in the allocated"
        " memory\n", DPxPTR(HstPtrBegin));
     rc = OFFLOAD_FAIL;

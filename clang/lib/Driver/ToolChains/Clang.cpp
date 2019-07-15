@@ -3335,6 +3335,11 @@ static void RenderDebugOptions(const ToolChain &TC, const Driver &D,
     }
   }
 
+  // FIXME: temporarily Turn off debuging on GPUs for openmp
+  if ((T.getArch() == llvm::Triple::amdgcn) ||
+      (T.getArch() == llvm::Triple::nvptx64))
+    DebugInfoKind = codegenoptions::NoDebugInfo;
+
   // Adjust the debug info kind for the given toolchain.
   TC.adjustDebugInfoKind(DebugInfoKind, Args);
 
@@ -3496,6 +3501,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   if (IsCuda || IsHIP) {
+    CmdArgs.push_back("-std=c++11");
     // We have to pass the triple of the host if compiling for a CUDA/HIP device
     // and vice-versa.
     std::string NormalizedTriple;
@@ -3535,6 +3541,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
             .normalize();
     CmdArgs.push_back("-aux-triple");
     CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
+    // Treat all c++ device code as if it is c++11
+    if (types::isCXX(Input.getType()))
+      CmdArgs.push_back("-std=c++11");
   }
 
   if (Triple.isOSWindows() && (Triple.getArch() == llvm::Triple::arm ||
@@ -5037,7 +5046,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Enable vectorization per default according to the optimization level
   // selected. For optimization levels that want vectorization we use the alias
   // option to simplify the hasFlag logic.
-  bool EnableVec = shouldEnableVectorizerAtOLevel(Args, false);
+  // Do not vectorize on GPUs
+  // FIXME: Temporarily turn off vectorization for GPUs
+  bool EnableVec = shouldEnableVectorizerAtOLevel(Args, false) &&
+                   !(Triple.getArch() == llvm::Triple::amdgcn ||
+                     Triple.getArch() == llvm::Triple::nvptx64);
   OptSpecifier VectorizeAliasOption =
       EnableVec ? options::OPT_O_Group : options::OPT_fvectorize;
   if (Args.hasFlag(options::OPT_fvectorize, VectorizeAliasOption,
@@ -5045,7 +5058,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-vectorize-loops");
 
   // -fslp-vectorize is enabled based on the optimization level selected.
-  bool EnableSLPVec = shouldEnableVectorizerAtOLevel(Args, true);
+  bool EnableSLPVec = shouldEnableVectorizerAtOLevel(Args, true) &&
+                      !(Triple.getArch() == llvm::Triple::amdgcn ||
+                        Triple.getArch() == llvm::Triple::nvptx64);
   OptSpecifier SLPVectAliasOption =
       EnableSLPVec ? options::OPT_O_Group : options::OPT_fslp_vectorize;
   if (Args.hasFlag(options::OPT_fslp_vectorize, SLPVectAliasOption,
@@ -5461,7 +5476,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     assert(Output.isNothing() && "Invalid output.");
   }
 
-  addDashXForInput(Args, Input, CmdArgs);
+  if (IsHIP) {
+    CmdArgs.push_back("-x");
+    CmdArgs.push_back("hip");
+  } else
+    addDashXForInput(Args, Input, CmdArgs);
 
   ArrayRef<InputInfo> FrontendInputs = Input;
   if (IsHeaderModulePrecompile)
@@ -6269,7 +6288,10 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
     Triples += Action::GetOffloadKindName(CurKind);
     Triples += '-';
     Triples += CurTC->getTriple().normalize();
-    if (CurKind == Action::OFK_HIP && CurDep->getOffloadingArch()) {
+    if ((CurKind == Action::OFK_HIP ||
+         CurKind == Action::OFK_OpenMP ||
+         CurKind == Action::OFK_Cuda) &&
+        CurDep->getOffloadingArch()) {
       Triples += '-';
       Triples += CurDep->getOffloadingArch();
     }
@@ -6307,6 +6329,90 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs, None));
 }
 
+static bool isArchiveOfBundlesFileName(StringRef FilePath) {
+  StringRef FileName = llvm::sys::path::filename(FilePath);
+  if (!FileName.endswith(".a"))
+    return false;
+
+  if (!FileName.startswith("lib"))
+    return false;
+
+  if (FileName.contains("amdgcn") && FileName.contains("gfx"))
+    return false;
+
+  if (FileName.contains("nvptx") && FileName.contains("sm_"))
+    return false;
+
+  return true;
+}
+
+
+static void createUnbundleArchiveCommand(Compilation &C,
+                                         const OffloadUnbundlingJobAction &UA,
+                                         const Tool &T,
+                                         const InputInfoList &Outputs,
+                                         const InputInfoList &Inputs) {
+  auto DepInfo = UA.getDependentActionsInfo();
+  InputInfo Input = Inputs.front();
+  StringRef ArchiveOfBundles = Input.getFilename();
+
+  std::string gpuname;
+  std::string OutputLib;
+  std::string HostOutputArchive;
+
+  bool isBitCodeSDL = false;
+  for (unsigned I = 0; I < DepInfo.size(); ++I) {
+    auto &Dep = DepInfo[I];
+    auto &Triple = Dep.DependentToolChain->getTriple();
+    if(Triple.isNVPTX() || Triple.getArch() == llvm::Triple::amdgcn) {
+      if(Triple.getArch() == llvm::Triple::amdgcn) {
+        isBitCodeSDL = true;
+      }
+      gpuname = Dep.DependentBoundArch.str();
+      OutputLib = DepInfo[I].DependentToolChain->getInputFilename(Outputs[I]);
+
+      const char *UBProgram =
+        C.getArgs().MakeArgString(T.getToolChain().GetProgramPath(
+          "clang-unbundle-archive"));
+
+      llvm::SmallString<128> TmpDirString;
+      llvm::sys::path::system_temp_directory(true, TmpDirString);
+      std::string TmpDir(TmpDirString.str());
+
+      ArgStringList CmdArgs;
+
+      std::string InputArg("-input=");
+      InputArg += ArchiveOfBundles;
+      std::string OffloadArg("-offload-arch=" + gpuname);
+      std::string OutputArg("-output=" + OutputLib);
+      std::string HostOutputArg;
+      if (!HostOutputArchive.empty())  {
+        HostOutputArg = ("-host-output=" + HostOutputArchive);
+      }
+
+      if (!isBitCodeSDL) {
+        // FIXME(Jan): nvlink does not seem to handle archives, we need to
+        // create a wrapper for nvlink that extracts the archive and
+        // gives nvlink individual files.
+        return;
+      } else {
+        ArgStringList UBArgs;
+        UBArgs.push_back(C.getArgs().MakeArgString(InputArg.c_str()));
+        UBArgs.push_back(C.getArgs().MakeArgString(OffloadArg.c_str()));
+        UBArgs.push_back(C.getArgs().MakeArgString(OutputArg.c_str()));
+        UBArgs.push_back(C.getArgs().MakeArgString(HostOutputArg.c_str()));
+        C.addCommand(llvm::make_unique<Command>(UA, T, UBProgram, UBArgs,
+                                            Inputs));
+        // Prevent host file being written multiple times.
+        HostOutputArchive.clear();
+      }
+    } else {
+      HostOutputArchive =
+        DepInfo[I].DependentToolChain->getInputFilename(Outputs[I]);
+    }
+  }
+}
+
 void OffloadBundler::ConstructJobMultipleOutputs(
     Compilation &C, const JobAction &JA, const InputInfoList &Outputs,
     const InputInfoList &Inputs, const llvm::opt::ArgList &TCArgs,
@@ -6325,6 +6431,12 @@ void OffloadBundler::ConstructJobMultipleOutputs(
 
   assert(Inputs.size() == 1 && "Expecting to unbundle a single file!");
   InputInfo Input = Inputs.front();
+  StringRef FileName = Input.getFilename();
+
+  if (isArchiveOfBundlesFileName(FileName)) {
+    createUnbundleArchiveCommand(C, UA, *this, Outputs, Inputs);
+    return;
+  }
 
   // Get the type.
   CmdArgs.push_back(TCArgs.MakeArgString(
@@ -6342,7 +6454,9 @@ void OffloadBundler::ConstructJobMultipleOutputs(
     Triples += Action::GetOffloadKindName(Dep.DependentOffloadKind);
     Triples += '-';
     Triples += Dep.DependentToolChain->getTriple().normalize();
-    if (Dep.DependentOffloadKind == Action::OFK_HIP &&
+    if ((Dep.DependentOffloadKind == Action::OFK_HIP ||
+         Dep.DependentOffloadKind == Action::OFK_OpenMP ||
+         Dep.DependentOffloadKind == Action::OFK_Cuda) &&
         !Dep.DependentBoundArch.empty()) {
       Triples += '-';
       Triples += Dep.DependentBoundArch;

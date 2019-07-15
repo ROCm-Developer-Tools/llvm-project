@@ -565,6 +565,9 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
 
   AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs, JA);
 
+  AddStaticDeviceLibs(C, *this, JA, Inputs, Args, CmdArgs, "nvptx", GPUArch,
+                      false, false);
+
   const char *Exec =
       Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
@@ -716,6 +719,12 @@ void CudaToolChain::addClangTargetOptions(
     if (!FoundBCLibrary)
       getDriver().Diag(diag::warn_drv_omp_offload_target_missingbcruntime)
           << LibOmpTargetName;
+
+    // Add user-specified (-l)  static device libs.
+    // These are bitcode SDLs that get linked with -mlink-builtin-bitcode option
+    if (DeviceOffloadingKind == Action::OFK_OpenMP)
+      AddStaticDeviceLibs(getDriver(), DriverArgs, CC1Args, "nvptx", GpuArch,
+                        /* bitcode SDL?*/ true, /* PostClang Link? */ true);
   }
 }
 
@@ -855,6 +864,10 @@ CudaToolChain::GetCXXStdlibType(const ArgList &Args) const {
 
 void CudaToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
                                               ArgStringList &CC1Args) const {
+  // For HCC2, pick up includes from compiler install include path first
+  const Driver &D = HostTC.getDriver();
+  CC1Args.push_back("-internal-isystem");
+  CC1Args.push_back(DriverArgs.MakeArgString(D.Dir + "/../include"));
   HostTC.AddClangSystemIncludeArgs(DriverArgs, CC1Args);
 }
 

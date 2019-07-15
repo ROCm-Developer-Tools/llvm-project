@@ -7905,20 +7905,33 @@ void AMDGPUTargetCodeGenInfo::setTargetAttributes(
     GV->setDSOLocal(true);
   }
 
-  if (GV->isDeclaration())
-    return;
   const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D);
   if (!FD)
     return;
 
   llvm::Function *F = cast<llvm::Function>(GV);
 
+  if (M.getLangOpts().OpenMP) {
+    F->removeFnAttr(llvm::Attribute::OptimizeNone);
+    F->removeFnAttr(llvm::Attribute::NoInline);
+    F->addFnAttr(llvm::Attribute::AlwaysInline);
+    F->addFnAttr(llvm::Attribute::NoUnwind);
+    F->addFnAttr(llvm::Attribute::NoRecurse);
+    if (!GV->isDeclaration())
+      F->setLinkage(llvm::GlobalVariable::ExternalLinkage);
+  }
+  if (GV->isDeclaration())
+    return;
+  // The reset of setTargetAttributes is for Function definitions
+
   const auto *ReqdWGS = M.getLangOpts().OpenCL ?
     FD->getAttr<ReqdWorkGroupSizeAttr>() : nullptr;
 
-  if (((M.getLangOpts().OpenCL && FD->hasAttr<OpenCLKernelAttr>()) ||
-      (M.getLangOpts().HIP && FD->hasAttr<CUDAGlobalAttr>())) &&
-      (M.getTriple().getOS() == llvm::Triple::AMDHSA))
+  // add implicit kernargs for both openCL and HIP, and Openmp.
+  if ( FD->hasAttr<CUDAGlobalAttr>() &&
+      ( M.getLangOpts().HIP || M.getLangOpts().OpenMP ||
+       ( M.getLangOpts().OpenCL &&
+	 (M.getTriple().getOS() == llvm::Triple::AMDHSA) ) ) )
     F->addFnAttr("amdgpu-implicitarg-num-bytes", "56");
 
   const auto *FlatWGS = FD->getAttr<AMDGPUFlatWorkGroupSizeAttr>();
