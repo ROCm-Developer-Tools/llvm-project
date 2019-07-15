@@ -121,7 +121,6 @@
 #define FTN_TARGET_DISASSOCIATE_PTR omp_target_disassociate_ptr
 #endif
 
-#if OMP_50_ENABLED
 #define FTN_GET_WARP_ID omp_ext_get_warp_id
 #define FTN_GET_LANE_ID omp_ext_get_lane_id
 #define FTN_GET_SMID omp_ext_get_smid
@@ -250,7 +249,6 @@
 #define FTN_TARGET_DISASSOCIATE_PTR omp_target_disassociate_ptr_
 #endif
 
-#if OMP_50_ENABLED
 #define FTN_GET_WARP_ID omp_ext_get_warp_id_
 #define FTN_GET_LANE_ID omp_ext_get_lane_id_
 #define FTN_GET_SMID omp_getSMID_
@@ -380,7 +378,6 @@
 #define FTN_TARGET_DISASSOCIATE_PTR OMP_TARGET_DISASSOCIATE_PTR
 #endif
 
-#if OMP_50_ENABLED
 #define FTN_GET_WARP_ID OMP_EXT_GET_WARP_ID
 #define FTN_GET_LANE_ID OMP_EXT_GET_LANE_ID
 #define FTN_GET_SMID OMP_EXT_GET_SMID
