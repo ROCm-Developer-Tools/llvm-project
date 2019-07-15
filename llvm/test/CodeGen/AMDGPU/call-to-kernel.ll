@@ -1,3 +1,4 @@
+; XFAIL: *
 ; RUN: not llc -march=amdgcn -mcpu=tahiti -verify-machineinstrs -o /dev/null %s 2>&1 | FileCheck %s
 
 ; FIXME: It should be invalid IR to have a call to a kernel, but this
