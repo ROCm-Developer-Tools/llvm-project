@@ -23,6 +23,8 @@
 #define TARGET_NAME CUDA
 #endif
 
+bool print_kernel_trace;
+
 #ifdef OMPTARGET_DEBUG
 static int DebugLevel = 0;
 
@@ -74,16 +76,16 @@ struct KernelTy {
   // 0 - SPMD mode (without master warp)
   // 1 - Generic mode (with master warp)
   int8_t ExecutionMode;
+  const char* Name;
 
-  KernelTy(CUfunction _Func, int8_t _ExecutionMode)
-      : Func(_Func), ExecutionMode(_ExecutionMode) {}
+  KernelTy(CUfunction _Func, int8_t _ExecutionMode,
+    const char* _Name)
+      : Func(_Func), ExecutionMode(_ExecutionMode),
+        Name(_Name) {}
 };
 
 /// Device envrionment data
-/// Manually sync with the deviceRTL side for now, move to a dedicated header file later.
-struct omptarget_device_environmentTy {
-  int32_t debug_level;
-};
+#include "../../../src/device_env_struct.h"
 
 /// List that contains all the kernels.
 /// FIXME: we may need this to be per device and per library.
@@ -181,6 +183,13 @@ public:
       DebugLevel = std::stoi(envStr);
     }
 #endif // OMPTARGET_DEBUG
+
+    // LIBOMPTARGET_KERNEL_TRACE provides a kernel launch trace to stdout
+    // anytime. You do not need a debug library build.
+    if (char *envStr = getenv("LIBOMPTARGET_KERNEL_TRACE"))
+      print_kernel_trace = true;
+    else
+      print_kernel_trace = false;
 
     DP("Start initializing CUDA\n");
 
@@ -522,7 +531,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
       CUDA_ERR_STRING(err);
     }
 
-    KernelsList.push_back(KernelTy(fun, ExecModeVal));
+    KernelsList.push_back(KernelTy(fun, ExecModeVal, e->name));
 
     __tgt_offload_entry entry = *e;
     entry.addr = (void *)&KernelsList.back();
@@ -539,7 +548,12 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     if (char *envStr = getenv("LIBOMPTARGET_DEVICE_RTL_DEBUG")) {
       device_env.debug_level = std::stoi(envStr);
     }
+    DP("Device debug level from env var LIBOMPTARGET_DEVICE_RTL_DEBUG set to %d\n",
+      device_env.debug_level);
 #endif
+    // pass num_devices and device_num to device runtime
+    device_env.num_devices = DeviceInfo.NumberOfDevices;
+    device_env.device_num = device_id;
 
     const char * device_env_Name="omptarget_device_environment";
     CUdeviceptr device_env_Ptr;
@@ -753,10 +767,14 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
     DP("Using requested number of teams %d\n", team_num);
   }
 
-  // Run on the device.
-  DP("Launch kernel with %d blocks and %d threads\n", cudaBlocksPerGrid,
-     cudaThreadsPerBlock);
+  if (print_kernel_trace)
+    // enum modes are SPMD, GENERIC, NONE 0,1,2
+    printf("DEVID:%2d SGN:%1d args:%2d teamsXthrds:(%4dX%4d) reqd:(%4dX%4d) n:%s\n",
+      device_id, KernelInfo->ExecutionMode, arg_num,
+      cudaBlocksPerGrid, cudaThreadsPerBlock,
+      team_num, thread_limit, KernelInfo->Name);
 
+  // Run on the device.
   err = cuLaunchKernel(KernelInfo->Func, cudaBlocksPerGrid, 1, 1,
       cudaThreadsPerBlock, 1, 1, 0 /*bytes of shared memory*/, 0, &args[0], 0);
   if (err != CUDA_SUCCESS) {

@@ -3041,10 +3041,13 @@ llvm::Constant *CGOpenMPRuntime::getOrCreateInternalVariable(
            "OMP internal variable has different type than requested");
     return &*Elem.second;
   }
-
+  llvm::GlobalValue::LinkageTypes Linkage =
+      (CGM.getTriple().getArch() == llvm::Triple::amdgcn)
+          ? llvm::GlobalValue::PrivateLinkage
+          : llvm::GlobalValue::CommonLinkage;
   return Elem.second = new llvm::GlobalVariable(
              CGM.getModule(), Ty, /*IsConstant*/ false,
-             llvm::GlobalValue::CommonLinkage, llvm::Constant::getNullValue(Ty),
+             Linkage, llvm::Constant::getNullValue(Ty),
              Elem.first(), /*InsertBefore=*/nullptr,
              llvm::GlobalValue::NotThreadLocal, AddressSpace);
 }
@@ -3911,7 +3914,9 @@ CGOpenMPRuntime::createOffloadingBinaryDescriptorRegistration() {
 
   // Get list of devices we care about
   const std::vector<llvm::Triple> &Devices = CGM.getLangOpts().OMPTargetTriples;
-
+  // Return if we dont have a device.
+  if (Devices.empty())
+    return nullptr;
   // We should be creating an offloading descriptor only if there are devices
   // specified.
   assert(!Devices.empty() && "No OpenMP offloading devices??");
@@ -4348,6 +4353,50 @@ QualType CGOpenMPRuntime::getTgtOffloadEntryQTy() {
   }
   return TgtOffloadEntryQTy;
 }
+
+// Create Tgt Attribute Sruct type.
+QualType CGOpenMPRuntime::getTgtAttributeStructQTy() {
+  ASTContext &C = CGM.getContext();
+  QualType KmpInt8Ty = C.getIntTypeForBitwidth(/*Width=*/8, /*Signed=*/1);
+  QualType KmpInt16Ty = C.getIntTypeForBitwidth(/*Width=*/16, /*Signed=*/1);
+  if (TgtAttributeStructQTy.isNull()) {
+    RecordDecl *RD = C.buildImplicitRecord("__tgt_attribute_struct");
+    RD->startDefinition();
+    addFieldToRecordDecl(C, RD, KmpInt16Ty); // Version
+    addFieldToRecordDecl(C, RD, KmpInt16Ty); // Struct Size in bytes.
+    addFieldToRecordDecl(C, RD, KmpInt16Ty); // WG_size
+    addFieldToRecordDecl(C, RD, KmpInt8Ty);  // Mode
+    addFieldToRecordDecl(C, RD, KmpInt8Ty);  // HostServices
+    RD->completeDefinition();
+    TgtAttributeStructQTy = C.getRecordType(RD);
+  }
+  return TgtAttributeStructQTy;
+}
+
+/// Emit structure descriptor for a kernel
+void CGOpenMPRuntime::emitStructureKernelDesc(CodeGenModule &CGM,
+                          StringRef Name,
+                          int16_t WG_Size,
+                          int8_t Mode,
+                          int8_t HostServices) {
+
+  // Create all device images
+  llvm::Constant *AttrData[] = {
+      llvm::ConstantInt::get(CGM.Int16Ty, 1),  // Version
+      llvm::ConstantInt::get(CGM.Int16Ty, 8), // Size in bytes
+      llvm::ConstantInt::get(CGM.Int16Ty, WG_Size),
+      llvm::ConstantInt::get(CGM.Int8Ty, Mode), // 0 => SPMD, 1 => GENERIC
+      llvm::ConstantInt::get(CGM.Int8Ty, HostServices)};  // 1 => uses HostServices
+
+  llvm::GlobalVariable *AttrImages =
+      createGlobalStruct(CGM, getTgtAttributeStructQTy(),
+                         isDefaultLocationConstant(), AttrData,
+                         Name + Twine("_kern_desc"),
+                         llvm::GlobalValue::WeakAnyLinkage);
+  CGM.addCompilerUsedGlobal(AttrImages);
+
+}
+
 
 QualType CGOpenMPRuntime::getTgtDeviceImageQTy() {
   // These are the types we need to build:
@@ -8703,6 +8752,9 @@ void CGOpenMPRuntime::emitTargetNumIterationsCall(
     TD = getNestedDistributeDirective(CGM.getContext(), D);
   if (!TD)
     return;
+  const std::vector<llvm::Triple> &Devices = CGM.getLangOpts().OMPTargetTriples;
+  if (Devices.empty())
+    return;
   const auto *LD = cast<OMPLoopDirective>(TD);
   auto &&CodeGen = [LD, &Device, &SizeEmitter, this](CodeGenFunction &CGF,
                                                      PrePostActionTy &) {
@@ -8715,7 +8767,6 @@ void CGOpenMPRuntime::emitTargetNumIterationsCall(
                                            CGF.Int64Ty, /*isSigned=*/true);
     else
       DeviceID = CGF.Builder.getInt64(OMP_DEVICEID_UNDEF);
-
     llvm::Value *Args[] = {DeviceID, NumIterations};
     CGF.EmitRuntimeCall(
         createRuntimeFunction(OMPRTL__kmpc_push_target_tripcount), Args);
@@ -9221,6 +9272,11 @@ CGOpenMPRuntime::registerTargetFirstprivateCopy(CodeGenFunction &CGF,
 
 void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
                                                    llvm::Constant *Addr) {
+#if 0
+  // Exclude local constants that have no external storage
+  if (!VD->hasExternalStorage())
+    return;
+#endif
   llvm::Optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
       OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
   if (!Res) {

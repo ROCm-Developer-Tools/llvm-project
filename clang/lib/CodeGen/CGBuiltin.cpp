@@ -242,6 +242,7 @@ static Value *MakeAtomicCmpXchgValue(CodeGenFunction &CGF, const CallExpr *E,
   Value *Pair = CGF.Builder.CreateAtomicCmpXchg(
       Args[0], Args[1], Args[2], llvm::AtomicOrdering::SequentiallyConsistent,
       llvm::AtomicOrdering::SequentiallyConsistent);
+
   if (ReturnBool)
     // Extract boolean success flag and zext it to int.
     return CGF.Builder.CreateZExt(CGF.Builder.CreateExtractValue(Pair, 1),
@@ -3974,6 +3975,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BIprintf:
     if (getTarget().getTriple().isNVPTX())
       return EmitNVPTXDevicePrintfCallExpr(E, ReturnValue);
+    if (getTarget().getTriple().getArch() == llvm::Triple::amdgcn)
+      return EmitAMDGPUDevicePrintfCallExpr(E, ReturnValue);
     break;
   case Builtin::BI__builtin_canonicalize:
   case Builtin::BI__builtin_canonicalizef:
@@ -4116,6 +4119,12 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
       llvm::Triple::getArchTypePrefix(getTarget().getTriple().getArch());
   if (!Prefix.empty()) {
     IntrinsicID = Intrinsic::getIntrinsicForGCCBuiltin(Prefix.data(), Name);
+    // amdgcn allows nvvm intriniscs for cuda that get converted with llvm-link
+    // to libhiprt.bc inline functions.
+    if ((getTarget().getTriple().getArch() == llvm::Triple::amdgcn) &&
+        (IntrinsicID == Intrinsic::not_intrinsic))
+      IntrinsicID = Intrinsic::getIntrinsicForGCCBuiltin("nvvm", Name);
+
     // NOTE we don't need to perform a compatibility flag check here since the
     // intrinsics are declared in Builtins*.def via LANGBUILTIN which filter the
     // MS builtins via ALL_MS_LANGUAGES and are filtered earlier.
@@ -4173,12 +4182,107 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
       Args.push_back(ArgValue);
     }
 
-    Value *V = Builder.CreateCall(F, Args);
     QualType BuiltinRetType = E->getType();
 
     llvm::Type *RetTy = VoidTy;
     if (!BuiltinRetType->isVoidType())
       RetTy = ConvertType(BuiltinRetType);
+
+    if (getTarget().getTriple().getArch() == llvm::Triple::amdgcn) {
+      // Change nvidia intrinsics into function calls to be converted
+      // by libcuda2gcn.bc
+      //  FIXME: This should only be necessary for hip automatic mode
+      //         with --hip-auto-headers=cuda_open or cuda
+      const char *NewName;
+      switch (BuiltinID) {
+      case AMDGPU::BI__nvvm_read_ptx_sreg_nctaid_x:
+        NewName = "nvvm.read.ptx.sreg.nctaid.x";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_nctaid_y:
+        NewName = "nvvm.read.ptx.sreg.nctaid.y";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_nctaid_z:
+        NewName = "nvvm.read.ptx.sreg.nctaid.z";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_ctaid_x:
+        NewName = "nvvm.read.ptx.sreg.ctaid.x";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_ctaid_y:
+        NewName = "nvvm.read.ptx.sreg.ctaid.y";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_ctaid_z:
+        NewName = "nvvm.read.ptx.sreg.ctaid.z";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_tid_x:
+        NewName = "nvvm.read.ptx.sreg.tid.x";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_tid_y:
+        NewName = "nvvm.read.ptx.sreg.tid.y";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_tid_z:
+        NewName = "nvvm.read.ptx.sreg.tid.z";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_ntid_x:
+        NewName = "nvvm.read.ptx.sreg.ntid.x";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_ntid_y:
+        NewName = "nvvm.read.ptx.sreg.ntid.y";
+        break;
+      case AMDGPU::BI__nvvm_read_ptx_sreg_ntid_z:
+        NewName = "nvvm.read.ptx.sreg.ntid.z";
+        break;
+      case AMDGPU::BI__nvvm_membar_gl:
+        NewName = "nvvm.membar.gl";
+        break;
+      case AMDGPU::BI__nvvm_membar_cta:
+        NewName = "nvvm.membar.cta";
+        break;
+      case AMDGPU::BI__nvvm_membar_sys:
+        NewName = "nvvm.membar.sys";
+        break;
+      case AMDGPU::BI__nvvm_shfl_down_i32:
+        NewName = "nvvm.shfl.down.i32";
+        break;
+      case AMDGPU::BI__nvvm_shfl_down_f32:
+        NewName = "nvvm.shfl.down.f32";
+        break;
+      case AMDGPU::BI__nvvm_shfl_up_i32:
+        NewName = "nvvm.shfl.up.i32";
+        break;
+      case AMDGPU::BI__nvvm_shfl_bfly_f32:
+        NewName = "nvvm.shfl.bfly.f32";
+        break;
+      case AMDGPU::BI__nvvm_shfl_up_f32:
+        NewName = "nvvm.shfl.up.f32";
+        break;
+      case AMDGPU::BI__nvvm_shfl_idx_i32:
+        NewName = "nvvm.shfl.idx.i32";
+        break;
+      case AMDGPU::BI__nvvm_atom_inc_g_ui:
+        NewName = "nvvm.atomic.load.inc.32.p0i32";
+        break;
+      case AMDGPU::BI__nvvm_atom_inc_s_ui:
+        NewName = "nvvm.atomic.load.inc.32.p0i32";
+        break;
+      case AMDGPU::BI__nvvm_atom_inc_gen_ui:
+        NewName = "nvvm.atomic.load.inc.32.p0i32";
+        break;
+      default:
+        NewName = Name;
+        break;
+      }; // End of switch
+      if (NewName != Name) {
+        llvm::Module *M = &CGM.getModule();
+        // remove the old one
+        F->eraseFromParent();
+        F = M->getFunction(NewName);
+        if (!F)
+          F = llvm::Function::Create(FTy, llvm::GlobalVariable::ExternalLinkage,
+                                     NewName, M);
+      }
+    } // End arch=-amdgcn
+
+    Value *V = Builder.CreateCall(F, Args);
 
     if (RetTy != V->getType()) {
       // XXX - vector of pointers?
@@ -12637,6 +12741,25 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
 
 Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
                                               const CallExpr *E) {
+
+  // These helper functions may need work
+  auto AmdgcnMakeLdg = [&](unsigned IntrinsicID) {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    clang::CharUnits Align =
+        getNaturalPointeeTypeAlignment(E->getArg(0)->getType());
+    return Builder.CreateCall(
+        CGM.getIntrinsic(IntrinsicID, {Ptr->getType()->getPointerElementType(),
+                                       Ptr->getType()}),
+        {Ptr, ConstantInt::get(Builder.getInt32Ty(), Align.getQuantity())});
+  };
+  auto AmdgcnMakeScopedAtomic = [&](unsigned IntrinsicID) {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    return Builder.CreateCall(
+        CGM.getIntrinsic(IntrinsicID, {Ptr->getType()->getPointerElementType(),
+                                       Ptr->getType()}),
+        {Ptr, EmitScalarExpr(E->getArg(1))});
+  };
+
   switch (BuiltinID) {
   case AMDGPU::BI__builtin_amdgcn_div_scale:
   case AMDGPU::BI__builtin_amdgcn_div_scalef: {
@@ -12822,9 +12945,272 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
     return emitRangedBuiltin(*this, Intrinsic::r600_read_tidig_y, 0, 1024);
   case AMDGPU::BI__builtin_r600_read_tidig_z:
     return emitRangedBuiltin(*this, Intrinsic::r600_read_tidig_z, 0, 1024);
+
+    // OpenCuda builtins start here.
+    // FIXME  There is lots of work to do here to map all open_cuda atomic
+    // builtins
+    //        As an example, see code below for
+    //        AMDGPU::BI__nvvm_atom_inc_gen_ui. We could call those intrinsics
+    //        here if there was a direct mapping. But we prefer to make a
+    //        library call and let the optimizer remove the wrapper for
+    //        consistency. Also consider adding a boolean is_amdgcn with default
+    //        value false to EmitAMDGPUBuiltinExpr.
+  case AMDGPU::BI__nvvm_atom_add_gen_i:
+  case AMDGPU::BI__nvvm_atom_add_gen_l:
+  case AMDGPU::BI__nvvm_atom_add_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::Add, E);
+
+  case AMDGPU::BI__nvvm_atom_sub_gen_i:
+  case AMDGPU::BI__nvvm_atom_sub_gen_l:
+  case AMDGPU::BI__nvvm_atom_sub_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::Sub, E);
+
+  case AMDGPU::BI__nvvm_atom_and_gen_i:
+  case AMDGPU::BI__nvvm_atom_and_gen_l:
+  case AMDGPU::BI__nvvm_atom_and_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::And, E);
+
+  case AMDGPU::BI__nvvm_atom_or_gen_i:
+  case AMDGPU::BI__nvvm_atom_or_gen_l:
+  case AMDGPU::BI__nvvm_atom_or_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::Or, E);
+
+  case AMDGPU::BI__nvvm_atom_xor_gen_i:
+  case AMDGPU::BI__nvvm_atom_xor_gen_l:
+  case AMDGPU::BI__nvvm_atom_xor_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::Xor, E);
+
+  case AMDGPU::BI__nvvm_atom_xchg_gen_i:
+  case AMDGPU::BI__nvvm_atom_xchg_gen_l:
+  case AMDGPU::BI__nvvm_atom_xchg_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::Xchg, E);
+
+  case AMDGPU::BI__nvvm_atom_max_gen_i:
+  case AMDGPU::BI__nvvm_atom_max_gen_l:
+  case AMDGPU::BI__nvvm_atom_max_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::Max, E);
+
+  case AMDGPU::BI__nvvm_atom_max_gen_ui:
+  case AMDGPU::BI__nvvm_atom_max_gen_ul:
+  case AMDGPU::BI__nvvm_atom_max_gen_ull:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::UMax, E);
+
+  case AMDGPU::BI__nvvm_atom_min_gen_i:
+  case AMDGPU::BI__nvvm_atom_min_gen_l:
+  case AMDGPU::BI__nvvm_atom_min_gen_ll:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::Min, E);
+
+  case AMDGPU::BI__nvvm_atom_min_gen_ui:
+  case AMDGPU::BI__nvvm_atom_min_gen_ul:
+  case AMDGPU::BI__nvvm_atom_min_gen_ull:
+    return MakeBinaryAtomicValue(*this, llvm::AtomicRMWInst::UMin, E);
+
+  case AMDGPU::BI__nvvm_atom_cas_gen_i:
+  case AMDGPU::BI__nvvm_atom_cas_gen_l:
+  case AMDGPU::BI__nvvm_atom_cas_gen_ll:
+    // __nvvm_atom_cas_gen_* should return the old value rather than the
+    // success flag.
+    return MakeAtomicCmpXchgValue(*this, E, /*ReturnBool=*/false);
+
+  case AMDGPU::BI__nvvm_atom_add_gen_f: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    Value *Val = EmitScalarExpr(E->getArg(1));
+    llvm::Function *F =
+        CGM.getModule().getFunction("nvvm.atomic.load.add.f32.p0f32");
+    if (!F)
+      F = llvm::Function::Create(
+          llvm::FunctionType::get(Val->getType(),
+                                  {Ptr->getType(), Val->getType()}, false),
+          llvm::GlobalVariable::ExternalLinkage,
+          "nvvm.atomic.load.add.f32.p0f32", &CGM.getModule());
+    return Builder.CreateCall(F, {Ptr, Val});
+  }
+
+  case AMDGPU::BI__nvvm_atom_add_gen_d: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    Value *Val = EmitScalarExpr(E->getArg(1));
+    return Builder.CreateAtomicRMW(llvm::AtomicRMWInst::FAdd, Ptr, Val,
+                                   AtomicOrdering::SequentiallyConsistent);
+  }
+
+  case AMDGPU::BI__nvvm_atom_inc_gen_ui: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    Value *Val = EmitScalarExpr(E->getArg(1));
+    // FIXME use correct pXi32 depending on address space for Ptr.
+    llvm::Function *F =
+        CGM.getModule().getFunction("nvvm.atomic.load.inc.32.p0i32");
+    if (!F)
+      F = llvm::Function::Create(
+          llvm::FunctionType::get(Val->getType(),
+                                  {Ptr->getType(), Val->getType()}, false),
+          llvm::GlobalVariable::ExternalLinkage,
+          "nvvm.atomic.load.inc.32.p0i32", &CGM.getModule());
+    return Builder.CreateCall(F, {Ptr, Val});
+  }
+
+  case AMDGPU::BI__nvvm_atom_dec_gen_ui: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    Value *Val = EmitScalarExpr(E->getArg(1));
+    Value *FnALD32 =
+        CGM.getIntrinsic(Intrinsic::nvvm_atomic_load_dec_32, Ptr->getType());
+    return Builder.CreateCall(FnALD32, {Ptr, Val});
+  }
+
+  case AMDGPU::BI__nvvm_ldg_c:
+  case AMDGPU::BI__nvvm_ldg_c2:
+  case AMDGPU::BI__nvvm_ldg_c4:
+  case AMDGPU::BI__nvvm_ldg_s:
+  case AMDGPU::BI__nvvm_ldg_s2:
+  case AMDGPU::BI__nvvm_ldg_s4:
+  case AMDGPU::BI__nvvm_ldg_i:
+  case AMDGPU::BI__nvvm_ldg_i2:
+  case AMDGPU::BI__nvvm_ldg_i4:
+  case AMDGPU::BI__nvvm_ldg_l:
+  case AMDGPU::BI__nvvm_ldg_ll:
+  case AMDGPU::BI__nvvm_ldg_ll2:
+  case AMDGPU::BI__nvvm_ldg_uc:
+  case AMDGPU::BI__nvvm_ldg_uc2:
+  case AMDGPU::BI__nvvm_ldg_uc4:
+  case AMDGPU::BI__nvvm_ldg_us:
+  case AMDGPU::BI__nvvm_ldg_us2:
+  case AMDGPU::BI__nvvm_ldg_us4:
+  case AMDGPU::BI__nvvm_ldg_ui:
+  case AMDGPU::BI__nvvm_ldg_ui2:
+  case AMDGPU::BI__nvvm_ldg_ui4:
+  case AMDGPU::BI__nvvm_ldg_ul:
+  case AMDGPU::BI__nvvm_ldg_ull:
+  case AMDGPU::BI__nvvm_ldg_ull2:
+    // PTX Interoperability section 2.2: "For a vector with an even number of
+    // elements, its alignment is set to number of elements times the alignment
+    // of its member: n*alignof(t)."
+    return AmdgcnMakeLdg(Intrinsic::nvvm_ldg_global_i);
+  case AMDGPU::BI__nvvm_ldg_f:
+  case AMDGPU::BI__nvvm_ldg_f2:
+  case AMDGPU::BI__nvvm_ldg_f4:
+  case AMDGPU::BI__nvvm_ldg_d:
+  case AMDGPU::BI__nvvm_ldg_d2:
+    return AmdgcnMakeLdg(Intrinsic::nvvm_ldg_global_f);
+
+  case AMDGPU::BI__nvvm_atom_cta_add_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_add_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_add_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_add_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_add_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_add_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_add_gen_f:
+  case AMDGPU::BI__nvvm_atom_cta_add_gen_d:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_cta);
+  case AMDGPU::BI__nvvm_atom_sys_add_gen_f:
+  case AMDGPU::BI__nvvm_atom_sys_add_gen_d:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_sys);
+  case AMDGPU::BI__nvvm_atom_cta_xchg_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_xchg_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_xchg_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_xchg_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_xchg_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_xchg_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_max_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_max_gen_ui:
+  case AMDGPU::BI__nvvm_atom_cta_max_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_max_gen_ul:
+  case AMDGPU::BI__nvvm_atom_cta_max_gen_ll:
+  case AMDGPU::BI__nvvm_atom_cta_max_gen_ull:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_max_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_max_gen_ui:
+  case AMDGPU::BI__nvvm_atom_sys_max_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_max_gen_ul:
+  case AMDGPU::BI__nvvm_atom_sys_max_gen_ll:
+  case AMDGPU::BI__nvvm_atom_sys_max_gen_ull:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_min_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_min_gen_ui:
+  case AMDGPU::BI__nvvm_atom_cta_min_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_min_gen_ul:
+  case AMDGPU::BI__nvvm_atom_cta_min_gen_ll:
+  case AMDGPU::BI__nvvm_atom_cta_min_gen_ull:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_min_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_min_gen_ui:
+  case AMDGPU::BI__nvvm_atom_sys_min_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_min_gen_ul:
+  case AMDGPU::BI__nvvm_atom_sys_min_gen_ll:
+  case AMDGPU::BI__nvvm_atom_sys_min_gen_ull:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_inc_gen_ui:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_cta_dec_gen_ui:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_inc_gen_ui:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_sys_dec_gen_ui:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_and_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_and_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_and_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_and_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_and_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_and_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_or_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_or_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_or_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_or_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_or_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_or_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_xor_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_xor_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_xor_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_cta);
+  case AMDGPU::BI__nvvm_atom_sys_xor_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_xor_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_xor_gen_ll:
+    return AmdgcnMakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_sys);
+  case AMDGPU::BI__nvvm_atom_cta_cas_gen_i:
+  case AMDGPU::BI__nvvm_atom_cta_cas_gen_l:
+  case AMDGPU::BI__nvvm_atom_cta_cas_gen_ll: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    return Builder.CreateCall(
+        CGM.getIntrinsic(
+            Intrinsic::nvvm_atomic_cas_gen_i_cta,
+            {Ptr->getType()->getPointerElementType(), Ptr->getType()}),
+        {Ptr, EmitScalarExpr(E->getArg(1)), EmitScalarExpr(E->getArg(2))});
+  }
+  case AMDGPU::BI__nvvm_atom_sys_cas_gen_i:
+  case AMDGPU::BI__nvvm_atom_sys_cas_gen_l:
+  case AMDGPU::BI__nvvm_atom_sys_cas_gen_ll: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    return Builder.CreateCall(
+        CGM.getIntrinsic(
+            Intrinsic::nvvm_atomic_cas_gen_i_sys,
+            {Ptr->getType()->getPointerElementType(), Ptr->getType()}),
+        {Ptr, EmitScalarExpr(E->getArg(1)), EmitScalarExpr(E->getArg(2))});
+  }
+  case AMDGPU::BI__nvvm_match_all_sync_i32p:
+  case AMDGPU::BI__nvvm_match_all_sync_i64p: {
+    Value *Mask = EmitScalarExpr(E->getArg(0));
+    Value *Val = EmitScalarExpr(E->getArg(1));
+    Address PredOutPtr = EmitPointerWithAlignment(E->getArg(2));
+    Value *ResultPair = Builder.CreateCall(
+        CGM.getIntrinsic(BuiltinID == AMDGPU::BI__nvvm_match_all_sync_i32p
+                             ? Intrinsic::nvvm_match_all_sync_i32p
+                             : Intrinsic::nvvm_match_all_sync_i64p),
+        {Mask, Val});
+    Value *Pred = Builder.CreateZExt(Builder.CreateExtractValue(ResultPair, 1),
+                                     PredOutPtr.getElementType());
+    Builder.CreateStore(Pred, PredOutPtr);
+    return Builder.CreateExtractValue(ResultPair, 0);
+  }
   default:
     return nullptr;
-  }
+  } // end of big switch
 }
 
 /// Handle a SystemZ function in which the final argument is a pointer
