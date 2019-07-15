@@ -100,6 +100,8 @@ class CodeGenTypes {
   /// This map keeps cache of llvm::Types and maps clang::Type to
   /// corresponding llvm::Type.
   llvm::DenseMap<const Type *, llvm::Type *> TypeCache;
+  /// This map keeps cache of llvm::Types for AS Qualified Types
+  llvm::DenseMap<std::pair<const Type *, unsigned>, llvm::Type *> TypeCacheASQ;
 
   llvm::SmallSet<const Type *, 8> RecordsWithOpaqueMemberPointers;
 
@@ -156,6 +158,14 @@ public:
   /// given a CXXMethodDecl. If the method to has an incomplete return type,
   /// and/or incomplete argument types, this will return the opaque type.
   llvm::Type *GetFunctionTypeForVTable(GlobalDecl GD);
+
+  /// GetDeterminedAS - If the Address Space of a parent or subordinate type
+  /// is determined (non-Generic and non-Private) then return this value.
+  /// If a conflict exists, return the AS of the subordinate. This is used to
+  /// correctly propogate the QualType address space on recursive calls to
+  /// ConvertType. If both parent and subordinate cannot be determined,
+  /// return 0 which indicates TBD (to be determined).
+  clang::LangAS GetDeterminedAS(QualType T, QualType Sub);
 
   const CGRecordLayout &getCGRecordLayout(const RecordDecl*);
 

@@ -239,6 +239,11 @@
             integer (kind=omp_integer_kind) omp_get_num_devices
           end function omp_get_num_devices
 
+          function omp_get_device_num()
+            use omp_lib_kinds
+            integer (kind=omp_integer_kind) omp_get_device_num
+          end function omp_get_device_num
+
           function omp_get_num_teams()
             use omp_lib_kinds
             integer (kind=omp_integer_kind) omp_get_num_teams
@@ -557,6 +562,7 @@
 !dec$ attributes alias:'OMP_GET_DEFAULT_DEVICE' :: omp_get_default_device
 !dec$ attributes alias:'OMP_SET_DEFAULT_DEVICE' :: omp_set_default_device
 !dec$ attributes alias:'OMP_GET_NUM_DEVICES' :: omp_get_num_devices
+!dec$ attributes alias:'OMP_GET_DEVICE_NUM' :: omp_get_device_num
 !dec$ attributes alias:'OMP_GET_NUM_TEAMS' :: omp_get_num_teams
 !dec$ attributes alias:'OMP_GET_TEAM_NUM' :: omp_get_team_num
 !dec$ attributes alias:'OMP_GET_CANCELLATION' :: omp_get_cancellation
@@ -638,6 +644,7 @@
 !dec$ attributes alias:'_OMP_GET_DEFAULT_DEVICE' :: omp_get_default_device
 !dec$ attributes alias:'_OMP_SET_DEFAULT_DEVICE' :: omp_set_default_device
 !dec$ attributes alias:'_OMP_GET_NUM_DEVICES' :: omp_get_num_devices
+!dec$ attributes alias:'_OMP_GET_DEVICE_NUM' :: omp_get_device_num
 !dec$ attributes alias:'_OMP_GET_NUM_TEAMS' :: omp_get_num_teams
 !dec$ attributes alias:'_OMP_GET_TEAM_NUM' :: omp_get_team_num
 !dec$ attributes alias:'_OMP_GET_CANCELLATION' :: omp_get_cancellation
@@ -722,6 +729,7 @@
 !dec$ attributes alias:'omp_get_default_device_'::omp_get_default_device
 !dec$ attributes alias:'omp_set_default_device_'::omp_set_default_device
 !dec$ attributes alias:'omp_get_num_devices_'::omp_get_num_devices
+!dec$ attributes alias:'omp_get_device_nums_'::omp_get_device_num
 !dec$ attributes alias:'omp_get_num_teams_'::omp_get_num_teams
 !dec$ attributes alias:'omp_get_team_num_'::omp_get_team_num
 !dec$ attributes alias:'omp_get_cancellation_'::omp_get_cancellation

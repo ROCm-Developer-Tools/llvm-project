@@ -13,6 +13,7 @@
 #include "NVPTX.h"
 #include "Targets.h"
 #include "clang/Basic/Builtins.h"
+#include "clang/Basic/GpuGridValues.h"
 #include "clang/Basic/MacroBuilder.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -60,6 +61,8 @@ NVPTXTargetInfo::NVPTXTargetInfo(const llvm::Triple &Triple,
   TLSSupported = false;
   VLASupported = false;
   AddrSpaceMap = &NVPTXAddrSpaceMap;
+  GridValues = (const int *)&(GPU::NVPTXGpuGridValues[0]);
+  LongGridValues = (const long long *)&(GPU::NVPTXGpuLongGridValues[0]);
   UseAddrSpaceMapMangling = true;
 
   // Define available target features

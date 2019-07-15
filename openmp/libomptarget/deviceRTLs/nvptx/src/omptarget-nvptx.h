@@ -368,10 +368,7 @@ private:
   uint64_t cnt;
 };
 
-/// Device envrionment data
-struct omptarget_device_environmentTy {
-  int32_t debug_level;
-};
+#include "../../../src/device_env_struct.h"
 
 /// Memory manager for statically allocated memory.
 class omptarget_nvptx_SimpleMemoryManager {

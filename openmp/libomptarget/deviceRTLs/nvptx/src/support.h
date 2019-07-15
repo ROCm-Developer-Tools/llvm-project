@@ -14,8 +14,8 @@
 // Execution Parameters
 ////////////////////////////////////////////////////////////////////////////////
 enum ExecutionMode {
-  Generic = 0x00u,
-  Spmd = 0x01u,
+  Spmd = 0x00u,
+  Generic = 0x01u,
   ModeMask = 0x01u,
 };
 

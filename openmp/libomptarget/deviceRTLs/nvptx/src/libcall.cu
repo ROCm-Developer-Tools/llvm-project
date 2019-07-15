@@ -302,8 +302,15 @@ EXTERN int omp_get_default_device(void) {
 }
 
 EXTERN int omp_get_num_devices(void) {
-  PRINT0(LD_IO, "call omp_get_num_devices() is undef on device, returns 0\n");
-  return 0;
+  PRINT(LD_IO, "call omp_get_num_devices() returns device_size %d\n",
+        omptarget_device_environment.num_devices);
+  return omptarget_device_environment.num_devices;
+}
+
+EXTERN int omp_get_device_num(void) {
+  PRINT(LD_IO, "call omp_get_device_num() returns device_num %d\n",
+        omptarget_device_environment.device_num);
+  return omptarget_device_environment.device_num;
 }
 
 EXTERN int omp_get_num_teams(void) {
@@ -316,6 +323,58 @@ EXTERN int omp_get_team_num() {
   int rc = GetOmpTeamId();
   PRINT(LD_IO, "call omp_get_team_num() returns %d\n", rc);
   return rc;
+}
+
+__device__ static unsigned getWarpId() { return threadIdx.x / WARPSIZE; }
+
+EXTERN int omp_ext_get_warp_id() {
+  int rc = getWarpId();
+  PRINT(LD_IO, "call omp_ext_get_warp_id() returns %d\n", rc);
+  return rc;
+}
+
+__device__ static unsigned getLaneId() { return threadIdx.x % WARPSIZE; }
+
+EXTERN int omp_ext_get_lane_id() {
+  int rc = getLaneId();
+  PRINT(LD_IO, "call omp_ext_get_lane_id() returns %d\n", rc);
+  return rc;
+}
+
+INLINE unsigned smid() {
+  unsigned id;
+  asm("mov.u32 %0, %%smid;" : "=r"(id));
+  return id;
+}
+
+EXTERN int omp_ext_get_smid() {
+  int rc = smid();
+  PRINT(LD_IO, "call omp_ext_get_smid() returns %d\n", rc);
+  return rc;
+}
+
+EXTERN int omp_ext_is_spmd_mode() {
+  int rc = isSPMDMode();
+  PRINT(LD_IO, "call omp_ext_is_spmd_mode() returns %d\n", rc);
+  return rc;
+}
+
+__device__ static unsigned getNumThreads() { return blockDim.x; }
+__device__ static unsigned getMasterThreadId() {
+  unsigned Mask = WARPSIZE - 1;
+  return (getNumThreads() - 1) & (~Mask);
+}
+
+EXTERN int omp_ext_get_master_thread_id() {
+  int rc = getMasterThreadId();
+  PRINT(LD_IO, "call omp_ext_get_master_thread_id() returns %d\n", rc);
+  return rc;
+}
+
+EXTERN unsigned long long omp_ext_get_active_threads_mask() {
+  unsigned rc = __ACTIVEMASK();
+  PRINT(LD_IO, "call omp_ext_get_active_threads_mask() returns %x\n", rc);
+  return (unsigned long long)rc;
 }
 
 EXTERN int omp_is_initial_device(void) {

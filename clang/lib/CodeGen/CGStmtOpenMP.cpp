@@ -298,10 +298,18 @@ static Address castValueFromUintptr(CodeGenFunction &CGF, SourceLocation Loc,
                                     QualType DstType, StringRef Name,
                                     LValue AddrLV) {
   ASTContext &Ctx = CGF.getContext();
-
-  llvm::Value *CastedPtr = CGF.EmitScalarConversion(
-      AddrLV.getAddress().getPointer(), Ctx.getUIntPtrType(),
-      Ctx.getPointerType(DstType), Loc);
+  Address Addr = AddrLV.getAddress();
+  if (Ctx.getTargetInfo().getTriple().getArch() == llvm::Triple::amdgcn &&
+      CGF.CGM.getLangOpts().OpenMPIsDevice) {
+    auto *Ty = CGF.ConvertType(Ctx.getPointerType(DstType));
+    auto *PTy = dyn_cast<llvm::PointerType>(Ty);
+    // For device path, add addrspacecast if needed before emitscalar conversion
+    if (PTy && PTy->getAddressSpace() != Addr.getAddressSpace())
+      Addr = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(Addr, Ty);
+  }
+  llvm::Value *CastedPtr =
+      CGF.EmitScalarConversion(Addr.getPointer(), Ctx.getUIntPtrType(),
+                               Ctx.getPointerType(DstType), Loc);
   Address TmpAddr =
       CGF.MakeNaturalAlignAddrLValue(CastedPtr, Ctx.getPointerType(DstType))
           .getAddress();
@@ -352,7 +360,8 @@ static llvm::Function *emitOutlinedFunctionPrologue(
         &LocalAddrs,
     llvm::DenseMap<const Decl *, std::pair<const Expr *, llvm::Value *>>
         &VLASizes,
-    llvm::Value *&CXXThisValue, const FunctionOptions &FO) {
+    llvm::Value *&CXXThisValue, const FunctionOptions &FO,
+    bool argsNeedAddrSpace) {
   const CapturedDecl *CD = FO.S->getCapturedDecl();
   const RecordDecl *RD = FO.S->getCapturedRecordDecl();
   assert(CD->hasBody() && "missing CapturedDecl body");
@@ -404,6 +413,19 @@ static llvm::Function *emitOutlinedFunctionPrologue(
     }
     if (ArgType->isVariablyModifiedType())
       ArgType = getCanonicalParamType(Ctx, ArgType);
+
+    // Set the IPD QualType for kernel args to be in device AS (1)
+    if (CapVar && CGM.getLangOpts().OpenMPIsDevice && argsNeedAddrSpace &&
+        (Ctx.getTargetInfo().getTriple().getArch() == llvm::Triple::amdgcn)) {
+      const clang::Type *ty = ArgType.getTypePtr();
+      if (ty->isAnyPointerType() || ty->isReferenceType()) {
+        clang::LangAS LLVM_AS = CapVar->getType().getAddressSpace();
+        if (LLVM_AS == LangAS::Default)
+          LLVM_AS = LangAS::cuda_device;
+        ArgType = Ctx.getAddrSpaceQualType(ArgType, LLVM_AS);
+      }
+    }
+
     VarDecl *Arg;
     if (DebugFunctionDecl && (CapVar || I->capturesThis())) {
       Arg = ParmVarDecl::Create(
@@ -430,9 +452,32 @@ static llvm::Function *emitOutlinedFunctionPrologue(
       std::next(CD->param_begin(), CD->getContextParamPosition() + 1),
       CD->param_end());
 
+  SmallVector<CanQualType, 16> argCanQualTypes;
+  if (CGM.getLangOpts().OpenMPIsDevice && argsNeedAddrSpace &&
+      (Ctx.getTargetInfo().getTriple().getArch() == llvm::Triple::amdgcn)) {
+    // We need Canonical Param Types WITH addrspace qualifier
+    for (const auto &Arg : TargetArgs) {
+      clang::LangAS address_space = Arg->getType().getAddressSpace();
+      if (address_space != LangAS::Default)
+        argCanQualTypes.push_back(
+            CanQualType::CreateUnsafe(Ctx.getAddrSpaceQualType(
+                Ctx.getCanonicalParamType(Arg->getType()), address_space)));
+      else
+        argCanQualTypes.push_back(Ctx.getCanonicalParamType(Arg->getType()));
+    }
+  }
+
   // Create the function declaration.
   const CGFunctionInfo &FuncInfo =
-      CGM.getTypes().arrangeBuiltinFunctionDeclaration(Ctx.VoidTy, TargetArgs);
+      (CGM.getLangOpts().OpenMPIsDevice && argsNeedAddrSpace &&
+       (Ctx.getTargetInfo().getTriple().getArch() == llvm::Triple::amdgcn))
+          ? CGM.getTypes().arrangeLLVMFunctionInfo(
+                Ctx.VoidTy, false, false, argCanQualTypes,
+                FunctionType::ExtInfo(), {}, RequiredArgs::All)
+          : CGM.getTypes().arrangeBuiltinFunctionDeclaration(Ctx.VoidTy,
+                                                             TargetArgs);
+
+  // Create the function declaration.
   llvm::FunctionType *FuncLLVMTy = CGM.getTypes().GetFunctionType(FuncInfo);
 
   auto *F =
@@ -529,6 +574,9 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
   bool NeedWrapperFunction =
       getDebugInfo() &&
       CGM.getCodeGenOpts().getDebugInfo() >= codegenoptions::LimitedDebugInfo;
+  bool isKernel = (CapturedStmtInfo->getHelperName().str().find(
+                       "__omp_offloading_") != std::string::npos);
+
   FunctionArgList Args;
   llvm::MapVector<const Decl *, std::pair<const VarDecl *, Address>> LocalAddrs;
   llvm::DenseMap<const Decl *, std::pair<const Expr *, llvm::Value *>> VLASizes;
@@ -539,9 +587,11 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
     Out << "_debug__";
   FunctionOptions FO(&S, !NeedWrapperFunction, /*RegisterCastedArgsOnly=*/false,
                      Out.str());
-  llvm::Function *F = emitOutlinedFunctionPrologue(*this, Args, LocalAddrs,
-                                                   VLASizes, CXXThisValue, FO);
+  llvm::Function *F = emitOutlinedFunctionPrologue(
+      *this, Args, LocalAddrs, VLASizes, CXXThisValue, FO, isKernel);
   CodeGenFunction::OMPPrivateScope LocalScope(*this);
+  if ((CGM.getTriple().getArch() == llvm::Triple::amdgcn) && isKernel)
+    F->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
   for (const auto &LocalAddrPair : LocalAddrs) {
     if (LocalAddrPair.second.first) {
       LocalScope.addPrivate(LocalAddrPair.second.first, [&LocalAddrPair]() {
@@ -567,9 +617,13 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
   Args.clear();
   LocalAddrs.clear();
   VLASizes.clear();
-  llvm::Function *WrapperF =
-      emitOutlinedFunctionPrologue(WrapperCGF, Args, LocalAddrs, VLASizes,
-                                   WrapperCGF.CXXThisValue, WrapperFO);
+  isKernel = (CapturedStmtInfo->getHelperName().str().find(
+                  "__omp_offloading_") != std::string::npos);
+
+  llvm::Function *WrapperF = emitOutlinedFunctionPrologue(
+      WrapperCGF, Args, LocalAddrs, VLASizes, WrapperCGF.CXXThisValue,
+      WrapperFO, isKernel);
+
   llvm::SmallVector<llvm::Value *, 4> CallArgs;
   for (const auto *Arg : Args) {
     llvm::Value *CallArg;

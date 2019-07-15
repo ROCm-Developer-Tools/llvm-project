@@ -2,6 +2,7 @@ set(LLVM_LINK_COMPONENTS
   BinaryFormat
   Option
   Support
+  Object
   )
 
 if(WIN32)
