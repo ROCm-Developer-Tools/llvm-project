@@ -29,6 +29,7 @@ const char *Action::getClassName(ActionClass AC) {
   case AnalyzeJobClass: return "analyzer";
   case MigrateJobClass: return "migrator";
   case CompileJobClass: return "compiler";
+  case FortranFrontendJobClass: return "fortran-frontend";
   case BackendJobClass: return "backend";
   case AssembleJobClass: return "assembler";
   case LinkJobClass: return "linker";
@@ -352,6 +353,12 @@ void CompileJobAction::anchor() {}
 
 CompileJobAction::CompileJobAction(Action *Input, types::ID OutputType)
     : JobAction(CompileJobClass, Input, OutputType) {}
+
+void FortranFrontendJobAction::anchor() {}
+
+FortranFrontendJobAction::FortranFrontendJobAction(Action *Input,
+                                             types::ID OutputType)
+    : JobAction(FortranFrontendJobClass, Input, OutputType) {}
 
 void BackendJobAction::anchor() {}
 
