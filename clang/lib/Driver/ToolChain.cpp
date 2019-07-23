@@ -341,6 +341,9 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
   case Action::OffloadUnbundlingJobClass:
     return getOffloadBundler();
 
+  case Action::FortranFrontendJobClass:
+    return getFlang();
+
   case Action::OffloadWrapperJobClass:
     return getOffloadWrapper();
   }
@@ -988,6 +991,7 @@ bool ToolChain::addFastMathRuntimeIfAvailable(const ArgList &Args,
 
   return false;
 }
+
 
 SanitizerMask ToolChain::getSupportedSanitizers() const {
   // Return sanitizers which don't require runtime support and are not

@@ -211,8 +211,19 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
     }
   }
 
-  if (!SeenFirstLinkerInput && needFortranMain(D, Args)) {
-    CmdArgs.push_back("-lflangmain");
+   if (!SeenFirstLinkerInput && needFortranMain(D, Args)) {
+     CmdArgs.push_back("-lflangmain");
+   }
+
+   //Claim "no Fortran main" arguments
+   for (auto Arg : Args.filtered(options::OPT_no_fortran_main,options::OPT_Mnomain)) {
+     Arg->claim();
+   }
+
+  // LIBRARY_PATH - included following the user specified library paths.
+  //                and only supported on native toolchains.
+  if (!TC.isCrossCompiling()) {
+    addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
   }
 
   // Claim "no Fortran main" arguments

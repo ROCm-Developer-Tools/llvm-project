@@ -328,11 +328,37 @@ types::ID types::lookupTypeForTypeSpecifier(const char *Name) {
   return TY_INVALID;
 }
 
-// FIXME: Why don't we just put this list in the defs file, eh.
-// FIXME: The list is now in Types.def but for now this function will verify
-//        the old behavior and a subsequent change will delete most of the body.
 void types::getCompilationPhases(ID Id, llvm::SmallVectorImpl<phases::ID> &P) {
-  P = getInfo(Id).Phases;
+  if (isFortran(Id)) {
+    // Delegate preprocessing to the "upper" part of Fortran compiler,
+    // preprocess for other preprocessable inputs
+    if (getPreprocessedType(Id) != TY_INVALID && !isFortran(Id)) {
+      P.push_back(phases::Preprocess);
+    }
+
+    if (getPrecompiledType(Id) != TY_INVALID) {
+      P.push_back(phases::Precompile);
+    }
+
+    if (!onlyPrecompileType(Id)) {
+      if (!onlyAssembleType(Id)) {
+        if (isFortran(Id)) {
+          P.push_back(phases::FortranFrontend);
+          P.push_back(phases::Compile);
+          P.push_back(phases::Backend);
+        } else {
+          P.push_back(phases::Compile);
+          P.push_back(phases::Backend);
+        }
+      }
+      P.push_back(phases::Assemble);
+    }
+    if (!onlyPrecompileType(Id)) {
+      P.push_back(phases::Link);
+    }
+  } else {
+    P = getInfo(Id).Phases;
+  }
   assert(0 < P.size() && "Not enough phases in list");
   assert(P.size() <= phases::MaxNumberOfPhases && "Too many phases in list");
 }
@@ -342,6 +368,9 @@ void types::getCompilationPhases(const clang::driver::Driver &Driver,
                                  llvm::SmallVectorImpl<phases::ID> &P) {
   llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PhaseList;
   types::getCompilationPhases(Id, PhaseList);
+  if (isFortran(Id)) {
+    P = PhaseList;
+  }
 
   // Filter to compiler mode. When the compiler is run as a preprocessor then
   // compilation is not an option.
