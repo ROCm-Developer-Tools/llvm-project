@@ -530,6 +530,17 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // The profile runtime also needs access to system libraries.
   getToolChain().addProfileRTLibs(Args, CmdArgs);
 
+	  // Add Fortran runtime libraries
+  if (needFortranLibs(D, Args)) {
+    ToolChain.AddFortranStdlibLibArgs(Args, CmdArgs);  
+  } else {
+  // Claim "no Flang libraries" arguments if any
+    for (auto Arg : Args.filtered(options::OPT_noFlangLibs)) {      
+      Arg->claim();    
+    }  
+  }
+
+
   if (JA.isHostOffloading(Action::OFK_HIP)) {
     CmdArgs.push_back("-latmi_runtime");
     CmdArgs.push_back("-lhip_hcc");
