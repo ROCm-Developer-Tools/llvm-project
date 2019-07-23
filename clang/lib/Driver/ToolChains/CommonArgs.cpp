@@ -62,6 +62,23 @@ using namespace clang::driver::tools;
 using namespace clang;
 using namespace llvm::opt;
 
+/// \brief Determine if Fortran link libraies are needed
+bool clang::driver::tools::needFortranLibs(const Driver &D, const ArgList &Args) {
+  if (D.IsFortranMode() && !Args.hasArg(options::OPT_nostdlib) &&
+      !Args.hasArg(options::OPT_noFlangLibs)) {
+    return true;
+  }
+
+  return false;
+}
+
+/// \brief Determine if Fortran "main" object is needed
+static bool needFortranMain(const Driver &D, const ArgList &Args) {
+  return (tools::needFortranLibs(D, Args)
+          && (!Args.hasArg(options::OPT_Mnomain) ||
+              !Args.hasArg(options::OPT_no_fortran_main)));
+}
+
 void tools::addPathIfExists(const Driver &D, const Twine &Path,
                             ToolChain::path_list &Paths) {
   if (D.getVFS().exists(Path))
@@ -144,6 +161,7 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
                             const ArgList &Args, ArgStringList &CmdArgs,
                             const JobAction &JA) {
   const Driver &D = TC.getDriver();
+  bool SeenFirstLinkerInput = false;
 
   // Add extra linker input arguments which are not treated as inputs
   // (constructed via -Xarch_).
@@ -186,6 +204,15 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
       A.renderAsInput(Args, CmdArgs);
     }
   }
+
+   if (!SeenFirstLinkerInput && needFortranMain(D, Args)) {
+     CmdArgs.push_back("-lflangmain");  
+   }
+
+   //Claim "no Fortran main" arguments
+   for (auto Arg : Args.filtered(options::OPT_no_fortran_main,options::OPT_Mnomain)) {
+     Arg->claim();
+   }
 
   // LIBRARY_PATH - included following the user specified library paths.
   //                and only supported on native toolchains.
