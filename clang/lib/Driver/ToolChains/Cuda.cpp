@@ -501,8 +501,11 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
   assert(TC.getTriple().isNVPTX() && "Wrong platform");
 
   ArgStringList CmdArgs;
+  const char *Exec =
+    Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
 
-  // OpenMP uses nvlink to link cubin files. The result will be embedded in the
+  CmdArgs.push_back(Exec);
+   // OpenMP uses nvlink to link cubin files. The result will be embedded in the
   // host binary by the host linker.
   assert(!JA.isHostOffloading(Action::OFK_OpenMP) &&
          "CUDA toolchain not expected for an OpenMP host device.");
@@ -568,9 +571,10 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
   AddStaticDeviceLibs(C, *this, JA, Inputs, Args, CmdArgs, "nvptx", GPUArch,
                       false, false);
 
-  const char *Exec =
-      Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
-  C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
+  const char *NVLinkWrapper =
+    Args.MakeArgString(getToolChain().GetProgramPath("clang-nvlink-wrapper"));
+  C.addCommand(llvm::make_unique<Command>(JA, *this, NVLinkWrapper, CmdArgs,
+                                          Inputs));
 }
 
 /// CUDA toolchain.  Our assembler is ptxas, and our "linker" is fatbinary,
@@ -599,7 +603,8 @@ std::string CudaToolChain::getInputFilename(const InputInfo &Input) const {
   // Replace extension for object files with cubin because nvlink relies on
   // these particular file names.
   SmallString<256> Filename(ToolChain::getInputFilename(Input));
-  llvm::sys::path::replace_extension(Filename, "cubin");
+  if(llvm::sys::path::extension(Filename) != ".a")
+    llvm::sys::path::replace_extension(Filename, "cubin");
   return Filename.str();
 }
 

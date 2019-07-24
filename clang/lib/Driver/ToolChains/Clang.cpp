@@ -6360,14 +6360,10 @@ static void createUnbundleArchiveCommand(Compilation &C,
   std::string OutputLib;
   std::string HostOutputArchive;
 
-  bool isBitCodeSDL = false;
   for (unsigned I = 0; I < DepInfo.size(); ++I) {
     auto &Dep = DepInfo[I];
     auto &Triple = Dep.DependentToolChain->getTriple();
     if(Triple.isNVPTX() || Triple.getArch() == llvm::Triple::amdgcn) {
-      if(Triple.getArch() == llvm::Triple::amdgcn) {
-        isBitCodeSDL = true;
-      }
       gpuname = Dep.DependentBoundArch.str();
       OutputLib = DepInfo[I].DependentToolChain->getInputFilename(Outputs[I]);
 
@@ -6390,22 +6386,15 @@ static void createUnbundleArchiveCommand(Compilation &C,
         HostOutputArg = ("-host-output=" + HostOutputArchive);
       }
 
-      if (!isBitCodeSDL) {
-        // FIXME(Jan): nvlink does not seem to handle archives, we need to
-        // create a wrapper for nvlink that extracts the archive and
-        // gives nvlink individual files.
-        return;
-      } else {
-        ArgStringList UBArgs;
-        UBArgs.push_back(C.getArgs().MakeArgString(InputArg.c_str()));
-        UBArgs.push_back(C.getArgs().MakeArgString(OffloadArg.c_str()));
-        UBArgs.push_back(C.getArgs().MakeArgString(OutputArg.c_str()));
-        UBArgs.push_back(C.getArgs().MakeArgString(HostOutputArg.c_str()));
-        C.addCommand(llvm::make_unique<Command>(UA, T, UBProgram, UBArgs,
-                                            Inputs));
-        // Prevent host file being written multiple times.
-        HostOutputArchive.clear();
-      }
+      ArgStringList UBArgs;
+      UBArgs.push_back(C.getArgs().MakeArgString(InputArg.c_str()));
+      UBArgs.push_back(C.getArgs().MakeArgString(OffloadArg.c_str()));
+      UBArgs.push_back(C.getArgs().MakeArgString(OutputArg.c_str()));
+      UBArgs.push_back(C.getArgs().MakeArgString(HostOutputArg.c_str()));
+      C.addCommand(llvm::make_unique<Command>(UA, T, UBProgram, UBArgs,
+                                              Inputs));
+      // Prevent host file being written multiple times.
+      HostOutputArchive.clear();
     } else {
       HostOutputArchive =
         DepInfo[I].DependentToolChain->getInputFilename(Outputs[I]);

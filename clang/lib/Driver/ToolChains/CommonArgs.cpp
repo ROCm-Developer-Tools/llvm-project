@@ -1566,125 +1566,6 @@ void tools::addMultilibFlag(bool Enabled, const char *const Flag,
   Flags.push_back(std::string(Enabled ? "+" : "-") + Flag);
 }
 
-std::vector<std::unique_ptr<llvm::object::Archive>> Archives;
-std::vector<std::unique_ptr<llvm::MemoryBuffer>> ArchiveBuffers;
-
-static void reportError(Twine Error) {
-  // FIXME: Handle Errors here.
-  // llvm::errs() << Error << ".\n";
-}
-
-static bool reportIfError(std::error_code EC, Twine Context = "") {
-  if (!EC)
-    return false;
-
-  std::string ContextStr = Context.str();
-  if (ContextStr.empty())
-    reportError(EC.message());
-  reportError(Context + ": " + EC.message());
-  return true;
-}
-
-static bool reportIfError(llvm::Error E, Twine Context = "") {
-  if (!E)
-    return false;;
-
-  handleAllErrors(std::move(E), [&](const llvm::ErrorInfoBase &EIB) {
-    std::string ContextStr = Context.str();
-    if (ContextStr.empty())
-      reportError(EIB.message());
-    reportError(Context + ": " + EIB.message());
-  });
-  return true;
-}
-
-static llvm::object::Archive &readArchive(std::unique_ptr<llvm::MemoryBuffer> Buf ) {
-  ArchiveBuffers.push_back(std::move(Buf));
-  auto LibOrErr =
-    llvm::object::Archive::create(ArchiveBuffers.back()->getMemBufferRef());
-  reportIfError(LibOrErr.takeError(),
-              "Could not parse library");
-  Archives.push_back(std::move(*LibOrErr));
-  return *Archives.back();
-}
-
-static StringRef removeExtension(StringRef FileName) {
-  StringRef NoExtFileName;
-  if (FileName.contains(".")) {
-    NoExtFileName = FileName.rsplit('.').first;
-  } else {
-    NoExtFileName = FileName;
-  }
- return NoExtFileName;
-}
-
-static SmallString<128> saveTempFile(std::unique_ptr<llvm::MemoryBuffer> &MemBuf,
-                                     StringRef BaseName, StringRef Extension) {
-  SmallString<128> Path;
-  std::error_code EC1 =
-    llvm::sys::fs::createTemporaryFile(removeExtension(BaseName), Extension, Path);
-  if (reportIfError(EC1, "Unable to create temp file")) {
-    return SmallString<128>();
-  }
-  std::error_code WEC;
-  llvm::raw_fd_ostream SourceFileStream(Path, WEC, llvm::sys::fs::F_None);
-  if (reportIfError(WEC, "Unable to write cubin temp file")) {
-    return SmallString<128>();
-  }
-  SourceFileStream << MemBuf->getBuffer();
-  return Path;
-}
-
-static void extractArchive(Compilation &C,
-                           std::string ArchivePath,
-                           const llvm::opt::ArgList &DriverArgs,
-                           llvm::opt::ArgStringList &CC1Args) {
-  StringRef IFName = ArchivePath;
-  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> BufOrErr =
-    llvm::MemoryBuffer::getFileOrSTDIN(IFName, -1, false);
-
-  if (reportIfError(BufOrErr.getError(),
-                    "Can't open file " + IFName))
-    return;
-
-  auto &Archive = readArchive(std::move(BufOrErr.get()));
-  SmallVector<std::string, 8> SourcePaths;
-
-  llvm::Error Err = llvm::Error::success();
-  auto ChildEnd = Archive.child_end();
-  for(auto ChildIter = Archive.child_begin(Err);
-      ChildIter != ChildEnd;
-      ++ChildIter) {
-    auto ChildNameOrErr = (*ChildIter).getName();
-
-    StringRef ChildName;
-    if (reportIfError(ChildNameOrErr.takeError(), "No Child Name")) {
-      ChildName = "unknown_file_name";
-    } else {
-      ChildName = llvm::sys::path::filename(ChildNameOrErr.get());
-    }
-
-    auto ChildBufferRefOrErr = (*ChildIter).getMemoryBufferRef();
-
-    if (reportIfError(ChildBufferRefOrErr.takeError(), "No Child Mem Buf")) {
-      continue;
-    }
-
-    auto ChildBuffer = llvm::MemoryBuffer::getMemBuffer(ChildBufferRefOrErr.get(),
-                                                  false);
-    SmallString<128> SourcePath = saveTempFile(ChildBuffer, ChildName, "cubin");
-
-    if(!SourcePath.equals("")) {
-      auto TempFileName = DriverArgs.MakeArgString(StringRef(SourcePath).str());
-      C.addTempFile(TempFileName);
-      CC1Args.push_back(TempFileName);
-    }
-  }
-
-  reportIfError(std::move(Err));
-}
-
-
 /// SDLSearch: Search for Static Device Library
 bool tools::SDLSearch(const Driver &D,
                       const llvm::opt::ArgList &DriverArgs,
@@ -1823,7 +1704,7 @@ bool tools::SDLSearch(Compilation &C,
 
       std::string OutputLib = isBitCodeSDL ?
         TmpDir + "/libbc-" + libname + "-" + archname + "-" + gpuname + ".a" :
-        TmpDir + "/lib" + libname + "-" + archname + "-" + gpuname + ".";
+        TmpDir + "/lib" + libname + "-" + archname + "-" + gpuname + ".a";
 
       C.addTempFile(C.getArgs().MakeArgString(OutputLib.c_str()));
 
@@ -1833,40 +1714,17 @@ bool tools::SDLSearch(Compilation &C,
       std::string OffloadArg("-offload-arch=" + gpuname);
       std::string OutputArg("-output=" + OutputLib);
 
-      int ExecResult = -1;
-      if (!isBitCodeSDL) {
-        // FIXME: nvlink does not seem to handle archives, which means
-        // we have to unbundle and then extract this archive to get
-        // the input files to nvlink. This code plux extractArchive
-        // will go away once nvlink is fixed, or we find a way to use
-        // it.
-        std::vector<StringRef> UBArgs;
-        UBArgs.push_back("clang-unbundle-archive");
-        UBArgs.push_back(InputArg);
-        UBArgs.push_back(OffloadArg);
-        UBArgs.push_back(OutputArg);
-        ExecResult =
-          llvm::sys::ExecuteAndWait(UBProgram, UBArgs);
-       } else {
-        ArgStringList UBArgs;
-        UBArgs.push_back(C.getArgs().MakeArgString(InputArg.c_str()));
-        UBArgs.push_back(C.getArgs().MakeArgString(OffloadArg.c_str()));
-        UBArgs.push_back(C.getArgs().MakeArgString(OutputArg.c_str()));
-        C.addCommand(llvm::make_unique<Command>(JA, T, UBProgram, UBArgs,
-                                                Inputs));
-      }
-
+      ArgStringList UBArgs;
+      UBArgs.push_back(C.getArgs().MakeArgString(InputArg.c_str()));
+      UBArgs.push_back(C.getArgs().MakeArgString(OffloadArg.c_str()));
+      UBArgs.push_back(C.getArgs().MakeArgString(OutputArg.c_str()));
+      C.addCommand(llvm::make_unique<Command>(JA, T, UBProgram, UBArgs,
+                                              Inputs));
       if (postClangLink)
         CC1Args.push_back("-mlink-builtin-bitcode");
 
-      if (isBitCodeSDL) {
-        CC1Args.push_back(DriverArgs.MakeArgString(OutputLib));
-        FoundSDL = true;
-      } else if (ExecResult == 0) {
-        extractArchive(C, OutputLib, DriverArgs, CC1Args);
-        FoundSDL = true;
-      }
-
+      CC1Args.push_back(DriverArgs.MakeArgString(OutputLib));
+      FoundSDL = true;
       break;
     }
   }
