@@ -91,6 +91,21 @@ using namespace clang;
 using namespace llvm::opt;
 
 // static
+static bool archiveContainsDeviceCode(const char* UBProgram,
+                                      std::string Archive,
+                                      std::string GpuName) {
+  std::vector<StringRef> UBArgs;
+  std::string InputArg("-input=" + Archive);
+  std::string OffloadArg("-offload-arch=" + GpuName);
+  UBArgs.push_back("clang-unbundle-archive");
+  UBArgs.push_back("-dry-run");
+  UBArgs.push_back(InputArg);
+  UBArgs.push_back(OffloadArg);
+  int ExecResult =
+    llvm::sys::ExecuteAndWait(UBProgram, UBArgs);
+  return ExecResult == 0;
+}
+
 std::string Driver::GetResourcesPath(StringRef BinaryPath,
                                      StringRef CustomResourceDir) {
   // Since the resource directory is embedded in the module hash, it's important
@@ -2946,6 +2961,19 @@ class OffloadingActionBuilder final {
         }
 
         for (unsigned I = 0; I < ToolChains.size(); ++I) {
+          bool foundDeviceCode = false;
+          for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
+            if (archiveContainsDeviceCode(
+                  ToolChains[I]->GetProgramPath(
+                    "clang-unbundle-archive").c_str(),
+                  FileName,
+                  CudaArchToString(GpuArchList[I]))) {
+              foundDeviceCode = true;
+            }
+          }
+          if(!foundDeviceCode)
+            return ABRT_Inactive;
+
           OpenMPDeviceActions.push_back(UA);
           if (GpuArchList.size())
             for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
