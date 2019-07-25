@@ -30,8 +30,11 @@ __device__ omptarget_nvptx_SimpleMemoryManager
     omptarget_nvptx_simpleMemoryManager;
 __device__ __shared__ uint32_t usedMemIdx;
 __device__ __shared__ uint32_t usedSlotIdx;
-
+#ifdef __AMDGCN__
+__device__ volatile __shared__ uint8_t parallelLevel[MAX_THREADS_PER_TEAM / WARPSIZE];
+#else
 __device__ __shared__ uint8_t parallelLevel[MAX_THREADS_PER_TEAM / WARPSIZE];
+#endif
 __device__ __shared__ uint16_t threadLimit;
 __device__ __shared__ uint16_t threadsInTeam;
 __device__ __shared__ uint16_t nThreads;
