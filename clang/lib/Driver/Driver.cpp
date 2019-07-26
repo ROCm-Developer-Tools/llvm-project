@@ -2963,7 +2963,8 @@ class OffloadingActionBuilder final {
         for (unsigned I = 0; I < ToolChains.size(); ++I) {
           bool foundDeviceCode = false;
           for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
-            if (archiveContainsDeviceCode(
+            if (VirtualArchForCudaArch(GpuArchList[I]) == CudaVirtualArch::COMPUTE_AMDGCN ||
+                archiveContainsDeviceCode(
                   ToolChains[I]->GetProgramPath(
                     "clang-unbundle-archive").c_str(),
                   FileName,
