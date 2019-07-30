@@ -343,6 +343,9 @@ bool Vectorizer::areConsecutivePointers(Value *PtrA, Value *PtrB,
   APInt OffsetB(PtrBitWidth, 0);
   PtrA = PtrA->stripAndAccumulateInBoundsConstantOffsets(DL, OffsetA);
   PtrB = PtrB->stripAndAccumulateInBoundsConstantOffsets(DL, OffsetB);
+  if (DL.getTypeStoreSizeInBits(PtrA->getType()) != PtrBitWidth ||
+    DL.getTypeStoreSizeInBits(PtrB->getType()) != PtrBitWidth)
+    return false;
 
   APInt OffsetDelta = OffsetB - OffsetA;
 
