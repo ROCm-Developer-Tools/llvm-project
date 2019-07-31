@@ -643,7 +643,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
   if (!IsHIP) {
     for (Arg *A : C.getInputArgs())
       if (A->getOption().matches(options::OPT_cuda_gpu_arch_EQ) &&
-          StringRef(A->getValue()).startswith("gfx")) {
+          StringRef(A->getValue()).startswith("gfx") && !IsFortranMode()) {
         IsHIP = true;
         IsCuda = false;
         HIPAutomaticMode = true;
