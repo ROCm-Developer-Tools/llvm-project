@@ -533,6 +533,8 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 	  // Add Fortran runtime libraries
   if (needFortranLibs(D, Args)) {
     ToolChain.AddFortranStdlibLibArgs(Args, CmdArgs);  
+    CmdArgs.push_back("-rpath");
+    CmdArgs.push_back(Args.MakeArgString(D.Dir + "/../lib"));
   } else {
   // Claim "no Flang libraries" arguments if any
     for (auto Arg : Args.filtered(options::OPT_noFlangLibs)) {      
