@@ -353,7 +353,13 @@ __device__ static unsigned getMasterThreadId() {
 }
 
 INLINE unsigned smid() {
+#ifdef __AMDGCN__
   return __smid();
+#else
+  unsigned id;
+  asm("mov.u32 %0, %%smid;" : "=r"(id));
+  return id;
+#endif
 }
 
 EXTERN int omp_ext_get_smid() {
