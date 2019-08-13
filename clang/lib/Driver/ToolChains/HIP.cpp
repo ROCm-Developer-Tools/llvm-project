@@ -232,7 +232,7 @@ const char *AMDGCN::Linker::constructLlcCommand(
   ArgStringList LlcArgs{InputFileName,
                         "-mtriple=amdgcn-amd-amdhsa",
                         "-filetype=obj",
-                        "-mattr=-code-object-v3",
+                        "-mattr=+code-object-v3",
                         "-disable-promote-alloca-to-lds",
                         Args.MakeArgString("-mcpu=" + SubArchName)};
 
