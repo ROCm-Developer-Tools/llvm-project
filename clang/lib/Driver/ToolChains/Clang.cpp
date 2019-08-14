@@ -5468,7 +5468,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (IsHIP) {
     CmdArgs.push_back("-x");
-    CmdArgs.push_back("hip");
+    if (Input.getType() == types::TY_LLVM_BC)
+      CmdArgs.push_back("ir");
+    else
+      CmdArgs.push_back("hip");
   } else
     addDashXForInput(Args, Input, CmdArgs);
 
