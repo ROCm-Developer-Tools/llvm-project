@@ -78,14 +78,17 @@ void __kmpc_nvptx_end_reduce(int32_t global_tid) {}
 EXTERN
 void __kmpc_nvptx_end_reduce_nowait(int32_t global_tid) {}
 
+#ifdef __AMDGCN__
 EXTERN int32_t __kmpc_shuffle_int32(int32_t val, int16_t delta, int16_t size) {
+  __threadfence_block();
   return __SHFL_DOWN_SYNC(0xFFFFFFFF, val, delta, size);
 }
-#ifdef __AMDGCN__
+
 EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
   int lo, hi;
   hi = (int)((val >> 32) & 0xffffffff);
   lo = (int)(val & 0xffffffff);
+  __threadfence_block();
   hi = __shfl_down(hi, delta, size);
   lo = __shfl_down(lo, delta, size);
   val = hi;
@@ -93,7 +96,13 @@ EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
   val |= ((uint32_t)lo);
   return val;
 }
+
 #else
+
+EXTERN int32_t __kmpc_shuffle_int32(int32_t val, int16_t delta, int16_t size) {
+  return __SHFL_DOWN_SYNC(0xFFFFFFFF, val, delta, size);
+}
+
 EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
    int lo, hi;
    asm volatile("mov.b64 {%0,%1}, %2;" : "=r"(lo), "=r"(hi) : "l"(val));
