@@ -59,7 +59,8 @@
 #else
 
 #define __SHFL_DOWN_SYNC(mask, var, delta, width)                              \
-  __shfl_down((var), (delta), (width))
+  (__threadfence_block(),                                                     \
+  __shfl_down((var), (delta), (width)))
 #ifdef __AMDGCN__
 #define __SHFL_SYNC(mask, var, srcLane) __shfl((var), (srcLane), WARPSIZE)
 extern "C" __device__ void llvm_amdgcn_s_barrier();
