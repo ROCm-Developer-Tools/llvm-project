@@ -2773,6 +2773,21 @@ static void getTargetEntryUniqueInfo(ASTContext &C, SourceLocation Loc,
   DeviceID = ID.getDevice();
   FileID = ID.getFile();
   LineNum = PLoc.getLine();
+
+  //Check if current file has a parent(the includer of this file). If parent_source is valid, use
+  //parent info to provide unique name. This was added to ensure a target region inside
+  //of a template header file will provide unique info.
+  SourceLocation parent_source = SM.getIncludeLoc(SM.getFileID(Loc));
+  if(parent_source.isValid()){
+    PresumedLoc PPLoc = SM.getPresumedLoc(parent_source);
+    assert(PPLoc.isValid() && "Source location is expected to be always valid.");
+    if (auto EC = llvm::sys::fs::getUniqueID(PPLoc.getFilename(), ID))
+      SM.getDiagnostics().Report(diag::err_cannot_open_file)
+          << PPLoc.getFilename() << EC.message();
+
+    FileID = ID.getFile();
+    LineNum = PPLoc.getLine();
+  }
 }
 
 bool CGOpenMPRuntime::emitDeclareTargetVarDefinition(const VarDecl *VD,
