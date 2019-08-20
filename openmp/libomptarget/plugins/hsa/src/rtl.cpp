@@ -593,10 +593,23 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     elf_end(elfP);
   }
 
+  atmi_status_t err;
+  // Temporarily adding a fix to 7 and 8 gpu cards working.
+  // This patch needs to be reverted once we have a fix along the lines of:
+  //
+  // By default, atmi_module_register creates HSA executables on all devices
+  // in the system causing initialization overhead. If we have an env var
+  // (say ATMI_VISIBLE_DEVICES) and provide a list of devices
+  // (see HIP_VISIBLE_DEVICES for reference), then that could reduce init
+  // overhead if the application is only using one or small number of devices.
+  // Per device module registration could help in some cases to reduce
+  // initialization overhead if the app is not using all available devices
+  static int visited = 0;
+  if(!visited) {
   atmi_platform_type_t platform = (useBrig ? BRIG : AMDGCN);
   void *new_img = malloc(img_size);
   memcpy(new_img, image->ImageStart, img_size);
-  atmi_status_t err = atmi_module_register_from_memory((void **)&new_img,
+  err = atmi_module_register_from_memory((void **)&new_img,
                                                        &img_size, &platform,
                                                        1);
 
@@ -608,6 +621,8 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     return NULL;
   }
   new_img = NULL;
+  visited = 1;
+  }
 
   DP("ATMI module successfully loaded!\n");
 
