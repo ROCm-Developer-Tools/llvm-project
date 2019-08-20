@@ -593,10 +593,18 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     elf_end(elfP);
   }
 
+  atmi_status_t err;
+  // Temporaryily adding a fix to 7 and 8 gpu cards working.
+  // This patch needs to be reverted once we have a fix as described in:
+  // https://github.com/RadeonOpenCompute/atmi-staging/issues/67
+  // https://github.com/RadeonOpenCompute/atmi-staging/issues/65
+
+  static int visited = 0;
+  if(!visited) {
   atmi_platform_type_t platform = (useBrig ? BRIG : AMDGCN);
   void *new_img = malloc(img_size);
   memcpy(new_img, image->ImageStart, img_size);
-  atmi_status_t err = atmi_module_register_from_memory((void **)&new_img,
+  err = atmi_module_register_from_memory((void **)&new_img,
                                                        &img_size, &platform,
                                                        1);
 
@@ -608,6 +616,8 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     return NULL;
   }
   new_img = NULL;
+  visited = 1;
+  }
 
   DP("ATMI module successfully loaded!\n");
 
