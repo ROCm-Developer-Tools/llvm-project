@@ -10,7 +10,6 @@
 #include "CommonArgs.h"
 #include "InputInfo.h"
 #include "clang/Basic/Cuda.h"
-#include "clang/Config/config.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
@@ -25,7 +24,7 @@ using namespace clang::driver::tools;
 using namespace clang;
 using namespace llvm::opt;
 
-#if _WIN32 || _WIN64
+#if defined(_WIN32) || defined(_WIN64)
 #define NULL_FILE "nul"
 #else
 #define NULL_FILE "/dev/null"
@@ -54,6 +53,7 @@ static void addBCLib(const Driver &D, const ArgList &Args,
 
 } // namespace
 
+// OpenMP needs a custom link tool to build select statement
 const char *AMDGCN::Linker::constructOmpExtraCmds(Compilation &C,
     const JobAction &JA, const InputInfoList &Inputs,
     const ArgList &Args, StringRef SubArchName,
@@ -135,8 +135,8 @@ const char *AMDGCN::Linker::constructOmpExtraCmds(Compilation &C,
 
 const char *AMDGCN::Linker::constructLLVMLinkCommand(
     Compilation &C, const JobAction &JA, const InputInfoList &Inputs,
-    const ArgList &Args, StringRef SubArchName, StringRef OutputFilePrefix,
-    StringRef overrideInputsFile) const {
+    const ArgList &Args, StringRef SubArchName,
+    StringRef OutputFilePrefix, StringRef overrideInputsFile) const {
   ArgStringList CmdArgs;
   // Add the input bc's created by compile step.
   if (overrideInputsFile.empty()) {
@@ -145,8 +145,6 @@ const char *AMDGCN::Linker::constructLLVMLinkCommand(
         CmdArgs.push_back(II.getFilename());
   } else
     CmdArgs.push_back(Args.MakeArgString(overrideInputsFile));
-
-  ArgStringList LibraryPaths;
 
   // Add an intermediate output file.
   CmdArgs.push_back("-o");
@@ -226,14 +224,8 @@ const char *AMDGCN::Linker::constructLlcCommand(
     const llvm::opt::ArgList &Args, llvm::StringRef SubArchName,
     llvm::StringRef OutputFilePrefix, const char *InputFileName) const {
   // Construct llc command.
-  // FIXME: -disable-promote-alloca-to-lds is a workaround for issues in
-  // AMDGPUPromoteAlloca pass which cause invalid memory access in PyTorch.
-  // Remove this once the issue is fixed.
-  ArgStringList LlcArgs{InputFileName,
-                        "-mtriple=amdgcn-amd-amdhsa",
+  ArgStringList LlcArgs{InputFileName, "-mtriple=amdgcn-amd-amdhsa",
                         "-filetype=obj",
-                        "-mattr=+code-object-v3",
-                        "-disable-promote-alloca-to-lds",
                         Args.MakeArgString("-mcpu=" + SubArchName)};
 
   // Get the environment variable AOMP_LLC_ARGS and add opt to llc.
@@ -357,12 +349,8 @@ void AMDGCN::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Prefix.length() && "no linker inputs are files ");
 
   // Each command outputs different files.
-  bool DoOverride = true; // Always use custom linker
-  // If custom linking should only be done for openmp, replace 'true' with the
-  // expression: JA.getOffloadingDeviceKind() == Action::OFK_OpenMP
-
-  const char *overrideInputs =
-    DoOverride
+  bool DoOverride =  JA.getOffloadingDeviceKind() == Action::OFK_OpenMP;
+  const char *overrideInputs = DoOverride
           ? constructOmpExtraCmds(C, JA, Inputs, Args, SubArchName, Prefix)
           : "";
   const char *LLVMLinkCommand = constructLLVMLinkCommand(
