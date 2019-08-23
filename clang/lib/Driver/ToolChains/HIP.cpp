@@ -88,20 +88,25 @@ const char *AMDGCN::Linker::constructOmpExtraCmds(Compilation &C,
       Args.MakeArgString(C.getDriver().Dir + "/../lib/libdevice"));
   LibraryPaths.push_back(Args.MakeArgString(C.getDriver().Dir + "/../lib"));
 
+  llvm::StringRef WaveFrontSizeBC;
   std::string GFXVersion = SubArchName.drop_front(3).str();
+  if (stoi(GFXVersion) < 1000)
+    WaveFrontSizeBC = "oclc_wavefrontsize64_on.amdgcn.bc";
+  else
+    WaveFrontSizeBC = "oclc_wavefrontsize64_off.amdgcn.bc";
 
-  // FIXME: remove double link of hip aompextras, ockl 
+  // FIXME: remove double link of hip aompextras, ockl, and WaveFrontSizeBC
   if (Args.hasArg(options::OPT_cuda_device_only))
     BCLibs.append(
         {Args.MakeArgString("libomptarget-amdgcn-" + SubArchName + ".bc"),
          Args.MakeArgString("libhostcall-amdgcn-" + SubArchName + ".bc"),
-         "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc" });
+         "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc", WaveFrontSizeBC});
   else
     BCLibs.append(
         {Args.MakeArgString("libomptarget-amdgcn-" + SubArchName + ".bc"),
          Args.MakeArgString("libhostcall-amdgcn-" + SubArchName + ".bc"),
          Args.MakeArgString("libaompextras-amdgcn-" + SubArchName + ".bc"),
-         "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc" });
+         "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc", WaveFrontSizeBC});
   for (auto Lib : BCLibs)
     addBCLib(C.getDriver(), Args, CmdArgs, LibraryPaths, Lib,
                       /* PostClang Link? */ false);
@@ -454,6 +459,12 @@ void HIPToolChain::addClangTargetOptions(
     else
       FlushDenormalControlBC = "oclc_daz_opt_off.amdgcn.bc";
 
+    llvm::StringRef WaveFrontSizeBC;
+    if (stoi(GFXVersion) < 1000)
+      WaveFrontSizeBC = "oclc_wavefrontsize64_on.amdgcn.bc";
+    else
+      WaveFrontSizeBC = "oclc_wavefrontsize64_off.amdgcn.bc";
+
     // FIXME remove double link of aompextras and hip
     if (DriverArgs.hasArg(options::OPT_cuda_device_only))
       // FIXME: when building aompextras, we need to skip aompextras
@@ -461,7 +472,7 @@ void HIPToolChain::addClangTargetOptions(
           {"hip.amdgcn.bc", "opencl.amdgcn.bc", "ocml.amdgcn.bc",
            "ockl.amdgcn.bc", "oclc_finite_only_off.amdgcn.bc",
            FlushDenormalControlBC, "oclc_correctly_rounded_sqrt_on.amdgcn.bc",
-           "oclc_unsafe_math_off.amdgcn.bc", ISAVerBC });
+           "oclc_unsafe_math_off.amdgcn.bc", ISAVerBC, WaveFrontSizeBC});
 
     else
       BCLibs.append(
@@ -469,7 +480,8 @@ void HIPToolChain::addClangTargetOptions(
            "ockl.amdgcn.bc", "oclc_finite_only_off.amdgcn.bc",
            FlushDenormalControlBC, "oclc_correctly_rounded_sqrt_on.amdgcn.bc",
            "oclc_unsafe_math_off.amdgcn.bc", ISAVerBC,
-           DriverArgs.MakeArgString("libaompextras-amdgcn-" + GpuArch + ".bc")});
+           DriverArgs.MakeArgString("libaompextras-amdgcn-" + GpuArch + ".bc"),
+           WaveFrontSizeBC});
   }
   for (auto Lib : BCLibs)
     addBCLib(getDriver(), DriverArgs, CC1Args, LibraryPaths, Lib,
