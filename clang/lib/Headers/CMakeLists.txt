@@ -171,6 +171,10 @@ set(cuda_open_files
   cuda_open/vector_types.h
 )
 
+set(hip_files
+  hip/hip_host_runtime_api.h
+)
+
 set(output_dir ${LLVM_LIBRARY_OUTPUT_INTDIR}/clang/${CLANG_VERSION}/include)
 set(out_files)
 set(generated_files)
@@ -199,7 +203,7 @@ endfunction(clang_generate_header)
 
 
 # Copy header files from the source directory to the build directory
-foreach( f ${files} ${cuda_wrapper_files} ${ppc_wrapper_files} ${openmp_wrapper_files} ${cuda_open_files})
+foreach( f ${files} ${cuda_wrapper_files} ${ppc_wrapper_files} ${openmp_wrapper_files} ${cuda_open_files} ${hip_files})
   copy_header_to_output_dir(${CMAKE_CURRENT_SOURCE_DIR} ${f})
 endforeach( f )
 
@@ -220,6 +224,11 @@ set(header_install_dir lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION}/include)
 install(
   FILES ${cuda_open_files}
   DESTINATION ${header_install_dir}/cuda_open
+  COMPONENT clang-resource-headers)
+
+install(
+  FILES ${hip_files}
+  DESTINATION ${header_install_dir}/hip
   COMPONENT clang-resource-headers)
 
 
