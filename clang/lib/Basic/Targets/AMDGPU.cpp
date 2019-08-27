@@ -271,6 +271,8 @@ AMDGPUTargetInfo::AMDGPUTargetInfo(const llvm::Triple &Triple,
   resetDataLayout(isAMDGCN(getTriple()) ? DataLayoutStringAMDGCN
                                         : DataLayoutStringR600);
   assert(DataLayout->getAllocaAddrSpace() == Private);
+  TLSSupported = false;
+  VLASupported = false;
   GridValues = (const int *)&(GPU::AMDGPUGpuGridValues[0]);
   LongGridValues = (const long long *)&(GPU::AMDGPUGpuLongGridValues[0]);
 
