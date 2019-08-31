@@ -53,6 +53,19 @@ void RTLsTy::LoadRTLs() {
   }
 #endif // OMPTARGET_DEBUG
 
+  // FIXME this is amdgcn specific.
+  // Propogate HIP_VISIBLE_DEVICES if set to ROCR_VISIBLE_DEVICES.
+  if (char *hipVisDevs = getenv("HIP_VISIBLE_DEVICES")) {
+    if (char *rocrVisDevs = getenv("ROCR_VISIBLE_DEVICES")) {
+      if (strcmp(hipVisDevs, rocrVisDevs) != 0)
+        fprintf(stderr,
+                "Warning both HIP_VISIBLE_DEVICES %s "
+                "and ROCR_VISIBLE_DEVICES %s set\n", hipVisDevs, rocrVisDevs);
+    }
+    DP("Setting ROCR_VISIBLE_DEVICES %s\n", hipVisDevs);
+    setenv("ROCR_VISIBLE_DEVICES", hipVisDevs, true);
+  }
+
   // Parse environment variable OMP_TARGET_OFFLOAD (if set)
   TargetOffloadPolicy = (kmp_target_offload_kind_t) __kmpc_get_target_offload();
   if (TargetOffloadPolicy == tgt_disabled) {
