@@ -33,6 +33,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "omptarget-nvptx.h"
+#include "target_impl.h"
 
 typedef struct ConvergentSimdJob {
   omptarget_nvptx_TaskDescr taskDescr;
@@ -48,14 +49,13 @@ EXTERN bool __kmpc_kernel_convergent_simd(void *buffer, uint64_t Mask,
                                           bool *IsFinal, int32_t *LaneSource,
                                           int32_t *LaneId, int32_t *NumLanes) {
   PRINT0(LD_IO, "call to __kmpc_kernel_convergent_simd\n");
-  uint64_t ConvergentMask = Mask;
-  int32_t ConvergentSize = __popcll(ConvergentMask);
+  __kmpc_impl_lanemask_t ConvergentMask = Mask;
+  int32_t ConvergentSize = __kmpc_impl_popc(ConvergentMask);
   uint64_t WorkRemaining = ConvergentMask >> (*LaneSource + 1);
-  *LaneSource += __ffsll(WorkRemaining);
-  *IsFinal = __popcll(WorkRemaining) == 1;
-  uint64_t lanemask_lt;
-  lanemask_lt = __lanemask_lt();
-  *LaneId = __popcll(ConvergentMask & lanemask_lt);
+  *LaneSource += __kmpc_impl_ffs(WorkRemaining);
+  *IsFinal = __kmpc_impl_popc(WorkRemaining) == 1;
+  __kmpc_impl_lanemask_t lanemask_lt = __kmpc_impl_lanemask_lt();
+  *LaneId = __kmpc_impl_popc(ConvergentMask & lanemask_lt);
 #else
 EXTERN bool __kmpc_kernel_convergent_simd(void *buffer, uint32_t Mask,
                                           bool *IsFinal, int32_t *LaneSource,
@@ -79,7 +79,7 @@ EXTERN bool __kmpc_kernel_convergent_simd(void *buffer, uint32_t Mask,
       omptarget_nvptx_threadPrivateContext->SimdLimitForNextSimd(threadId);
   job->slimForNextSimd = SimdLimit;
 
-  int32_t SimdLimitSource = __SHFL_SYNC(Mask, SimdLimit, *LaneSource);
+  int32_t SimdLimitSource = __kmpc_impl_shfl_sync(Mask, SimdLimit, *LaneSource);
   // reset simdlimit to avoid propagating to successive #simd
   if (SimdLimitSource > 0 && threadId == sourceThreadId)
     omptarget_nvptx_threadPrivateContext->SimdLimitForNextSimd(threadId) = 0;
@@ -137,14 +137,13 @@ EXTERN bool __kmpc_kernel_convergent_parallel(void *buffer, uint64_t Mask,
                                               bool *IsFinal,
                                               int32_t *LaneSource) {
   PRINT0(LD_IO, "call to __kmpc_kernel_convergent_parallel\n");
-  uint64_t ConvergentMask = Mask;
-  int32_t ConvergentSize = __popcll(ConvergentMask);
+   __kmpc_impl_lanemask_t ConvergentMask = Mask;
+  int32_t ConvergentSize = __kmpc_impl_popc(ConvergentMask);
   uint64_t WorkRemaining = ConvergentMask >> (*LaneSource + 1);
-  *LaneSource += __ffsll(WorkRemaining);
-  *IsFinal = __popcll(WorkRemaining) == 1;
-  uint64_t lanemask_lt;
-  lanemask_lt = __lanemask_lt();
-  uint32_t OmpId = __popcll(ConvergentMask & lanemask_lt);
+  *LaneSource += __kmpc_impl_ffs(WorkRemaining);
+  *IsFinal = __kmpc_impl_popc(WorkRemaining) == 1;
+  __kmpc_impl_lanemask_t lanemask_lt = __kmpc_impl_lanemask_lt();
+  uint32_t OmpId = __kmpc_impl_popc(ConvergentMask & lanemask_lt);
 #else
 EXTERN bool __kmpc_kernel_convergent_parallel(void *buffer, uint32_t Mask,
                                               bool *IsFinal,
@@ -168,7 +167,8 @@ EXTERN bool __kmpc_kernel_convergent_parallel(void *buffer, uint32_t Mask,
       omptarget_nvptx_threadPrivateContext->NumThreadsForNextParallel(threadId);
   job->tnumForNextPar = NumThreadsClause;
 
-  int32_t NumThreadsSource = __SHFL_SYNC(Mask, NumThreadsClause, *LaneSource);
+  int32_t NumThreadsSource =
+      __kmpc_impl_shfl_sync(Mask, NumThreadsClause, *LaneSource);
   // reset numthreads to avoid propagating to successive #parallel
   if (NumThreadsSource > 0 && threadId == sourceThreadId)
     omptarget_nvptx_threadPrivateContext->NumThreadsForNextParallel(threadId) =
