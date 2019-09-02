@@ -15,6 +15,7 @@
 #include <stdio.h>
 
 #include "omptarget-nvptx.h"
+#include "target_impl.h"
 
 // may eventually remove this
 EXTERN
@@ -78,22 +79,23 @@ void __kmpc_nvptx_end_reduce(int32_t global_tid) {}
 EXTERN
 void __kmpc_nvptx_end_reduce_nowait(int32_t global_tid) {}
 
+#ifdef __AMDGCN__
+EXTERN int32_t __kmpc_shuffle_int32(int32_t val, int16_t delta, int16_t size) {
+  return __kmpc_impl_shfl_down_sync(0xFFFFFFFF, val, delta, size);
+}
+
+EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
+   uint32_t lo, hi;
+   __kmpc_impl_unpack(val, lo, hi);
+   hi = __kmpc_impl_shfl_down_sync(0xFFFFFFFF, hi, delta, size);
+   lo = __kmpc_impl_shfl_down_sync(0xFFFFFFFF, lo, delta, size);
+   return __kmpc_impl_pack(lo, hi);
+}
+#else
 EXTERN int32_t __kmpc_shuffle_int32(int32_t val, int16_t delta, int16_t size) {
   return __SHFL_DOWN_SYNC(0xFFFFFFFF, val, delta, size);
 }
-#ifdef __AMDGCN__
-EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
-  int lo, hi;
-  hi = (int)((val >> 32) & 0xffffffff);
-  lo = (int)(val & 0xffffffff);
-  hi = __shfl_down(hi, delta, size);
-  lo = __shfl_down(lo, delta, size);
-  val = hi;
-  val <<= 32;
-  val |= ((uint32_t)lo);
-  return val;
-}
-#else
+
 EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
    int lo, hi;
    asm volatile("mov.b64 {%0,%1}, %2;" : "=r"(lo), "=r"(hi) : "l"(val));
@@ -129,8 +131,8 @@ INLINE static void gpu_irregular_warp_reduce(void *reduce_data,
 INLINE static uint32_t
 gpu_irregular_simd_reduce(void *reduce_data, kmp_ShuffleReductFctPtr shflFct) {
 #ifdef __AMDGCN__
-  uint64_t lanemask_lt;
-  uint64_t lanemask_gt;
+  __kmpc_impl_lanemask_t lanemask_lt;
+  __kmpc_impl_lanemask_t lanemask_gt;
 #else
   uint32_t lanemask_lt;
   uint32_t lanemask_gt;
@@ -138,14 +140,14 @@ gpu_irregular_simd_reduce(void *reduce_data, kmp_ShuffleReductFctPtr shflFct) {
   uint32_t size, remote_id, physical_lane_id;
   physical_lane_id = GetThreadIdInBlock() % WARPSIZE;
 #ifdef __AMDGCN__
-  lanemask_lt = __lanemask_lt();
-  uint64_t Liveness = __ballot64(true);
-  uint32_t logical_lane_id = __popcll(Liveness & lanemask_lt) * 2;
-  lanemask_gt = __lanemask_gt();
+  lanemask_lt = __kmpc_impl_lanemask_lt();
+  __kmpc_impl_lanemask_t Liveness = __ballot64(true);
+  uint32_t logical_lane_id = __kmpc_impl_popc(Liveness & lanemask_lt) * 2;
+  lanemask_gt = __kmpc_impl_lanemask_gt();
   do {
     Liveness = __ballot64(true);
-    remote_id = __ffsll(Liveness & lanemask_gt);
-    size = __popcll(Liveness);
+    remote_id = __kmpc_impl_ffs(Liveness & lanemask_gt);
+    size = __kmpc_impl_popc(Liveness);
 #else
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lanemask_lt));
   uint32_t Liveness = __ACTIVEMASK();
@@ -169,7 +171,7 @@ int32_t __kmpc_nvptx_simd_reduce_nowait(int32_t global_tid, int32_t num_vars,
                                         kmp_ShuffleReductFctPtr shflFct,
                                         kmp_InterWarpCopyFctPtr cpyFct) {
 #ifdef __AMDGCN__
-  uint64_t Liveness = __ballot64(true);
+  __kmpc_impl_lanemask_t Liveness = __ballot64(true);
   if (Liveness == 0xffffffffffffffff) {
 #else
   uint32_t Liveness = __ACTIVEMASK();
@@ -236,12 +238,12 @@ static int32_t nvptx_parallel_reduce_nowait(
 #else
   // __CUDA_ARCH__ < 700 includes AMDGCN
 #ifdef __AMDGCN__
-  uint64_t Liveness = __ballot64(true);
+  __kmpc_impl_lanemask_t Liveness = __ballot64(true);
   if (Liveness == 0xffffffffffffffff) // Full warp
     gpu_regular_warp_reduce(reduce_data, shflFct);
   else if (!(Liveness & (Liveness + 1))) // Partial warp but contiguous lanes
     gpu_irregular_warp_reduce(reduce_data, shflFct,
-                              /*LaneCount=*/__popcll(Liveness),
+                              /*LaneCount=*/__kmpc_impl_popc(Liveness),
                               /*LaneId=*/GetThreadIdInBlock() % WARPSIZE);
   else if (!isRuntimeUninitialized) // Dispersed lanes. Only threads in L2
                                     // parallel region may enter here; return
@@ -426,12 +428,12 @@ static int32_t nvptx_teams_reduce_nowait(int32_t global_tid, int32_t num_vars,
 
   // Reduce across warps to the warp master.
 #ifdef __AMDGCN__
-  uint64_t Liveness = __ballot64(true);
+  __kmpc_impl_lanemask_t Liveness = __ballot64(true);
   if (Liveness == 0xffffffffffffffff) // Full warp
     gpu_regular_warp_reduce(reduce_data, shflFct);
   else // Partial warp but contiguous lanes
     gpu_irregular_warp_reduce(reduce_data, shflFct,
-                              /*LaneCount=*/__popcll(Liveness),
+                              /*LaneCount=*/__kmpc_impl_popc(Liveness),
                               /*LaneId=*/ThreadId % WARPSIZE);
 #else
   uint32_t Liveness = __ACTIVEMASK();
