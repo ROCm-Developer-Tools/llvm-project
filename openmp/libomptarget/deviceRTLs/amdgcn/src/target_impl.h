@@ -40,6 +40,10 @@ INLINE uint64_t __kmpc_impl_ffs(uint64_t x) { return __ffsll(x); }
 
 INLINE uint64_t __kmpc_impl_popc(uint64_t x) { return __popcll(x); }
 
+INLINE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
+  return __ballot64(1);
+}
+
 INLINE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t Mask, int32_t Var,
                                      int32_t SrcLane) {
   return __SHFL_SYNC(Mask, Var, SrcLane);
