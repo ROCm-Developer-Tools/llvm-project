@@ -382,7 +382,7 @@ EXTERN int omp_ext_get_master_thread_id() {
 
 #ifdef __AMDGCN__
 EXTERN unsigned long long omp_ext_get_active_threads_mask() {
-  unsigned long long rc = __ballot64(true);
+  unsigned long long rc = __kmpc_impl_activemask();
   PRINT(LD_IO, "call omp_ext_get_active_threads_mask() returns %llx\n", rc);
   return rc;
 }

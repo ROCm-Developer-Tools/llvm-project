@@ -14,6 +14,8 @@
 // Execution Parameters
 ////////////////////////////////////////////////////////////////////////////////
 
+#include "target_impl.h"
+
 INLINE void setExecutionParameters(ExecutionMode EMode, RuntimeMode RMode) {
   execution_param = EMode;
   execution_param |= RMode;
@@ -203,8 +205,8 @@ INLINE int IsTeamMaster(int ompThreadId) { return (ompThreadId == 0); }
 
 INLINE void IncParallelLevel(bool ActiveParallel) {
 #ifdef __AMDGCN__
-  unsigned long long tnum = __ballot64(true);
-  int leader = __ffsll(tnum) - 1;
+  __kmpc_impl_lanemask_t tnum = __kmpc_impl_activemask();
+  int leader = __kmpc_impl_ffs(tnum) - 1;
 #else
   unsigned tnum = __ACTIVEMASK();
   int leader = __ffs(tnum) - 1;
@@ -219,8 +221,8 @@ INLINE void IncParallelLevel(bool ActiveParallel) {
 
 INLINE void DecParallelLevel(bool ActiveParallel) {
 #ifdef __AMDGCN__
-  unsigned long long tnum = __ballot64(true);
-  int leader = __ffsll(tnum) - 1;
+  __kmpc_impl_lanemask_t tnum = __kmpc_impl_activemask();
+  int leader = __kmpc_impl_ffs(tnum) - 1;
 #else
   unsigned tnum = __ACTIVEMASK();
   int leader = __ffs(tnum) - 1;
