@@ -177,7 +177,7 @@ EXTERN void __kmpc_flush(kmp_Ident *loc) {
 #ifdef __AMDGCN__
 EXTERN int64_t __kmpc_warp_active_thread_mask64() {
   PRINT0(LD_IO, "call __kmpc_warp_active_thread_mask64\n");
-  return __ballot64(1);
+  return __kmpc_impl_activemask();
 }
 #else
 EXTERN int32_t __kmpc_warp_active_thread_mask() {

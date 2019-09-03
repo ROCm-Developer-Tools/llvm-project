@@ -28,7 +28,7 @@ INLINE static unsigned getLaneId() { return threadIdx.x % WARPSIZE; }
 // Return true if this is the first active thread in the warp.
 INLINE static bool IsWarpMasterActiveThread() {
 #ifdef __AMDGCN__
-  int64_t Mask = __ballot64(true);
+  __kmpc_impl_lanemask_t Mask = __kmpc_impl_activemask();
   unsigned tid = threadIdx.x;
   unsigned laneid = (tid & 0X3F);
   int64_t Sh;
@@ -141,7 +141,7 @@ EXTERN void *__kmpc_data_sharing_environment_begin(
 
   unsigned WID = getWarpId();
 #ifdef __AMDGCN__
-  unsigned long long CurActiveThreads = __ballot64(true);
+  __kmpc_impl_lanemask_t CurActiveThreads = __kmpc_impl_activemask();
 #else
   unsigned CurActiveThreads = __ACTIVEMASK();
 #endif
@@ -293,7 +293,7 @@ EXTERN void __kmpc_data_sharing_environment_end(
   }
 
 #ifdef __AMDGCN__
-  int64_t CurActive = __ballot64(true);
+  __kmpc_impl_lanemask_t CurActive = __kmpc_impl_activemask();
 #else
   int32_t CurActive = __ACTIVEMASK();
 #endif
@@ -427,7 +427,7 @@ INLINE static void* data_sharing_push_stack_common(size_t PushSize) {
   const unsigned WID = getWarpId();
   void *FrameP = 0;
 #ifdef __AMDGCN__
-  int64_t CurActive = __ballot64(true);
+  __kmpc_impl_lanemask_t CurActive = __kmpc_impl_activemask();
 #else
   int32_t CurActive = __ACTIVEMASK();
 #endif
