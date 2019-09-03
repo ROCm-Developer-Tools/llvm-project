@@ -390,7 +390,7 @@ public:
   }
 
   INLINE static uint64_t NextIter() {
-    __kmpc_impl_lanemask_t active = __ballot64(true);
+    __kmpc_impl_lanemask_t active = __kmpc_impl_activemask();
     uint32_t leader = __kmpc_impl_ffs(active) - 1;
     uint32_t change = __kmpc_impl_popc(active);
     __kmpc_impl_lanemask_t lane_mask_lt = __kmpc_impl_lanemask_lt();
