@@ -280,7 +280,7 @@ INLINE void *SafeFree(void *ptr, const char *msg) {
 
 #ifdef __AMDGCN__
 INLINE void named_sync(const int barrier, const int num_threads) {
-  __named_sync(barrier, num_threads);
+  __builtin_amdgcn_wave_barrier();
 }
 #else
 INLINE void named_sync(const int barrier, const int num_threads) {
