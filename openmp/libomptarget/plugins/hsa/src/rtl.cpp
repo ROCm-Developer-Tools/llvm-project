@@ -141,6 +141,7 @@ public:
   // OpenMP Environment properties
   int EnvNumTeams;
   int EnvTeamLimit;
+  int EnvMaxTeamsDefault;
 
   // OpenMP Requires Flags
   int64_t RequiresFlags;
@@ -305,6 +306,14 @@ public:
       DP("Parsed OMP_NUM_TEAMS=%d\n", EnvNumTeams);
     } else {
       EnvNumTeams = -1;
+    }
+    // Get environment variables regarding expMaxTeams
+    envStr = getenv("OMP_MAX_TEAMS_DEFAULT");
+    if (envStr) {
+      EnvMaxTeamsDefault = std::stoi(envStr);
+      DP("Parsed OMP_MAX_TEAMS_DEFAULT=%d\n", EnvMaxTeamsDefault);
+    } else {
+      EnvMaxTeamsDefault = -1;
     }
 
     // Default state.
@@ -1025,8 +1034,13 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
     int EnvTeamLimit, int EnvNumTeams, int num_teams, int thread_limit,
     uint64_t loop_tripcount) {
 
+    int Max_Teams = DeviceInfo.EnvMaxTeamsDefault > 0
+                      ? DeviceInfo.EnvMaxTeamsDefault
+                      : DeviceInfo.Max_Teams;
+
   if (print_kernel_trace > 1) {
     fprintf(stderr, "RTLDeviceInfoTy::Max_Teams: %d\n", RTLDeviceInfoTy::Max_Teams);
+    fprintf(stderr, "Max_Teams: %d\n", Max_Teams);
     fprintf(stderr, "RTLDeviceInfoTy::Warp_Size: %d\n", RTLDeviceInfoTy::Warp_Size);
     fprintf(stderr, "RTLDeviceInfoTy::Max_WG_Size: %d\n", RTLDeviceInfoTy::Max_WG_Size);
     fprintf(stderr, "RTLDeviceInfoTy::Default_WG_Size: %d\n", RTLDeviceInfoTy::Default_WG_Size);
@@ -1059,9 +1073,9 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
 
   // Set default num_groups (teams)
   if (DeviceInfo.EnvTeamLimit > 0)
-    num_groups = (RTLDeviceInfoTy::Max_Teams<DeviceInfo.EnvTeamLimit) ? RTLDeviceInfoTy::Max_Teams : DeviceInfo.EnvTeamLimit;
+    num_groups = (Max_Teams<DeviceInfo.EnvTeamLimit) ? Max_Teams : DeviceInfo.EnvTeamLimit;
   else
-    num_groups = RTLDeviceInfoTy::Max_Teams;
+    num_groups = Max_Teams;
   DP("Set default num of groups %d\n", num_groups);
 
   if (print_kernel_trace > 1) {
@@ -1076,7 +1090,7 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
   // So we only handle constant thread_limits.
   if (threadsPerGroup > RTLDeviceInfoTy::Default_WG_Size) //  256 < threadsPerGroup <= 1024
     // Should we round threadsPerGroup up to nearest RTLDeviceInfoTy::Warp_Size here?
-    num_groups = (RTLDeviceInfoTy::Max_Teams * RTLDeviceInfoTy::Max_WG_Size) / threadsPerGroup;
+    num_groups = (Max_Teams * RTLDeviceInfoTy::Max_WG_Size) / threadsPerGroup;
 
   // check for num_teams() clause
   if (num_teams > 0) {
@@ -1102,11 +1116,11 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
       } else {
         num_groups = loop_tripcount;
       }
-      if (num_groups > RTLDeviceInfoTy::Max_Teams) {
-        num_groups = RTLDeviceInfoTy::Max_Teams;
+      if (num_groups > Max_Teams) {
+        num_groups = Max_Teams;
         if (print_kernel_trace > 1)
-          fprintf(stderr, "Limiting num_groups %d to RTLDeviceInfoTy::Max_Teams %d \n",
-                  num_groups, RTLDeviceInfoTy::Max_Teams);
+          fprintf(stderr, "Limiting num_groups %d to Max_Teams %d \n",
+                  num_groups, Max_Teams);
       }
       if (num_groups > num_teams && num_teams > 0) {
         num_groups = num_teams;
