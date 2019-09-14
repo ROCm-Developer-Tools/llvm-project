@@ -280,7 +280,10 @@ INLINE void *SafeFree(void *ptr, const char *msg) {
 
 #ifdef __AMDGCN__
 INLINE void named_sync(const int barrier, const int num_threads) {
-  __builtin_amdgcn_wave_barrier();
+  // we have protected the master warp from releasing from its barrier
+  // due to a full workgroup barrier in the middle of a work function.
+  // So it is ok to issue a full workgroup barrier here.
+  __builtin_amdgcn_s_barrier();
 }
 #else
 INLINE void named_sync(const int barrier, const int num_threads) {

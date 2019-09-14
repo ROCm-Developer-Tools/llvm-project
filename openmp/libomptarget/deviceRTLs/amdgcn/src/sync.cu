@@ -76,6 +76,43 @@ EXTERN void __kmpc_barrier_simple_spmd(kmp_Ident *loc_ref, int32_t tid) {
   PRINT0(LD_SYNC, "completed kmpc_barrier_simple_spmd\n");
 }
 
+// This barrier prevents worker warps from starting till the
+// master sets the workFn. We must set workers_active to false
+// before barrier then when released, we set workers_active
+// to true in case a full workgroup barrier somewhere in the
+// workers logic wakes up the master.
+EXTERN void __kmpc_barrier_worker_start(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_barrier_worker_start\n");
+  omptarget_workers_active = false;
+  __kmpc_impl_syncthreads();
+  omptarget_workers_active = true;
+  PRINT0(LD_SYNC, "completed kmpc_barrier_worker_start\n");
+}
+
+// THis is the 2nd worker barrier that executes when all the work
+// is done. So we set omptarget_workers_active to false to that
+// the 2nd master barrier (master_end) will not enter the while loop.
+EXTERN void __kmpc_barrier_worker_end(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_barrier_worker_end\n");
+  omptarget_workers_active = false;
+  __kmpc_impl_syncthreads();
+  PRINT0(LD_SYNC, "completed kmpc_barrier_worker_end\n");
+}
+
+// This is the 2nd master barrier where the master warp waits
+// for the worker warps to finish. It is possible that workers may
+// encounter a full workgroup barrier before completion of the
+// work as in the case of a reduction.  This will "wake" the
+// master warp prematurely.  The shared flang omptarget_workers_active
+// tells the master warp to wait for another barrier.
+EXTERN void __kmpc_barrier_master_end(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_barrier_master_end\n");
+  __kmpc_impl_syncthreads();
+  while(omptarget_workers_active)
+    __kmpc_impl_syncthreads();
+  PRINT0(LD_SYNC, "completed kmpc_barrier_master_end\n");
+}
+
 // Emit a simple barrier call in Generic mode.  Assumes the caller is in an L0
 // parallel region and that all worker threads participate.
 EXTERN void __kmpc_barrier_simple_generic(kmp_Ident *loc_ref, int32_t tid) {
