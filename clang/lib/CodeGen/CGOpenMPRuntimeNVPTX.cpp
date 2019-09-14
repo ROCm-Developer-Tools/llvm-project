@@ -106,8 +106,17 @@ enum OpenMPRTLFunctionNVPTX {
   /// Call to void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid);
   OMPRTL__kmpc_barrier,
   /// Call to void __kmpc_barrier_simple_spmd(ident_t *loc, kmp_int32
-  /// global_tid);
+  /// global_tid); for MasterStart and Terminate barriers.
   OMPRTL__kmpc_barrier_simple_spmd,
+  /// Call to void __kmpc_barrier_master_end(ident_t *loc, kmp_int32
+  /// global_tid);
+  OMPRTL__kmpc_barrier_master_end,
+  /// Call to void __kmpc_barrier_worker_start(ident_t *loc, kmp_int32
+  /// global_tid);
+  OMPRTL__kmpc_barrier_worker_start,
+  /// Call to void __kmpc_barrier_worker_end(ident_t *loc, kmp_int32
+  /// global_tid);
+  OMPRTL__kmpc_barrier_worker_end,
 };
 
 /// Pre(post)-action for different OpenMP constructs specialized for NVPTX.
@@ -1402,7 +1411,7 @@ void CGOpenMPRuntimeNVPTX::emitNonSPMDEntryFooter(CodeGenFunction &CGF,
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_deinit), Args);
   // Barrier to terminate worker threads.
-  syncCTAThreads(CGF);
+  syncCTAThreads(CGF,CGOpenMPRuntimeNVPTX::CTA_BarrierTerminate);
   // Master thread jumps to exit point.
   CGF.EmitBranch(EST.ExitBB);
 
@@ -1590,7 +1599,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   // Workers wait for work from master.
   CGF.EmitBlock(AwaitBB);
   // Wait for parallel work
-  syncCTAThreads(CGF);
+  syncCTAThreads(CGF,CGOpenMPRuntimeNVPTX::CTA_BarrierWorkerStart);
 
   Address WorkFn =
       CGF.CreateDefaultAlignTempAlloca(CGF.Int8PtrTy, /*Name=*/"work_fn");
@@ -1733,7 +1742,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   // All active and inactive workers wait at a barrier after parallel region.
   CGF.EmitBlock(BarrierBB);
   // Barrier after parallel region.
-  syncCTAThreads(CGF);
+  syncCTAThreads(CGF,CGOpenMPRuntimeNVPTX::CTA_BarrierWorkerEnd);
   CGF.EmitBranch(AwaitBB);
 
   // Exit target region.
@@ -2036,6 +2045,42 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn =
         CGM.CreateRuntimeFunction(FnTy, /*Name*/ "__kmpc_barrier_simple_spmd");
+    cast<llvm::Function>(RTLFn.getCallee())
+        ->addFnAttr(llvm::Attribute::Convergent);
+    break;
+  }
+  case OMPRTL__kmpc_barrier_master_end: {
+    // Build void __kmpc_barrier_master_end(ident_t *loc, kmp_int32
+    // global_tid);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, /*Name*/ "__kmpc_barrier_master_end");
+    cast<llvm::Function>(RTLFn.getCallee())
+        ->addFnAttr(llvm::Attribute::Convergent);
+    break;
+  }
+  case OMPRTL__kmpc_barrier_worker_start: {
+    // Build void __kmpc_barrier_worker_start(ident_t *loc, kmp_int32
+    // global_tid);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, /*Name*/ "__kmpc_barrier_worker_start");
+    cast<llvm::Function>(RTLFn.getCallee())
+        ->addFnAttr(llvm::Attribute::Convergent);
+    break;
+  }
+  case OMPRTL__kmpc_barrier_worker_end: {
+    // Build void __kmpc_barrier_worker_end(ident_t *loc, kmp_int32
+    // global_tid);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, /*Name*/ "__kmpc_barrier_worker_end");
     cast<llvm::Function>(RTLFn.getCallee())
         ->addFnAttr(llvm::Attribute::Convergent);
     break;
@@ -2804,7 +2849,7 @@ void CGOpenMPRuntimeNVPTX::emitNonSPMDParallelCall(
 
     // Activate workers. This barrier is used by the master to signal
     // work for the workers.
-    syncCTAThreads(CGF);
+    syncCTAThreads(CGF,CGOpenMPRuntimeNVPTX::CTA_BarrierMasterStart);
 
     // OpenMP [2.5, Parallel Construct, p.49]
     // There is an implied barrier at the end of a parallel region. After the
@@ -2812,7 +2857,7 @@ void CGOpenMPRuntimeNVPTX::emitNonSPMDParallelCall(
     // execution of the enclosing task region.
     //
     // The master waits at this barrier until all workers are done.
-    syncCTAThreads(CGF);
+    syncCTAThreads(CGF,CGOpenMPRuntimeNVPTX::CTA_BarrierMasterEnd);
 
     if (!CapturedVars.empty())
       CGF.EmitRuntimeCall(
@@ -2938,18 +2983,39 @@ void CGOpenMPRuntimeNVPTX::emitSPMDParallelCall(
   }
 }
 
-void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF) {
+void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF,
+                CGOpenMPRuntimeNVPTX::CTA_BarrierType  barrier_type) {
   // Always emit simple barriers!
   if (!CGF.HaveInsertPoint())
     return;
-  // Build call __kmpc_barrier_simple_spmd(nullptr, 0);
-  // This function does not use parameters, so we can emit just default values.
+  // Build call to various __kmpc_barrier_ functions based on barrier_type
+  // These functions do not use parameters, so we can emit just default values.
   llvm::Value *Args[] = {
       llvm::ConstantPointerNull::get(
           cast<llvm::PointerType>(getIdentTyPointerTy())),
       llvm::ConstantInt::get(CGF.Int32Ty, /*V=*/0, /*isSigned=*/true)};
-  CGF.EmitRuntimeCall(
+
+  // If we are not doing codegen for amdgcn, always use the simple spmd
+  if (CGF.CGM.getTriple().getArch() != llvm::Triple::amdgcn) {
+     CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL__kmpc_barrier_simple_spmd), Args);
+     return;
+  }
+
+  // amdgcn barriers
+  if (barrier_type == CGOpenMPRuntimeNVPTX::CTA_BarrierMasterEnd) {
+    CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL__kmpc_barrier_master_end), Args);
+  } else if (barrier_type == CGOpenMPRuntimeNVPTX::CTA_BarrierWorkerStart) {
+    CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL__kmpc_barrier_worker_start), Args);
+  } else if (barrier_type == CGOpenMPRuntimeNVPTX::CTA_BarrierWorkerEnd) {
+    CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL__kmpc_barrier_worker_end), Args);
+  } else { // barrier_type is either MasterStart or MasterTerminate
+     CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL__kmpc_barrier_simple_spmd), Args);
+  }
 }
 
 void CGOpenMPRuntimeNVPTX::emitBarrierCall(CodeGenFunction &CGF,
