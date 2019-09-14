@@ -48,6 +48,7 @@ __device__ __shared__
 // copy of these variables for each kernel, instance, and team.
 ////////////////////////////////////////////////////////////////////////////////
 volatile __device__ __shared__ omptarget_nvptx_WorkFn omptarget_nvptx_workFn;
+volatile __device__ __shared__ bool omptarget_workers_active;
 
 ////////////////////////////////////////////////////////////////////////////////
 // OpenMP kernel execution parameters
