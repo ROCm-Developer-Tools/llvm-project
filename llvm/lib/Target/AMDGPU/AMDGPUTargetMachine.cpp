@@ -238,6 +238,9 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUUseNativeCallsPass(*PR);
   initializeAMDGPUSimplifyLibCallsPass(*PR);
   initializeAMDGPUInlinerPass(*PR);
+  initializeAMDGPUOCL12AdapterPass(*PR);
+  initializeAMDGPUPrintfRuntimeBindingPass(*PR);
+  initializeAMDGPULowerKernelCallsPass(*PR);
   initializeGCNRegBankReassignPass(*PR);
   initializeGCNNSAReassignPass(*PR);
 }
@@ -379,6 +382,11 @@ StringRef AMDGPUTargetMachine::getFeatureString(const Function &F) const {
   return FSAttr.hasAttribute(Attribute::None) ?
     getTargetFeatureString() :
     FSAttr.getValueAsString();
+}
+
+void AMDGPUTargetMachine::addPreLinkPasses(PassManagerBase & PM) {
+  PM.add(llvm::createAMDGPUOCL12AdapterPass());
+  PM.add(llvm::createAMDGPUPrintfRuntimeBinding());
 }
 
 /// Predicate for Internalize pass.
@@ -663,6 +671,9 @@ void AMDGPUPassConfig::addIRPasses() {
   // bitcast calls.
   addPass(createAMDGPUFixFunctionBitcastsPass());
 
+  addPass(createAtomicExpandPass());
+  // this pass should be performed on linked module
+  addPass(createAMDGPULowerKernelCallsPass());
   // A call to propagate attributes pass in the backend in case opt was not run.
   addPass(createAMDGPUPropagateAttributesEarlyPass(&TM));
 

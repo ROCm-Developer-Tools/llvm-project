@@ -188,6 +188,18 @@ ModulePass *createAMDGPUAlwaysInlinePass(bool GlobalOpt = true);
 ModulePass *createR600OpenCLImageTypeLoweringPass();
 FunctionPass *createAMDGPUAnnotateUniformValues();
 
+ModulePass *createAMDGPUOCL12AdapterPass();
+void initializeAMDGPUOCL12AdapterPass(PassRegistry&);
+extern char &AMDGPUOCL12AdapterID;
+
+ModulePass *createAMDGPULowerKernelCallsPass();
+void initializeAMDGPULowerKernelCallsPass(PassRegistry&);
+extern char &AMDGPULowerKernelCallsID;
+
+ModulePass *createAMDGPUPrintfRuntimeBinding();
+void initializeAMDGPUPrintfRuntimeBindingPass(PassRegistry&);
+extern char &AMDGPUPrintfRuntimeBindingID;
+
 ModulePass* createAMDGPUUnifyMetadataPass();
 void initializeAMDGPUUnifyMetadataPass(PassRegistry&);
 extern char &AMDGPUUnifyMetadataID;
