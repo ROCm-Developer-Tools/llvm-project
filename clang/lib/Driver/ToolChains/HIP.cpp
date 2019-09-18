@@ -126,8 +126,12 @@ const char *AMDGCN::Linker::constructLlcCommand(
     const llvm::opt::ArgList &Args, llvm::StringRef SubArchName,
     llvm::StringRef OutputFilePrefix, const char *InputFileName) const {
   // Construct llc command.
+  // FIXME: -disable-promote-alloca-to-lds is a workaround for issues in
+  // AMDGPUPromoteAlloca pass which cause invalid memory access in PyTorch.
+  // Remove this once the issue is fixed.
   ArgStringList LlcArgs{InputFileName, "-mtriple=amdgcn-amd-amdhsa",
                         "-filetype=obj",
+                        "-disable-promote-alloca-to-lds",
                         Args.MakeArgString("-mcpu=" + SubArchName)};
 
   // Extract all the -m options
@@ -278,6 +282,8 @@ void HIPToolChain::addClangTargetOptions(
   if (DriverArgs.hasFlag(options::OPT_fgpu_rdc, options::OPT_fno_gpu_rdc,
                          false))
     CC1Args.push_back("-fgpu-rdc");
+
+  CC1Args.push_back("-fcuda-allow-variadic-functions");
 
   // Default to "hidden" visibility, as object level linking will not be
   // supported for the foreseeable future.

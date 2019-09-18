@@ -344,13 +344,21 @@ void CGNVCUDARuntime::emitDeviceStubBodyLegacy(CodeGenFunction &CGF,
   llvm::BasicBlock *EndBlock = CGF.createBasicBlock("setup.end");
   CharUnits Offset = CharUnits::Zero();
   for (const VarDecl *A : Args) {
+    auto *Arg = CGF.GetAddrOfLocalVar(A).getPointer();
     CharUnits TyWidth, TyAlign;
-    std::tie(TyWidth, TyAlign) =
-        CGM.getContext().getTypeInfoInChars(A->getType());
+    auto *Aux = CGM.getContext().getAuxTargetInfo();
+    if (Aux && Aux->getTriple().getArch() == llvm::Triple::amdgcn) {
+      auto *ArgTy = Arg->getType()->getPointerElementType();
+      auto &DL = CGM.getDataLayout();
+      TyWidth = CharUnits::fromQuantity(DL.getTypeStoreSize(ArgTy));
+      TyAlign = CharUnits::fromQuantity(DL.getABITypeAlignment(ArgTy));
+    } else {
+      std::tie(TyWidth, TyAlign) =
+               CGM.getContext().getTypeInfoInChars(A->getType());
+    }
     Offset = Offset.alignTo(TyAlign);
     llvm::Value *Args[] = {
-        CGF.Builder.CreatePointerCast(CGF.GetAddrOfLocalVar(A).getPointer(),
-                                      VoidPtrTy),
+        CGF.Builder.CreatePointerCast(Arg, VoidPtrTy),
         llvm::ConstantInt::get(SizeTy, TyWidth.getQuantity()),
         llvm::ConstantInt::get(SizeTy, Offset.getQuantity()),
     };
@@ -795,7 +803,7 @@ llvm::Function *CGNVCUDARuntime::makeModuleDtorFunction() {
 std::string CGNVCUDARuntime::getDeviceStubName(llvm::StringRef Name) const {
   if (!CGM.getLangOpts().HIP)
     return Name;
-  return (Name + ".stub").str();
+  return ("__device_stub_" + Name).str();
 }
 
 CGCUDARuntime *CodeGen::CreateNVCUDARuntime(CodeGenModule &CGM) {
