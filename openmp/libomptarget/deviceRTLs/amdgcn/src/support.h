@@ -23,15 +23,6 @@ EXTERN unsigned __smid();
 // named sync
 EXTERN void __named_sync(const int barrier, const int num_threads);
 
-// warp vote function
-EXTERN uint64_t __ballot64(int predicate);
-// initialized with a 64-bit mask with bits set in positions less than the
-// thread's lane number in the warp
-EXTERN uint64_t __lanemask_lt();
-// initialized with a 64-bit mask with bits set in positions greater than the
-// thread's lane number in the warp
-EXTERN uint64_t __lanemask_gt();
-
 // memory allocation
 EXTERN void *__malloc(size_t);
 EXTERN void __free(void *);
