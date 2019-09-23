@@ -14,8 +14,22 @@
 
 #include <stdint.h>
 
-#include "omptarget-nvptx.h"
 #include "option.h"
+
+#ifndef __AMDGCN__
+#error "amdgcn target_impl.h expects to be compiled under __AMDGCN__"
+#endif
+
+// warp vote function
+EXTERN uint64_t __ballot64(int predicate);
+// initialized with a 64-bit mask with bits set in positions less than the
+// thread's lane number in the warp
+EXTERN uint64_t __lanemask_lt();
+// initialized with a 64-bit mask with bits set in positions greater than the
+// thread's lane number in the warp
+EXTERN uint64_t __lanemask_gt();
+
+EXTERN void llvm_amdgcn_s_barrier();
 
 INLINE void __kmpc_impl_unpack(uint64_t val, uint32_t &lo, uint32_t &hi) {
   lo = (uint32_t)(val & 0x00000000FFFFFFFFL);
@@ -44,17 +58,16 @@ INLINE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
   return __ballot64(1);
 }
 
-INLINE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t Mask, int32_t Var,
+INLINE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t, int32_t Var,
                                      int32_t SrcLane) {
-  return __SHFL_SYNC(Mask, Var, SrcLane);
+  return __shfl(Var, SrcLane, WARPSIZE);
 }
 
-INLINE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t Mask,
-                                          int32_t Var, uint32_t Delta,
-                                          int32_t Width) {
-  return __SHFL_DOWN_SYNC(Mask, Var, Delta, Width);
+INLINE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t Var,
+                                          uint32_t Delta, int32_t Width) {
+  return __shfl_down(Var, Delta, Width);
 }
 
-INLINE void __kmpc_impl_syncthreads() { __SYNCTHREADS(); }
+INLINE void __kmpc_impl_syncthreads() { llvm_amdgcn_s_barrier(); }
 
 #endif
