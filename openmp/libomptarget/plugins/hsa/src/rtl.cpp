@@ -1109,29 +1109,32 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
     num_groups = (DeviceInfo.EnvTeamLimit<num_groups) ? DeviceInfo.EnvTeamLimit : num_groups;
     DP("Modifying teams based on EnvTeamLimit%d\n", DeviceInfo.EnvTeamLimit);
   } else {
-    if (loop_tripcount > 0) {
-      if (ExecutionMode == SPMD) {
-        // round up to the nearest integer
-        num_groups = ((loop_tripcount - 1) / threadsPerGroup) + 1;
-      } else {
-        num_groups = loop_tripcount;
+    if (num_teams <= 0) {
+      if (loop_tripcount > 0) {
+        if (ExecutionMode == SPMD) {
+          // round up to the nearest integer
+          num_groups = ((loop_tripcount - 1) / threadsPerGroup) + 1;
+        } else {
+          num_groups = loop_tripcount;
+        }
+        DP("Using %d teams due to loop trip count %" PRIu64 " and number of "
+           "threads per block %d\n",
+           num_groups, loop_tripcount, threadsPerGroup);
       }
-      if (num_groups > Max_Teams) {
-        num_groups = Max_Teams;
-        if (print_kernel_trace > 1)
-          fprintf(stderr, "Limiting num_groups %d to Max_Teams %d \n",
-                  num_groups, Max_Teams);
-      }
-      if (num_groups > num_teams && num_teams > 0) {
-        num_groups = num_teams;
-        if (print_kernel_trace > 1)
-          fprintf(stderr, "Limiting num_groups %d to clause num_teams %d \n",
-                  num_groups, num_teams);
-
-      }
-      DP("Using %d teams due to loop trip count %" PRIu64 " and number of "
-         "threads per block %d\n",
-         num_groups, loop_tripcount, threadsPerGroup);
+    }  else {
+      num_groups = num_teams;
+    }
+    if (num_groups > Max_Teams) {
+      num_groups = Max_Teams;
+      if (print_kernel_trace > 1)
+        fprintf(stderr, "Limiting num_groups %d to Max_Teams %d \n",
+                num_groups, Max_Teams);
+    }
+    if (num_groups > num_teams && num_teams > 0) {
+      num_groups = num_teams;
+      if (print_kernel_trace > 1)
+        fprintf(stderr, "Limiting num_groups %d to clause num_teams %d \n",
+                num_groups, num_teams);
     }
   }
 
