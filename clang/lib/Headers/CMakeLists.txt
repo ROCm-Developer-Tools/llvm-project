@@ -43,9 +43,6 @@ set(files
   __clang_cuda_libdevice_declares.h
   __clang_cuda_math_forward_declares.h
   __clang_cuda_runtime_wrapper.h
-  __clang_hip_automatic_cuda_open.h
-  __clang_hip_automatic_hip.h
-  __clang_hip_automatic_cuda.h
   __clang_openmp_runtime_wrapper.h
   cetintrin.h
   cldemoteintrin.h
@@ -145,32 +142,6 @@ set(openmp_wrapper_files
   openmp_wrappers/__clang_openmp_math_declares.h
 )
 
-set(cuda_open_files
-  cuda_open/__clang_cuda_open_builtins.h
-  cuda_open/__clang_cuda_open_builtin_vars.h
-  cuda_open/__clang_cuda_open_cmath.h
-  cuda_open/__clang_cuda_open_complex_builtins.h
-  cuda_open/__clang_cuda_open_device_functions.h
-  cuda_open/__clang_cuda_open_intrinsics.h
-  cuda_open/__clang_cuda_open_math_forward_declares.h
-  cuda_open/__clang_cuda_open_nv_declares.h
-  cuda_open/cuda_fp16.h
-  cuda_open/cuda_open.h
-  cuda_open/cuda_open_runtime.h
-  cuda_open/device_atomic_functions.hpp
-  cuda_open/device_double_functions.h
-  cuda_open/device_functions.h
-  cuda_open/device_functions.hpp
-  cuda_open/device_runtime.h
-  cuda_open/driver_types.h
-  cuda_open/host_config.h
-  cuda_open/host_defines.h
-  cuda_open/math_functions_dbl.hpp
-  cuda_open/math_functions.hpp
-  cuda_open/texture_indirect_functions.h
-  cuda_open/vector_types.h
-)
-
 set(hip_files
   hip/hip_host_runtime_api.h
 )
@@ -203,7 +174,7 @@ endfunction(clang_generate_header)
 
 
 # Copy header files from the source directory to the build directory
-foreach( f ${files} ${cuda_wrapper_files} ${ppc_wrapper_files} ${openmp_wrapper_files} ${cuda_open_files} ${hip_files})
+foreach( f ${files} ${cuda_wrapper_files} ${ppc_wrapper_files} ${openmp_wrapper_files} ${hip_files})
   copy_header_to_output_dir(${CMAKE_CURRENT_SOURCE_DIR} ${f})
 endforeach( f )
 
@@ -219,12 +190,6 @@ set_target_properties(clang-resource-headers PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${output_dir}")
 
 set(header_install_dir lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION}/include)
-
-
-install(
-  FILES ${cuda_open_files}
-  DESTINATION ${header_install_dir}/cuda_open
-  COMPONENT clang-resource-headers)
 
 install(
   FILES ${hip_files}

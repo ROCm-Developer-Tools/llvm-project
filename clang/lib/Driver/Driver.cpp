@@ -633,34 +633,6 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                      return types::isHIP(I.first);
                    }) ||
       C.getInputArgs().hasArg(options::OPT_hip_link);
-
-  // Check if this is HIP automatic mode.  That is, when user tries to
-  // "cuda" compile his source in a .cu file (or -x cuda specified) but
-  // user set --cuda-gpu-arch=gfx (not sm__) and he did not set -x hip or
-  // -hip-link, then we automatically assume to use HIP and provide
-  // automatic hip headers.
-  bool HIPAutomaticMode = false;
-  if (!IsHIP) {
-    for (Arg *A : C.getInputArgs())
-      if (A->getOption().matches(options::OPT_cuda_gpu_arch_EQ) &&
-          StringRef(A->getValue()).startswith("gfx") && !IsFortranMode()) {
-        IsHIP = true;
-        IsCuda = false;
-        HIPAutomaticMode = true;
-      }
-  }
-
-  // If no --cuda-gpu-arch= (aka --offload-arch=gfxXXX) was specified
-  // but hip_auto_headers was specified, then turn on HIP.
-  // FIXME: We may want to set a default gfx id here
-  StringRef hdrs =
-      C.getInputArgs().getLastArgValue(options::OPT_hip_auto_headers_EQ);
-  if (!IsHIP && !hdrs.empty()) {
-    HIPAutomaticMode = true;
-    IsHIP = true;
-    IsCuda = false;
-  }
-
   if (IsCuda && IsHIP) {
     Diag(clang::diag::err_drv_mix_cuda_hip);
     return;
@@ -693,7 +665,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     auto &HIPTC = ToolChains[HIPTriple.str() + "/" + HostTriple.str()];
     if (!HIPTC) {
       HIPTC = llvm::make_unique<toolchains::HIPToolChain>(
-          *this, HIPTriple, *HostTC, C.getInputArgs(), OFK, HIPAutomaticMode);
+          *this, HIPTriple, *HostTC, C.getInputArgs(), OFK);
     }
     C.addOffloadDeviceToolChain(HIPTC.get(), OFK);
   }
@@ -767,7 +739,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
               if (!HIPTC) {
                 HIPTC = llvm::make_unique<toolchains::HIPToolChain>(
                     *this, HIPTriple, *HostTC, C.getInputArgs(),
-                    Action::OFK_OpenMP, false);
+                    Action::OFK_OpenMP);
               }
               TC = HIPTC.get();
             } else {
