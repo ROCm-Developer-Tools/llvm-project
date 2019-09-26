@@ -203,8 +203,5 @@ BUILTIN(__builtin_r600_read_tidig_z, "Ui", "nc")
 BUILTIN(__builtin_r600_recipsqrt_ieee, "dd", "nc")
 BUILTIN(__builtin_r600_recipsqrt_ieeef, "ff", "nc")
 
-// add opencuda builtins, see CGBuiltin.cpp for more info
-#include "clang/Basic/BuiltinsOpenCuda.def"
-
 #undef BUILTIN
 #undef TARGET_BUILTIN

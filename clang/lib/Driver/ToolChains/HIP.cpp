@@ -369,14 +369,11 @@ void AMDGCN::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
 HIPToolChain::HIPToolChain(const Driver &D, const llvm::Triple &Triple,
                            const ToolChain &HostTC, const ArgList &Args, 
-                           const Action::OffloadKind OK,
-                           const bool isHipAutomaticMode = false)
-
+                           const Action::OffloadKind OK)
     : ToolChain(D, Triple, Args), HostTC(HostTC), OK(OK) {
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
-  HIPAutomaticMode = isHipAutomaticMode;
 }
 
 void HIPToolChain::addClangTargetOptions(
@@ -575,46 +572,6 @@ void HIPToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
 void HIPToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
                                                  ArgStringList &CC1Args) const {
   HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
-  if (HIPAutomaticMode) {
-    StringRef autohead = Args.getLastArgValue(options::OPT_hip_auto_headers_EQ);
-    if (autohead.empty() || autohead.equals("hip")) {
-      CC1Args.push_back("-include");
-      SmallString<128> P(HostTC.getDriver().ResourceDir);
-      llvm::sys::path::append(P, "/include/__clang_hip_automatic_hip.h");
-      CC1Args.push_back(Args.MakeArgString(P));
-    } else if (autohead.equals("cuda_open")) {
-      CC1Args.push_back("-include");
-      SmallString<128> P(HostTC.getDriver().ResourceDir);
-      llvm::sys::path::append(P, "/include/__clang_hip_automatic_cuda_open.h");
-      CC1Args.push_back(Args.MakeArgString(P));
-
-      CC1Args.push_back("-internal-isystem");
-      P = HostTC.getDriver().ResourceDir;
-      llvm::sys::path::append(P, "include/cuda_wrappers");
-      CC1Args.push_back(Args.MakeArgString(P));
-
-      CC1Args.push_back("-internal-isystem");
-      P = HostTC.getDriver().ResourceDir;
-      llvm::sys::path::append(P, "include/cuda_open");
-      CC1Args.push_back(Args.MakeArgString(P));
-    } else if (autohead.equals("cuda")) {
-      // Consider switch to cuda_open if no cuda sdk installed
-      CC1Args.push_back("-include");
-      SmallString<128> P(HostTC.getDriver().ResourceDir);
-      llvm::sys::path::append(P, "/include/__clang_hip_automatic_cuda.h");
-      CC1Args.push_back(Args.MakeArgString(P));
-
-      CC1Args.push_back("-internal-isystem");
-      P = HostTC.getDriver().ResourceDir;
-      llvm::sys::path::append(P, "include/cuda_wrappers");
-      CC1Args.push_back(Args.MakeArgString(P));
-
-      CC1Args.push_back("-internal-isystem");
-      CC1Args.push_back(Args.MakeArgString("/usr/local/cuda/include"));
-    } else
-      getDriver().Diag(diag::err_drv_hip_invalid_auto_header) << autohead;
-  } // end if( HIPAutomaticMode
-
 }
 
 void HIPToolChain::AddIAMCUIncludeArgs(const ArgList &Args,
