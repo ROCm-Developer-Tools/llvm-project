@@ -122,13 +122,11 @@ macro(add_cuda_bc_library name dir)
     -fvisibility=default
     --cuda-device-only
     -Wno-unused-value
-    --hip-auto-headers=cuda_open
+    -x hip
     -O${optimization_level}
     --cuda-gpu-arch=${mcpu}
     ${CUDA_DEBUG}
     -I${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-#    --hip-auto-headers=cuda
 
   set(bc1_files)
 
@@ -166,10 +164,10 @@ collect_sources(${libname} ${CMAKE_CURRENT_SOURCE_DIR} ${sources})
 foreach(mcpu ${mcpus})
   set(bc_files)
   add_cuda_bc_library(${libname} ${CMAKE_CURRENT_SOURCE_DIR} ${cuda_sources})
-
+  list(APPEND bc_files ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda_shim.ll)
   add_custom_command(
     OUTPUT lib${libname}-${mcpu}.bc
-    COMMAND ${AOMP_BINDIR}/llvm-link ${bc_files} -o ${OUTPUTDIR}/lib${libname}-${mcpu}.bc
+    COMMAND ${AOMP_BINDIR}/llvm-link ${bc_files} | ${AOMP_BINDIR}/opt --always-inline -o ${OUTPUTDIR}/lib${libname}-${mcpu}.bc
     DEPENDS ${bc_files}
     )
 
