@@ -91,8 +91,14 @@ __device__ __forceinline__ static void __threadfence_block(void) {
 __device__ __forceinline__ static void __threadfence_system(void) {
   __nvvm_membar_sys();
 }
+
 __device__ __forceinline__ static long long __clock64(void) {
-  return __builtin_amdgcn_s_memrealtime(); // TODO: Support older architectures?
+#if __AMDGCN__ > 800
+  return __builtin_amdgcn_s_memrealtime();
+#else
+  __device__ __forceinline__ long long __llvm_amdgcn_s_memrealtime(void);
+  return __llvm_amdgcn_s_memrealtime();
+#endif
 }
 
 extern "C" {
