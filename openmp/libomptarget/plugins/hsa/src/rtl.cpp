@@ -147,7 +147,7 @@ public:
   int64_t RequiresFlags;
 
   // static int EnvNumThreads;
-  static const int HardTeamLimit = 1 << 16; // 64k
+  static const int HardTeamLimit = 1 << 20; // 1 Meg
   static const int DefaultNumTeams = 128;
   static const int Max_Teams =
     clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Max_Teams];
@@ -1037,6 +1037,8 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
     int Max_Teams = DeviceInfo.EnvMaxTeamsDefault > 0
                       ? DeviceInfo.EnvMaxTeamsDefault
                       : DeviceInfo.Max_Teams;
+    if (Max_Teams > DeviceInfo.HardTeamLimit)
+      Max_Teams = DeviceInfo.HardTeamLimit;
 
   if (print_kernel_trace > 1) {
     fprintf(stderr, "RTLDeviceInfoTy::Max_Teams: %d\n", RTLDeviceInfoTy::Max_Teams);
@@ -1137,6 +1139,10 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
                 num_groups, num_teams);
     }
   }
+
+  // num_teams clause always honored, no matter what,
+  if (num_teams > 0)
+    num_groups = num_teams;
 
   if (print_kernel_trace > 1) {
     fprintf(stderr, "threadsPerGroup: %d\n", threadsPerGroup);
