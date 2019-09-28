@@ -68,18 +68,18 @@ extern "C" {
 __device__ void __nvvm_membar_gl(void);
 __device__ void __nvvm_membar_cta(void);
 __device__ void __nvvm_membar_sys(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_tid_x(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_tid_y(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_tid_z(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_ctaid_x(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_ctaid_y(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_ctaid_z(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_ntid_x(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_ntid_y(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_ntid_z(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_nctaid_x(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_nctaid_y(void);
-__device__ uint32_t __nvvm_read_ptx_sreg_nctaid_z(void);
+__device__ int32_t __nvvm_read_ptx_sreg_tid_x(void);
+__device__ int32_t __nvvm_read_ptx_sreg_tid_y(void);
+__device__ int32_t __nvvm_read_ptx_sreg_tid_z(void);
+__device__ int32_t __nvvm_read_ptx_sreg_ctaid_x(void);
+__device__ int32_t __nvvm_read_ptx_sreg_ctaid_y(void);
+__device__ int32_t __nvvm_read_ptx_sreg_ctaid_z(void);
+__device__ int32_t __nvvm_read_ptx_sreg_ntid_x(void);
+__device__ int32_t __nvvm_read_ptx_sreg_ntid_y(void);
+__device__ int32_t __nvvm_read_ptx_sreg_ntid_z(void);
+__device__ int32_t __nvvm_read_ptx_sreg_nctaid_x(void);
+__device__ int32_t __nvvm_read_ptx_sreg_nctaid_y(void);
+__device__ int32_t __nvvm_read_ptx_sreg_nctaid_z(void);
 }
 
 __device__ __forceinline__ static void __threadfence(void) {
