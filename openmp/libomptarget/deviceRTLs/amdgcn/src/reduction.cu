@@ -566,12 +566,12 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
       lgcpyFct(global_buffer, ModBockId, reduce_data);
     else
       lgredFct(global_buffer, ModBockId, reduce_data);
-    __threadfence_system();
 
     // Increment team counter.
     // This counter is incremented by all teams in the current
     // BUFFER_SIZE chunk.
     ChunkTeamCount = atomicInc((uint32_t *)&Cnt, num_of_records - 1);
+    __threadfence_system();
   }
   // Synchronize
   if (checkSPMDMode(loc))
