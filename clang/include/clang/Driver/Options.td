@@ -598,8 +598,6 @@ def hip_device_lib_EQ : Joined<["--"], "hip-device-lib=">, Group<Link_Group>,
   HelpText<"HIP device library">;
 def fhip_dump_offload_linker_script : Flag<["-"], "fhip-dump-offload-linker-script">,
   Group<f_Group>, Flags<[NoArgumentUnused, HelpHidden]>;
-def hip_auto_headers_EQ : Joined<["--"], "hip-auto-headers=">, Group<Link_Group>,
-  HelpText<"Headers to include in HIP automatic mode, default=hip, others: cuda_open cuda">;
 def libomptarget_nvptx_path_EQ : Joined<["--"], "libomptarget-nvptx-path=">, Group<i_Group>,
   HelpText<"Path to libomptarget-nvptx libraries">;
 def dA : Flag<["-"], "dA">, Group<d_Group>;
