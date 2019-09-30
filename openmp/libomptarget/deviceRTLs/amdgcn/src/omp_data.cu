@@ -50,6 +50,7 @@ __device__ __shared__
 volatile __device__ __shared__ omptarget_nvptx_WorkFn omptarget_nvptx_workFn;
 #ifdef __AMDGCN__
 volatile __device__ __shared__ bool omptarget_workers_active;
+volatile __device__ __shared__ bool omptarget_master_active;
 #endif
 ////////////////////////////////////////////////////////////////////////////////
 // OpenMP kernel execution parameters
