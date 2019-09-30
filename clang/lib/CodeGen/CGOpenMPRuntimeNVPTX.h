@@ -39,14 +39,15 @@ public:
   /// and terminate type have NO additional logic so they simply emit a 
   /// call to OMPRTL__kmpc_barrier_simple_spmd
   enum CTA_BarrierType{
-    /// generate call to OMPRTL__kmpc_barrier_worker_start
-    CTA_BarrierWorkerStart,
-    /// generate call to OMPRTL__kmpc_barrier_worker_end
-    CTA_BarrierWorkerEnd,
+    /// generate call to OMPRTL__kmpc_amd_worker_start
+    CTA_AmdWorkerStart,
+    /// generate call to OMPRTL__kmpc_amd_worker_end
+    CTA_AmdWorkerEnd,
     /// generate call to OMPRTL__kmpc_barrier_simple_spmd
-    CTA_BarrierMasterStart,
-    /// generate call to OMPRTL__kmpc_barrier_master_end
-    CTA_BarrierMasterEnd,
+    CTA_AmdMasterStart,
+    /// generate call to OMPRTL__kmpc_amd_master_end for amdgcn or
+    //. two callse to __kmpc_barrier_simple_spmd. 
+    CTA_DoubleMasterBarrier,
     /// generate call to OMPRTL__kmpc_barrier_simple_spmd
     CTA_BarrierTerminate,
   };
