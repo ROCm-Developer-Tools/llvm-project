@@ -132,6 +132,13 @@ EXTERN void __kmpc_amd_master_end(kmp_Ident *loc_ref, int32_t tid) {
   PRINT0(LD_SYNC, "completed kmpc_amd_master_end\n");
 }
 
+EXTERN void __kmpc_amd_master_terminate(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_amd_master_terminate\n");
+  omptarget_master_active = false;
+  __kmpc_impl_syncthreads();
+  PRINT0(LD_SYNC, "completed kmpc_amd_master_terminate\n");
+}
+
 // Emit a simple barrier call in Generic mode.  Assumes the caller is in an L0
 // parallel region and that all worker threads participate.
 EXTERN void __kmpc_barrier_simple_generic(kmp_Ident *loc_ref, int32_t tid) {

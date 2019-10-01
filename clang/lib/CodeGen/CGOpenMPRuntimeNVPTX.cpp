@@ -114,6 +114,8 @@ enum OpenMPRTLFunctionNVPTX {
   OMPRTL__kmpc_amd_master_start,
   /// Call void __kmpc_amd_master_end(ident_t *loc, kmp_int32 global_tid)
   OMPRTL__kmpc_amd_master_end,
+  /// Call void __kmpc_amd_master_terminate(ident_t *loc, kmp_int32 global_tid)
+  OMPRTL__kmpc_amd_master_terminate,
   /// Call void __kmpc_amd_worker_start(ident_t *loc, kmp_int32 global_tid)
   OMPRTL__kmpc_amd_worker_start,
   /// Call void __kmpc_amd_worker_end(ident_t *loc, kmp_int32 global_tid)
@@ -2078,6 +2080,18 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
         ->addFnAttr(llvm::Attribute::Convergent);
     break;
   }
+  case OMPRTL__kmpc_amd_master_terminate: {
+    // Build void __kmpc_amd_master_terminate(ident_t *loc, kmp_int32
+    // global_tid);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
+    auto *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, /*Name*/ "__kmpc_amd_master_terminate");
+    cast<llvm::Function>(RTLFn.getCallee())
+        ->addFnAttr(llvm::Attribute::Convergent);
+    break;
+  }
   case OMPRTL__kmpc_amd_worker_start: {
     // Build void __kmpc_amd_worker_start(ident_t *loc, kmp_int32
     // global_tid);
@@ -3037,6 +3051,10 @@ void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF,
   } else if (barrier_type == CGOpenMPRuntimeNVPTX::CTA_AmdWorkerEnd) {
     CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL__kmpc_amd_worker_end), Args);
+  } else if (barrier_type == CGOpenMPRuntimeNVPTX::CTA_BarrierTerminate) {
+    CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL__kmpc_amd_master_terminate), Args);
+
   } else { // in all other cases just emit a simple barrier
      CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL__kmpc_barrier_simple_spmd), Args);
