@@ -625,17 +625,17 @@ public:
 
 /// Get the GPU warp size.
 static llvm::Value *getNVPTXWarpSize(CodeGenFunction &CGF) {
-  if(CGF.getTarget().getTriple().getArch() == llvm::Triple::amdgcn){
+  if (CGF.getTarget().getTriple().getArch() == llvm::Triple::amdgcn) {
     CGBuilderTy &Bld = CGF.Builder;
     // return constant compile-time target-specific warp size
     int TargetWarpSize = CGF.getTarget().getGridValue(GPU::GVIDX::GV_Warp_Size);
     return Bld.getInt32(TargetWarpSize);
-  } else{
-    return CGF.EmitRuntimeCall(
-        llvm::Intrinsic::getDeclaration(
-            &CGF.CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_warpsize),
-	"nvptx_warp_size");
   }
+
+  return CGF.EmitRuntimeCall(
+      llvm::Intrinsic::getDeclaration(
+          &CGF.CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_warpsize),
+      "nvptx_warp_size");
 }
 
 /// Get the id of the current thread on the GPU.
@@ -644,14 +644,12 @@ static llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF) {
   llvm::Module *M = &CGF.CGM.getModule();
   llvm::Function *F;
   if (CGF.getTarget().getTriple().getArch() == llvm::Triple::amdgcn) {
-    F = M->getFunction("nvvm.read.ptx.sreg.tid.x");
-    if (!F)
-      F = llvm::Function::Create(
-          llvm::FunctionType::get(CGF.Int32Ty, None, false),
-          llvm::GlobalVariable::ExternalLinkage, "nvvm.read.ptx.sreg.tid.x", M);
-  } else
+    F = llvm::Intrinsic::getDeclaration(M,
+                                        llvm::Intrinsic::amdgcn_workitem_id_x);
+  } else {
     F = llvm::Intrinsic::getDeclaration(
         M, llvm::Intrinsic::nvvm_read_ptx_sreg_tid_x);
+  }
   return Bld.CreateCall(F, llvm::None, "nvptx_tid");
 }
 
@@ -681,19 +679,21 @@ static llvm::Value *getNVPTXLaneID(CodeGenFunction &CGF) {
 static llvm::Value *getNVPTXNumThreads(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
   llvm::Module *M = &CGF.CGM.getModule();
-  llvm::Function *F;
   if (CGF.getTarget().getTriple().getArch() == llvm::Triple::amdgcn) {
-    F = M->getFunction("nvvm.read.ptx.sreg.ntid.x");
-    if (!F)
+    const char *n = "__ockl_get_local_size";
+    llvm::Function *F = M->getFunction(n);
+    if (!F) {
       F = llvm::Function::Create(
-          llvm::FunctionType::get(CGF.Int32Ty, None, false),
-          llvm::GlobalVariable::ExternalLinkage, "nvvm.read.ptx.sreg.ntid.x",
-          M);
-  } else
-    F = llvm::Intrinsic::getDeclaration(
-        M, llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x);
-  return Bld.CreateCall(F, llvm::None, "nvptx_num_threads");
+          llvm::FunctionType::get(CGF.Int64Ty, {CGF.Int32Ty}, false),
+          llvm::GlobalVariable::ExternalLinkage, n, M);
+    }
+    return Bld.CreateTrunc(
+        Bld.CreateCall(F, {Bld.getInt32(0)}, "nvptx_num_threads"), CGF.Int32Ty);
+  }
 
+  llvm::Function *F = llvm::Intrinsic::getDeclaration(
+      M, llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x);
+  return Bld.CreateCall(F, llvm::None, "nvptx_num_threads");
 }
 
 /// Get the value of the thread_limit clause in the teams directive.
