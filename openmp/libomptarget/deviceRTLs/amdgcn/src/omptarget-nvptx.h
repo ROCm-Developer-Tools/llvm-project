@@ -448,6 +448,7 @@ extern volatile __device__ __shared__ omptarget_nvptx_WorkFn
     omptarget_nvptx_workFn;
 #ifdef __AMDGCN__
 extern volatile __device__ __shared__ bool omptarget_workers_active;
+extern volatile __device__ __shared__ bool omptarget_master_active;
 #endif
 ////////////////////////////////////////////////////////////////////////////////
 // get private data structures

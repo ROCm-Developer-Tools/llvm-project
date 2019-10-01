@@ -76,41 +76,60 @@ EXTERN void __kmpc_barrier_simple_spmd(kmp_Ident *loc_ref, int32_t tid) {
   PRINT0(LD_SYNC, "completed kmpc_barrier_simple_spmd\n");
 }
 
-// This barrier prevents worker warps from starting till the
-// master sets the workFn. We must set workers_active to false
-// before barrier then when released, we set workers_active
-// to true in case a full workgroup barrier somewhere in the
-// workers logic wakes up the master.
-EXTERN void __kmpc_barrier_worker_start(kmp_Ident *loc_ref, int32_t tid) {
-  PRINT0(LD_SYNC, "call kmpc_barrier_worker_start\n");
+///////////////////////////////////////////////////////////////////////////////
+/// The following four functions are used to coordinate barriers between
+/// the master and worker warps in a generic kernel.  The amdgcn architecture
+/// does not have a partial barrier so this coordination needs to be
+/// recover if a user or implicit barrier is encountered in the sequential
+/// part of the master warp or the parallel part of the worker warps.
+///
+/// __kmpc_amd_worker_start has a barrier to prevent worker warps
+/// from starting till the master warp sets the workFn.  This function sets
+/// workers_active to true after the barrier to keep the master warp
+/// at its barrier in case a worker encounters an explicit or implicit
+/// barrier.
+EXTERN void __kmpc_amd_worker_start(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_amd_worker_start\n");
   omptarget_workers_active = false;
   __kmpc_impl_syncthreads();
+  while(omptarget_master_active) __kmpc_impl_syncthreads();
   omptarget_workers_active = true;
-  PRINT0(LD_SYNC, "completed kmpc_barrier_worker_start\n");
+  PRINT0(LD_SYNC, "completed kmpc_amd_worker_start\n");
 }
 
-// THis is the 2nd worker barrier that executes when all the work
-// is done. So we set omptarget_workers_active to false to that
-// the 2nd master barrier (master_end) will not enter the while loop.
-EXTERN void __kmpc_barrier_worker_end(kmp_Ident *loc_ref, int32_t tid) {
-  PRINT0(LD_SYNC, "call kmpc_barrier_worker_end\n");
+/// __kmpc_amd_worker_end sets workers_active to false and then
+/// issues a barrier to release the master warp to terminate or get
+/// the next subregion of work to process.
+EXTERN void __kmpc_amd_worker_end(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_amd_worker_end\n");
   omptarget_workers_active = false;
-  __kmpc_impl_syncthreads();
-  PRINT0(LD_SYNC, "completed kmpc_barrier_worker_end\n");
+  __kmpc_impl_syncthreads(); // to sync with 2nd barrier in master_end
+  PRINT0(LD_SYNC, "completed kmpc_amd_worker_end\n");
 }
 
-// This is the 2nd master barrier where the master warp waits
-// for the worker warps to finish. It is possible that workers may
-// encounter a full workgroup barrier before completion of the
-// work as in the case of a reduction.  This will "wake" the
-// master warp prematurely.  The shared flang omptarget_workers_active
-// tells the master warp to wait for another barrier.
-EXTERN void __kmpc_barrier_master_end(kmp_Ident *loc_ref, int32_t tid) {
-  PRINT0(LD_SYNC, "call kmpc_barrier_master_end\n");
+/// __kmpc_amd_master_start is executed first by the master.  It sets
+/// master_active to true to keep the worker warps at its first barrier
+/// in case the sequential part of the target region encounters any
+/// barrier, explicit or otherwise.
+EXTERN void __kmpc_amd_master_start(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_amd_master_start\n");
+  omptarget_master_active = true;
+  PRINT0(LD_SYNC, "completed kmpc_amd_master_start\n");
+}
+
+/// __kmpc_amd_master_end sets master_active to false and then enters
+/// the double barrier. The first releases the worker warps. The 2nd
+/// barrier holds the master warp until the workers are done. If the worker
+/// warps encounter a user barrier (implicitly or explicitly), the master
+/// warp needs to loop at the barrier until it knows the worker is
+/// really done by testing omptarget_workers_active.
+EXTERN void __kmpc_amd_master_end(kmp_Ident *loc_ref, int32_t tid) {
+  PRINT0(LD_SYNC, "call kmpc_amd_master_end\n");
+  omptarget_master_active = false;
   __kmpc_impl_syncthreads();
-  while(omptarget_workers_active)
-    __kmpc_impl_syncthreads();
-  PRINT0(LD_SYNC, "completed kmpc_barrier_master_end\n");
+  __kmpc_impl_syncthreads();
+  while(omptarget_workers_active) __kmpc_impl_syncthreads();
+  PRINT0(LD_SYNC, "completed kmpc_amd_master_end\n");
 }
 
 // Emit a simple barrier call in Generic mode.  Assumes the caller is in an L0
