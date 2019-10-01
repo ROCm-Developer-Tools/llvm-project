@@ -37,6 +37,9 @@ if (MSVC)
   set_source_files_properties(CodeGenModule.cpp PROPERTIES COMPILE_FLAGS /bigobj)
 endif()
 
+set_source_files_properties(CGCall.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
+set_source_files_properties(CGStmtOpenMP.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
+
 add_clang_library(clangCodeGen
   BackendUtil.cpp
   CGAtomic.cpp
