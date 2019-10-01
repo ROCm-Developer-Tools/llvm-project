@@ -452,6 +452,7 @@ EXTERN void __kmpc_amd_worker_start(kmp_Ident *loc_ref, int32_t tid);
 EXTERN void __kmpc_amd_worker_end(kmp_Ident *loc_ref, int32_t tid);
 EXTERN void __kmpc_amd_master_start(kmp_Ident *loc_ref, int32_t tid);
 EXTERN void __kmpc_amd_master_end(kmp_Ident *loc_ref, int32_t tid);
+EXTERN void __kmpc_amd_master_terminate(kmp_Ident *loc_ref, int32_t tid);
 EXTERN void __kmpc_barrier_simple_generic(kmp_Ident *loc_ref, int32_t tid);
 EXTERN int32_t __kmpc_cancel_barrier(kmp_Ident *loc, int32_t global_tid);
 
