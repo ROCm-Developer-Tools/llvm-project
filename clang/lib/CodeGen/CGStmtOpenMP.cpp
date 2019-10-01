@@ -571,7 +571,7 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
       "CapturedStmtInfo should be set when generating the captured function");
   const CapturedDecl *CD = S.getCapturedDecl();
   // Build the argument list.
-  bool NeedWrapperFunction =
+  bool NeedWrapperFunction = //false && 
       getDebugInfo() &&
       CGM.getCodeGenOpts().getDebugInfo() >= codegenoptions::LimitedDebugInfo;
   bool isKernel = (CapturedStmtInfo->getHelperName().str().find(
