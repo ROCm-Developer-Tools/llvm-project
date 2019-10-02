@@ -31,7 +31,7 @@ int32_t __gpu_block_reduce() {
     return 0;
   }
 #else
-   unsigned tnum = __ACTIVEMASK();
+   unsigned tnum = __kmpc_impl_activemask();
    if (tnum != (~0x0)) { // assume swapSize is 32
      return 0;
    }
@@ -79,7 +79,6 @@ void __kmpc_nvptx_end_reduce(int32_t global_tid) {}
 EXTERN
 void __kmpc_nvptx_end_reduce_nowait(int32_t global_tid) {}
 
-#ifdef __AMDGCN__
 EXTERN int32_t __kmpc_shuffle_int32(int32_t val, int16_t delta, int16_t size) {
   return __kmpc_impl_shfl_down_sync(0xFFFFFFFF, val, delta, size);
 }
@@ -91,20 +90,6 @@ EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
    lo = __kmpc_impl_shfl_down_sync(0xFFFFFFFF, lo, delta, size);
    return __kmpc_impl_pack(lo, hi);
 }
-#else
-EXTERN int32_t __kmpc_shuffle_int32(int32_t val, int16_t delta, int16_t size) {
-  return __SHFL_DOWN_SYNC(0xFFFFFFFF, val, delta, size);
-}
-
-EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size) {
-   int lo, hi;
-   asm volatile("mov.b64 {%0,%1}, %2;" : "=r"(lo), "=r"(hi) : "l"(val));
-   hi = __SHFL_DOWN_SYNC(0xFFFFFFFF, hi, delta, size);
-   lo = __SHFL_DOWN_SYNC(0xFFFFFFFF, lo, delta, size);
-   asm volatile("mov.b64 %0, {%1,%2};" : "=l"(val) : "r"(lo), "r"(hi));
-   return val;
-}
-#endif
 
 INLINE static void gpu_regular_warp_reduce(void *reduce_data,
                                            kmp_ShuffleReductFctPtr shflFct) {
@@ -130,34 +115,16 @@ INLINE static void gpu_irregular_warp_reduce(void *reduce_data,
 
 INLINE static uint32_t
 gpu_irregular_simd_reduce(void *reduce_data, kmp_ShuffleReductFctPtr shflFct) {
-#ifdef __AMDGCN__
-  __kmpc_impl_lanemask_t lanemask_lt;
-  __kmpc_impl_lanemask_t lanemask_gt;
-#else
-  uint32_t lanemask_lt;
-  uint32_t lanemask_gt;
-#endif
   uint32_t size, remote_id, physical_lane_id;
   physical_lane_id = GetThreadIdInBlock() % WARPSIZE;
-#ifdef __AMDGCN__
-  lanemask_lt = __kmpc_impl_lanemask_lt();
+  __kmpc_impl_lanemask_t lanemask_lt = __kmpc_impl_lanemask_lt();
   __kmpc_impl_lanemask_t Liveness = __kmpc_impl_activemask();
   uint32_t logical_lane_id = __kmpc_impl_popc(Liveness & lanemask_lt) * 2;
-  lanemask_gt = __kmpc_impl_lanemask_gt();
+  __kmpc_impl_lanemask_t lanemask_gt = __kmpc_impl_lanemask_gt();
   do {
     Liveness = __kmpc_impl_activemask();
     remote_id = __kmpc_impl_ffs(Liveness & lanemask_gt);
     size = __kmpc_impl_popc(Liveness);
-#else
-  asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lanemask_lt));
-  uint32_t Liveness = __ACTIVEMASK();
-  uint32_t logical_lane_id = __popc(Liveness & lanemask_lt) * 2;
-  asm("mov.u32 %0, %%lanemask_gt;" : "=r"(lanemask_gt));
-  do {
-    Liveness = __ACTIVEMASK();
-    remote_id = __ffs(Liveness & lanemask_gt);
-    size = __popc(Liveness);
-#endif
     logical_lane_id /= 2;
     shflFct(reduce_data, /*LaneId =*/logical_lane_id,
             /*Offset=*/remote_id - 1 - physical_lane_id, /*AlgoVersion=*/2);
@@ -170,11 +137,10 @@ int32_t __kmpc_nvptx_simd_reduce_nowait(int32_t global_tid, int32_t num_vars,
                                         size_t reduce_size, void *reduce_data,
                                         kmp_ShuffleReductFctPtr shflFct,
                                         kmp_InterWarpCopyFctPtr cpyFct) {
-#ifdef __AMDGCN__
   __kmpc_impl_lanemask_t Liveness = __kmpc_impl_activemask();
+#ifdef __AMDGCN__
   if (Liveness == 0xffffffffffffffff) {
 #else
-  uint32_t Liveness = __ACTIVEMASK();
   if (Liveness == 0xffffffff) {
 #endif
     gpu_regular_warp_reduce(reduce_data, shflFct);
@@ -237,9 +203,12 @@ static int32_t nvptx_parallel_reduce_nowait(
   return BlockThreadId == 0;
 #else
   // __CUDA_ARCH__ < 700 includes AMDGCN
-#ifdef __AMDGCN__
   __kmpc_impl_lanemask_t Liveness = __kmpc_impl_activemask();
+#ifdef __AMDGCN__
   if (Liveness == 0xffffffffffffffff) // Full warp
+#else
+  if (Liveness == 0xffffffff) // Full warp
+#endif
     gpu_regular_warp_reduce(reduce_data, shflFct);
   else if (!(Liveness & (Liveness + 1))) // Partial warp but contiguous lanes
     gpu_irregular_warp_reduce(reduce_data, shflFct,
@@ -249,19 +218,6 @@ static int32_t nvptx_parallel_reduce_nowait(
                                     // parallel region may enter here; return
                                     // early.
     return gpu_irregular_simd_reduce(reduce_data, shflFct);
-#else
-  uint32_t Liveness = __ACTIVEMASK();
-  if (Liveness == 0xffffffff) // Full warp
-    gpu_regular_warp_reduce(reduce_data, shflFct);
-  else if (!(Liveness & (Liveness + 1))) // Partial warp but contiguous lanes
-    gpu_irregular_warp_reduce(reduce_data, shflFct,
-                              /*LaneCount=*/__popc(Liveness),
-                              /*LaneId=*/GetThreadIdInBlock() % WARPSIZE);
-  else if (!isRuntimeUninitialized) // Dispersed lanes. Only threads in L2
-                                    // parallel region may enter here; return
-                                    // early.
-    return gpu_irregular_simd_reduce(reduce_data, shflFct);
-#endif
 
   // When we have more than [warpsize] number of threads
   // a block reduction is performed here.
@@ -427,23 +383,17 @@ static int32_t nvptx_teams_reduce_nowait(int32_t global_tid, int32_t num_vars,
     ldFct(reduce_data, scratchpad, i, NumTeams, /*Load and reduce*/ 1);
 
   // Reduce across warps to the warp master.
-#ifdef __AMDGCN__
   __kmpc_impl_lanemask_t Liveness = __kmpc_impl_activemask();
+#ifdef __AMDGCN__
   if (Liveness == 0xffffffffffffffff) // Full warp
+#else
+  if (Liveness == 0xffffffff) // Full warp
+#endif
     gpu_regular_warp_reduce(reduce_data, shflFct);
   else // Partial warp but contiguous lanes
     gpu_irregular_warp_reduce(reduce_data, shflFct,
                               /*LaneCount=*/__kmpc_impl_popc(Liveness),
                               /*LaneId=*/ThreadId % WARPSIZE);
-#else
-  uint32_t Liveness = __ACTIVEMASK();
-  if (Liveness == 0xffffffff) // Full warp
-    gpu_regular_warp_reduce(reduce_data, shflFct);
-  else // Partial warp but contiguous lanes
-    gpu_irregular_warp_reduce(reduce_data, shflFct,
-                              /*LaneCount=*/__popc(Liveness),
-                              /*LaneId=*/ThreadId % WARPSIZE);
-#endif
 
   // When we have more than [warpsize] number of threads
   // a block reduction is performed here.

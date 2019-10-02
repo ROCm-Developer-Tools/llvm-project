@@ -51,25 +51,21 @@ EXTERN bool __kmpc_kernel_convergent_simd(void *buffer, uint64_t Mask,
   PRINT0(LD_IO, "call to __kmpc_kernel_convergent_simd\n");
   __kmpc_impl_lanemask_t ConvergentMask = Mask;
   int32_t ConvergentSize = __kmpc_impl_popc(ConvergentMask);
-  uint64_t WorkRemaining = ConvergentMask >> (*LaneSource + 1);
-  *LaneSource += __kmpc_impl_ffs(WorkRemaining);
-  *IsFinal = __kmpc_impl_popc(WorkRemaining) == 1;
-  __kmpc_impl_lanemask_t lanemask_lt = __kmpc_impl_lanemask_lt();
-  *LaneId = __kmpc_impl_popc(ConvergentMask & lanemask_lt);
+  __kmpc_impl_lanemask_t WorkRemaining = ConvergentMask >> (*LaneSource + 1);
 #else
 EXTERN bool __kmpc_kernel_convergent_simd(void *buffer, uint32_t Mask,
                                           bool *IsFinal, int32_t *LaneSource,
                                           int32_t *LaneId, int32_t *NumLanes) {
   PRINT0(LD_IO, "call to __kmpc_kernel_convergent_simd\n");
   uint32_t ConvergentMask = Mask;
-  int32_t ConvergentSize = __popc(ConvergentMask);
+  int32_t ConvergentSize = __kmpc_impl_popc(ConvergentMask);
   uint32_t WorkRemaining = ConvergentMask >> (*LaneSource + 1);
-  *LaneSource += __ffs(WorkRemaining);
-  *IsFinal = __popc(WorkRemaining) == 1;
-  uint32_t lanemask_lt;
-  asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lanemask_lt));
-  *LaneId = __popc(ConvergentMask & lanemask_lt);
 #endif
+
+  *LaneSource += __kmpc_impl_ffs(WorkRemaining);
+  *IsFinal = __kmpc_impl_popc(WorkRemaining) == 1;
+  __kmpc_impl_lanemask_t lanemask_lt = __kmpc_impl_lanemask_lt();
+  *LaneId = __kmpc_impl_popc(ConvergentMask & lanemask_lt);
 
   int threadId = GetLogicalThreadIdInBlock(isSPMDMode());
   int sourceThreadId = (threadId & ~(WARPSIZE - 1)) + *LaneSource;
@@ -140,24 +136,20 @@ EXTERN bool __kmpc_kernel_convergent_parallel(void *buffer, uint64_t Mask,
    __kmpc_impl_lanemask_t ConvergentMask = Mask;
   int32_t ConvergentSize = __kmpc_impl_popc(ConvergentMask);
   uint64_t WorkRemaining = ConvergentMask >> (*LaneSource + 1);
-  *LaneSource += __kmpc_impl_ffs(WorkRemaining);
-  *IsFinal = __kmpc_impl_popc(WorkRemaining) == 1;
-  __kmpc_impl_lanemask_t lanemask_lt = __kmpc_impl_lanemask_lt();
-  uint32_t OmpId = __kmpc_impl_popc(ConvergentMask & lanemask_lt);
 #else
 EXTERN bool __kmpc_kernel_convergent_parallel(void *buffer, uint32_t Mask,
                                               bool *IsFinal,
                                               int32_t *LaneSource) {
   PRINT0(LD_IO, "call to __kmpc_kernel_convergent_parallel\n");
   uint32_t ConvergentMask = Mask;
-  int32_t ConvergentSize = __popc(ConvergentMask);
+  int32_t ConvergentSize = __kmpc_impl_popc(ConvergentMask);
   uint32_t WorkRemaining = ConvergentMask >> (*LaneSource + 1);
-  *LaneSource += __ffs(WorkRemaining);
-  *IsFinal = __popc(WorkRemaining) == 1;
-  uint32_t lanemask_lt;
-  asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lanemask_lt));
-  uint32_t OmpId = __popc(ConvergentMask & lanemask_lt);
 #endif
+
+  *LaneSource += __kmpc_impl_ffs(WorkRemaining);
+  *IsFinal = __kmpc_impl_popc(WorkRemaining) == 1;
+  __kmpc_impl_lanemask_t lanemask_lt = __kmpc_impl_lanemask_lt();
+  uint32_t OmpId = __kmpc_impl_popc(ConvergentMask & lanemask_lt);
 
   int threadId = GetLogicalThreadIdInBlock(isSPMDMode());
   int sourceThreadId = (threadId & ~(WARPSIZE - 1)) + *LaneSource;

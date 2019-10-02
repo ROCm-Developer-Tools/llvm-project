@@ -290,7 +290,7 @@ public:
       omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
       PRINT(LD_LOOP,
             "dispatch init (static chunk) : num threads = %d, ub =  %" PRId64
-            ", next lower bound = %lu, stride = %lu\n",
+            ", next lower bound = %llu, stride = %llu\n",
             (int)tnum,
             omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
             (unsigned long long)
@@ -322,7 +322,7 @@ public:
       omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
       PRINT(LD_LOOP,
             "dispatch init (static chunk) : num threads = %d, ub =  %" PRId64
-            ", next lower bound = %lu, stride = %lu\n",
+            ", next lower bound = %llu, stride = %llu\n",
             (int)tnum,
             omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
             (unsigned long long)
@@ -345,7 +345,7 @@ public:
       omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
       PRINT(LD_LOOP,
             "dispatch init (static nochunk) : num threads = %d, ub = %" PRId64
-            ", next lower bound = %lu, stride = %lu\n",
+            ", next lower bound = %llu, stride = %llu\n",
             (int)tnum,
             omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
             (unsigned long long)
@@ -367,7 +367,7 @@ public:
       }
       __kmpc_barrier(loc, threadId);
       PRINT(LD_LOOP,
-            "dispatch init (dyn) : num threads = %d, lb = %lu, ub = %" PRId64
+            "dispatch init (dyn) : num threads = %d, lb = %llu, ub = %" PRId64
             ", chunk %" PRIu64 "\n",
             (int)tnum,
             (unsigned long long)
@@ -380,7 +380,6 @@ public:
   ////////////////////////////////////////////////////////////////////////////////
   // Support for dispatch next
 
-#ifdef __AMDGCN__
   INLINE static uint64_t Shuffle(__kmpc_impl_lanemask_t active, int64_t val, int leader) {
     uint32_t lo, hi;
     __kmpc_impl_unpack(val, lo, hi);
@@ -404,33 +403,6 @@ public:
     warp_res = Shuffle(active, warp_res, leader);
     return warp_res + rank;
   }
-#else
-  INLINE static int64_t Shuffle(unsigned active, int64_t val, int leader) {
-    int lo, hi;
-    asm volatile("mov.b64 {%0,%1}, %2;" : "=r"(lo), "=r"(hi) : "l"(val));
-    hi = __SHFL_SYNC(active, hi, leader);
-    lo = __SHFL_SYNC(active, lo, leader);
-    asm volatile("mov.b64 %0, {%1,%2};" : "=l"(val) : "r"(lo), "r"(hi));
-    return val;
-  }
-
-  INLINE static uint64_t NextIter() {
-    unsigned int active = __ACTIVEMASK();
-    int leader = __ffs(active) - 1;
-    int change = __popc(active);
-    unsigned lane_mask_lt;
-    asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lane_mask_lt));
-    unsigned int rank = __popc(active & lane_mask_lt);
-    uint64_t warp_res;
-    if (rank == 0) {
-      warp_res = atomicAdd(
-          (unsigned long long *)&omptarget_nvptx_threadPrivateContext->Cnt(),
-          change);
-    }
-    warp_res = Shuffle(active, warp_res, leader);
-    return warp_res + rank;
-  }
-#endif
 
   INLINE static int DynamicNextChunk(T &lb, T &ub, T chunkSize,
                                      T loopLowerBound, T loopUpperBound) {
