@@ -1,4 +1,4 @@
-//===------------ target_impl.h - NVPTX OpenMP GPU options ------- CUDA -*-===//
+//===------------ target_impl.h - AMDGCN OpenMP GPU options ------ CUDA -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -9,6 +9,14 @@
 // Definitions of target specific functions
 //
 //===----------------------------------------------------------------------===//
+#ifndef __AMDGCN__
+// The amdgcn deviceRTL can be compiled for nvptx. Including the corresponding
+// target_impl file (which sets the same header guard) maintains this property
+// while allowing use of the __kmpc_impl constructs in the nvptx subsections.
+// This include can be dropped once sources are deduplicated to a common subdir
+#include "../../nvptx/src/target_impl.h"
+#endif
+
 #ifndef _TARGET_IMPL_H_
 #define _TARGET_IMPL_H_
 
