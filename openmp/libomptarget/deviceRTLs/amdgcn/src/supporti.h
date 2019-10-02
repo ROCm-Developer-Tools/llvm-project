@@ -204,13 +204,8 @@ INLINE int IsTeamMaster(int ompThreadId) { return (ompThreadId == 0); }
 // Parallel level
 
 INLINE void IncParallelLevel(bool ActiveParallel) {
-#ifdef __AMDGCN__
   __kmpc_impl_lanemask_t tnum = __kmpc_impl_activemask();
   int leader = __kmpc_impl_ffs(tnum) - 1;
-#else
-  unsigned tnum = __ACTIVEMASK();
-  int leader = __ffs(tnum) - 1;
-#endif
   __SHFL_SYNC(tnum, leader, leader);
   if (GetLaneId() == leader) {
     parallelLevel[GetWarpId()] +=
@@ -220,13 +215,8 @@ INLINE void IncParallelLevel(bool ActiveParallel) {
 }
 
 INLINE void DecParallelLevel(bool ActiveParallel) {
-#ifdef __AMDGCN__
   __kmpc_impl_lanemask_t tnum = __kmpc_impl_activemask();
   int leader = __kmpc_impl_ffs(tnum) - 1;
-#else
-  unsigned tnum = __ACTIVEMASK();
-  int leader = __ffs(tnum) - 1;
-#endif
   __SHFL_SYNC(tnum, leader, leader);
   if (GetLaneId() == leader) {
     parallelLevel[GetWarpId()] -=
