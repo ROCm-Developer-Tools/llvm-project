@@ -208,6 +208,6 @@ EXTERN int64_t __kmpc_warp_active_thread_mask64() {
 #else
 EXTERN int32_t __kmpc_warp_active_thread_mask() {
   PRINT0(LD_IO, "call __kmpc_warp_active_thread_mask\n");
-  return __ACTIVEMASK();
+  return __kmpc_impl_activemask();
 }
 #endif

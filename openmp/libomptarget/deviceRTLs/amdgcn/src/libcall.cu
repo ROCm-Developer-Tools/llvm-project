@@ -12,10 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "omptarget-nvptx.h"
+#include "target_impl.h"
 
 // Timer precision is 1ns
 #define TIMER_PRECISION ((double)1E-9)
-#define TICK ((double)1.0 / 745000000.0)
 
 EXTERN double omp_get_wtick(void) {
   PRINT(LD_IO, "omp_get_wtick() returns %g\n", TIMER_PRECISION);
@@ -24,7 +24,7 @@ EXTERN double omp_get_wtick(void) {
 
 EXTERN double omp_get_wtime(void) {
 #ifdef __AMDGCN__
-  double rc = TICK * __clock64();
+  double rc = ((double)1.0 / 745000000.0) * __clock64();
 #else
   unsigned long long nsecs;
   asm("mov.u64  %0, %%globaltimer;" : "=l"(nsecs));
@@ -388,7 +388,7 @@ EXTERN unsigned long long omp_ext_get_active_threads_mask() {
 }
 #else
 EXTERN unsigned long long omp_ext_get_active_threads_mask() {
-  unsigned rc = __ACTIVEMASK();
+  unsigned rc = __kmpc_impl_activemask();
   PRINT(LD_IO, "call omp_ext_get_active_threads_mask() returns %x\n", rc);
   return (unsigned long long)rc;
 }
