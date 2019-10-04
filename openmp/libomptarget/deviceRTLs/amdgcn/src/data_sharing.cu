@@ -120,11 +120,7 @@ __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot *rootS,
 
 EXTERN void *__kmpc_data_sharing_environment_begin(
     __kmpc_data_sharing_slot **SavedSharedSlot, void **SavedSharedStack,
-#ifdef __AMDGCN__
-    void **SavedSharedFrame, int64_t *SavedActiveThreads,
-#else
-    void **SavedSharedFrame, int32_t *SavedActiveThreads,
-#endif
+    void **SavedSharedFrame, __kmpc_impl_lanemask_t *SavedActiveThreads,
     size_t SharingDataSize, size_t SharingDefaultDataSize,
     int16_t IsOMPRuntimeInitialized) {
 
@@ -145,11 +141,7 @@ EXTERN void *__kmpc_data_sharing_environment_begin(
   __kmpc_data_sharing_slot *&SlotP = DataSharingState.SlotPtr[WID];
   void *&StackP = DataSharingState.StackPtr[WID];
   void * volatile &FrameP = DataSharingState.FramePtr[WID];
-#ifdef __AMDGCN__
-  int64_t &ActiveT = DataSharingState.ActiveThreads[WID];
-#else
-  int32_t &ActiveT = DataSharingState.ActiveThreads[WID];
-#endif
+  __kmpc_impl_lanemask_t &ActiveT = DataSharingState.ActiveThreads[WID];
 
   DSPRINT0(DSFLAG, "Save current slot/stack values.\n");
   // Save the current values.
@@ -257,11 +249,7 @@ EXTERN void *__kmpc_data_sharing_environment_begin(
 
 EXTERN void __kmpc_data_sharing_environment_end(
     __kmpc_data_sharing_slot **SavedSharedSlot, void **SavedSharedStack,
-#ifdef __AMDGCN__
-    void **SavedSharedFrame, int64_t *SavedActiveThreads,
-#else
-    void **SavedSharedFrame, int32_t *SavedActiveThreads,
-#endif
+    void **SavedSharedFrame, __kmpc_impl_lanemask_t *SavedActiveThreads,
     int32_t IsEntryPoint) {
 
   DSPRINT0(DSFLAG, "Entering __kmpc_data_sharing_environment_end\n");
@@ -296,11 +284,7 @@ EXTERN void __kmpc_data_sharing_environment_end(
   // assume that threads will converge right after the call site that started
   // the environment.
   if (IsWarpMasterActiveThread()) {
-#ifdef __AMDGCN__ 
-    int64_t &ActiveT = DataSharingState.ActiveThreads[WID];
-#else
-    int32_t &ActiveT = DataSharingState.ActiveThreads[WID];
-#endif
+    __kmpc_impl_lanemask_t &ActiveT = DataSharingState.ActiveThreads[WID];
 
     DSPRINT0(DSFLAG, "Before restoring the stack\n");
     // Zero the bits in the mask. If it is still different from zero, then we
