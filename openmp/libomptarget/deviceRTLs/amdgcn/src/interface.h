@@ -20,6 +20,7 @@
 #define _INTERFACES_H_
 
 #include "option.h"
+#include "target_impl.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // OpenMP interface
@@ -473,9 +474,9 @@ EXTERN void __kmpc_flush(kmp_Ident *loc);
 
 // vote
 #ifdef __AMDGCN__
-EXTERN int64_t __kmpc_warp_active_thread_mask64();
+EXTERN __kmpc_impl_lanemask_t __kmpc_warp_active_thread_mask64();
 #else
-EXTERN int32_t __kmpc_warp_active_thread_mask();
+EXTERN __kmpc_impl_lanemask_t __kmpc_warp_active_thread_mask();
 #endif
 
 // tasks
@@ -527,11 +528,13 @@ EXTERN void __kmpc_kernel_prepare_parallel(void *WorkFn,
 EXTERN bool __kmpc_kernel_parallel(void **WorkFn,
                                    int16_t IsOMPRuntimeInitialized);
 EXTERN void __kmpc_kernel_end_parallel();
-EXTERN bool __kmpc_kernel_convergent_parallel(void *buffer, uint32_t Mask,
+EXTERN bool __kmpc_kernel_convergent_parallel(void *buffer,
+                                              __kmpc_impl_lanemask_t Mask,
                                               bool *IsFinal,
                                               int32_t *LaneSource);
 EXTERN void __kmpc_kernel_end_convergent_parallel(void *buffer);
-EXTERN bool __kmpc_kernel_convergent_simd(void *buffer, uint32_t Mask,
+EXTERN bool __kmpc_kernel_convergent_simd(void *buffer,
+                                          __kmpc_impl_lanemask_t Mask,
                                           bool *IsFinal, int32_t *LaneSource,
                                           int32_t *LaneId, int32_t *NumLanes);
 EXTERN void __kmpc_kernel_end_convergent_simd(void *buffer);
@@ -562,24 +565,13 @@ __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot *RootS,
                                            size_t InitialDataSize);
 EXTERN void *__kmpc_data_sharing_environment_begin(
     __kmpc_data_sharing_slot **SavedSharedSlot, void **SavedSharedStack,
-    void **SavedSharedFrame,
-#ifdef __AMDGCN__
-    int64_t *SavedActiveThreads,
-#else
-    int32_t *SavedActiveThreads,
-#endif
+    void **SavedSharedFrame, __kmpc_impl_lanemask_t *SavedActiveThreads,
     size_t SharingDataSize, size_t SharingDefaultDataSize,
     int16_t IsOMPRuntimeInitialized);
-EXTERN void
-__kmpc_data_sharing_environment_end(__kmpc_data_sharing_slot **SavedSharedSlot,
-                                    void **SavedSharedStack,
-                                    void **SavedSharedFrame,
-#ifdef __AMDGCN__
-                                    int64_t *SavedActiveThreads,
-#else
-                                    int32_t *SavedActiveThreads,
-#endif
-                                    int32_t IsEntryPoint);
+EXTERN void __kmpc_data_sharing_environment_end(
+    __kmpc_data_sharing_slot **SavedSharedSlot, void **SavedSharedStack,
+    void **SavedSharedFrame, __kmpc_impl_lanemask_t *SavedActiveThreads,
+    int32_t IsEntryPoint);
 
 EXTERN void *
 __kmpc_get_data_sharing_environment_frame(int32_t SourceThreadID,
