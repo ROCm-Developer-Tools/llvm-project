@@ -38,10 +38,16 @@
 #define __align__(n) __attribute__((aligned(n)))
 #endif
 
-// device libc declarations
+// device libc
 extern "C" {
-__device__ void __assert_fail(const char *, const char *, unsigned int,
-                              const char *);
+__device__ __attribute__((noreturn)) void
+__assertfail(const char *, const char *, unsigned, const char *, size_t);
+__device__ static inline void __assert_fail(const char *__message,
+                                            const char *__file,
+                                            unsigned int __line,
+                                            const char *__function) {
+  __assertfail(__message, __file, __line, __function, sizeof(char));
+}
 __device__ int printf(const char *, ...);
 }
 
