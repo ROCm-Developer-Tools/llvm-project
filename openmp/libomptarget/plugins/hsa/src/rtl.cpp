@@ -1140,10 +1140,14 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
     }
   }
 
-  // num_teams clause always honored, no matter what,
-  if (num_teams > 0)
+  // num_teams clause always honored, no matter what, unless DEFAULT is active.
+  if (num_teams > 0) {
     num_groups = num_teams;
-
+    // Cap num_groups to EnvMaxTeamsDefault if set.
+    if (DeviceInfo.EnvMaxTeamsDefault > 0 &&
+        num_groups > DeviceInfo.EnvMaxTeamsDefault)
+      num_groups = DeviceInfo.EnvMaxTeamsDefault;
+  }
   if (print_kernel_trace > 1) {
     fprintf(stderr, "threadsPerGroup: %d\n", threadsPerGroup);
     fprintf(stderr, "num_groups: %d\n", num_groups);
