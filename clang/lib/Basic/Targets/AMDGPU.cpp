@@ -345,7 +345,6 @@ void AMDGPUTargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__HAS_FP64__");
   if (hasFastFMA())
     Builder.defineMacro("FP_FAST_FMA");
-  Builder.defineMacro("__CUDA_ARCH__", "320");
 }
 
 void AMDGPUTargetInfo::setAuxTarget(const TargetInfo *Aux) {
