@@ -99,7 +99,6 @@ const char *AMDGCN::Linker::constructOmpExtraCmds(Compilation &C,
   if (Args.hasArg(options::OPT_cuda_device_only))
     BCLibs.append(
         {Args.MakeArgString("libomptarget-amdgcn-" + SubArchName + ".bc"),
-         Args.MakeArgString("libm-amdgcn-" + SubArchName + ".bc"),
          Args.MakeArgString("libhostcall-amdgcn-" + SubArchName + ".bc"),
          "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc", WaveFrontSizeBC});
   else
