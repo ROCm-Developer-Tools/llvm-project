@@ -62,6 +62,9 @@ typedef struct kmp_TaskDep_Public {
 // external interface
 ////////////////////////////////////////////////////////////////////////////////
 
+typedef struct ident ident_t;
+typedef ident_t kmp_Ident;
+
 // query
 EXTERN int32_t __kmpc_global_num_threads(kmp_Ident *loc); // missing
 EXTERN int32_t __kmpc_bound_thread_num(kmp_Ident *loc);   // missing
