@@ -88,15 +88,8 @@ EXTERN int omp_get_cancellation(void);
 EXTERN void omp_set_default_device(int deviceId);
 EXTERN int omp_get_default_device(void);
 EXTERN int omp_get_num_devices(void);
-EXTERN int omp_get_device_num(void);
 EXTERN int omp_get_num_teams(void);
 EXTERN int omp_get_team_num(void);
-EXTERN int omp_ext_get_warp_id(void);
-EXTERN int omp_ext_get_lane_id(void);
-EXTERN int omp_ext_get_master_thread_id(void);
-EXTERN int omp_ext_get_smid(void);
-EXTERN int omp_ext_is_spmd_mode(void);
-EXTERN unsigned long long omp_ext_get_active_threads_mask(void);
 EXTERN int omp_is_initial_device(void);
 EXTERN int omp_get_initial_device(void);
 EXTERN int omp_get_max_task_priority(void);
@@ -223,50 +216,13 @@ typedef struct kmp_TaskDescr {
   int32_t partId;             // unused
   kmp_TaskFctPtr destructors; // destructor of c++ first private
 } kmp_TaskDescr;
-// task dep defs
-#define KMP_TASKDEP_IN 0x1u
-#define KMP_TASKDEP_OUT 0x2u
-typedef struct kmp_TaskDep_Public {
-  void *addr;
-  size_t len;
-  uint8_t flags; // bit 0: in, bit 1: out
-} kmp_TaskDep_Public;
-
-// flags that interpret the interface part of tasking flags
-#define KMP_TASK_IS_TIED 0x1
-#define KMP_TASK_FINAL 0x2
-#define KMP_TASK_MERGED_IF0 0x4 /* unused */
-#define KMP_TASK_DESTRUCTOR_THUNK 0x8
-
-// flags for task setup return
-#define KMP_CURRENT_TASK_NOT_SUSPENDED 0
-#define KMP_CURRENT_TASK_SUSPENDED 1
 
 // sync defs
 typedef int32_t kmp_CriticalName[8];
 
 ////////////////////////////////////////////////////////////////////////////////
-// flags for kstate (all bits initially off)
-////////////////////////////////////////////////////////////////////////////////
-
-// first 2 bits used by kmp_Reduction (defined in kmp_reduction.cpp)
-#define KMP_REDUCTION_MASK 0x3
-#define KMP_SKIP_NEXT_CALL 0x4
-#define KMP_SKIP_NEXT_CANCEL_BARRIER 0x8
-
-////////////////////////////////////////////////////////////////////////////////
-// data
-////////////////////////////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////////////////////////////
 // external interface
 ////////////////////////////////////////////////////////////////////////////////
-
-// query
-EXTERN int32_t __kmpc_global_num_threads(kmp_Ident *loc); // missing
-EXTERN int32_t __kmpc_bound_thread_num(kmp_Ident *loc);   // missing
-EXTERN int32_t __kmpc_bound_num_threads(kmp_Ident *loc);  // missing
-EXTERN int32_t __kmpc_in_parallel(kmp_Ident *loc);        // missing
 
 // parallel
 EXTERN int32_t __kmpc_global_thread_num(kmp_Ident *loc);
@@ -453,11 +409,6 @@ EXTERN int64_t __kmpc_shuffle_int64(int64_t val, int16_t delta, int16_t size);
 // sync barrier
 EXTERN void __kmpc_barrier(kmp_Ident *loc_ref, int32_t tid);
 EXTERN void __kmpc_barrier_simple_spmd(kmp_Ident *loc_ref, int32_t tid);
-EXTERN void __kmpc_amd_worker_start(kmp_Ident *loc_ref, int32_t tid);
-EXTERN void __kmpc_amd_worker_end(kmp_Ident *loc_ref, int32_t tid);
-EXTERN void __kmpc_amd_master_start(kmp_Ident *loc_ref, int32_t tid);
-EXTERN void __kmpc_amd_master_end(kmp_Ident *loc_ref, int32_t tid);
-EXTERN void __kmpc_amd_master_terminate(kmp_Ident *loc_ref, int32_t tid);
 EXTERN void __kmpc_barrier_simple_generic(kmp_Ident *loc_ref, int32_t tid);
 EXTERN int32_t __kmpc_cancel_barrier(kmp_Ident *loc, int32_t global_tid);
 
