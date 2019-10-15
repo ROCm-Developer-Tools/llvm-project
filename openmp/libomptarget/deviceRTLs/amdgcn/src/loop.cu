@@ -792,21 +792,8 @@ EXTERN void __kmpc_reduce_conditional_lastprivate(kmp_Ident *loc, int32_t gtid,
     // Atomic max of iterations.
     uint64_t *varArray = (uint64_t *)array;
     uint64_t elem = varArray[i];
-#ifdef __AMDGCN__
     (void)atomicMax((unsigned long long int *)Buffer,
                     (unsigned long long int)elem);
-#else
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
-    (void)atomicMax((unsigned long long int *)Buffer,
-                    (unsigned long long int)elem);
-#else
-    uint64_t old_value = *Buffer;
-    while (old_value < elem && !atomicCAS((unsigned long long *)Buffer,
-                                          (unsigned long long)old_value,
-                                          (unsigned long long)elem)) {
-    };
-#endif
-#endif
 
     // Barrier.
     syncWorkersInGenericMode(NumThreads);
