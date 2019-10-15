@@ -473,11 +473,7 @@ EXTERN void __kmpc_end_critical(kmp_Ident *loc, int32_t global_tid,
 EXTERN void __kmpc_flush(kmp_Ident *loc);
 
 // vote
-#ifdef __AMDGCN__
-EXTERN __kmpc_impl_lanemask_t __kmpc_warp_active_thread_mask64();
-#else
 EXTERN __kmpc_impl_lanemask_t __kmpc_warp_active_thread_mask();
-#endif
 
 // tasks
 EXTERN kmp_TaskDescr *__kmpc_omp_task_alloc(kmp_Ident *loc,
