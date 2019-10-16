@@ -217,49 +217,6 @@ static bool linkFiles(const char *argv0, LLVMContext &Context, Linker &L,
   return true;
 }
 
-//  Check if there is a declare/reference  to symbol "needs_hostcall_buffer"
-//  and if found link in the definition of the symbol found in needs_hostcall_buffer-amdgcn.bc
-static bool link_needs_hostcall_buffer(const char *argv0, LLVMContext &Context, Linker &L,
-                      unsigned Flags, Module* MOUT) {
-  bool has_needs_hostcall_buffer_declare = false;
-  for (Module::global_iterator globi = MOUT->global_begin(),
-                               e = MOUT->global_end();
-       globi != e; ++globi) {
-    GlobalVariable *GV = &*globi;
-    if (GV->hasName()) {
-      StringRef name = GV->getName();
-      if (name.startswith("needs_hostcall_buffer") && GV->isDeclaration()){
-        has_needs_hostcall_buffer_declare = true;
-      }
-    }
-  }
-  if (!has_needs_hostcall_buffer_declare)
-    return true;
-
-  std::string FileName = argv0;
-  std::size_t found = FileName.rfind("/");
-  if (found!=std::string::npos)
-    FileName.replace (found+1,FileName.length(),"../lib/libdevice/needs_hostcall_buffer-amdgcn.bc");
-  else
-    return false;
-
-  if (Verbose)
-    errs() << "Loading definition for hostcall buffer file'" << FileName << "'\n";
-  std::unique_ptr<Module> M = loadBcFile(argv0, FileName, Context);
-  if (!M.get()) {
-     errs() << argv0 << ": ";
-     WithColor::error() << " loading file '" << FileName << "'\n";
-     return false;
-  }
-  if (Verbose)
-    errs() << "Linking definition for the hostcall buffer file'" << FileName << "' to module.\n";
-  bool Err = L.linkInModule(std::move(M), Flags);
-  if (Err)
-    return false;
-
-  return true;
-}
-
 // Rewrite select_outline_wrapper calls, to be direct calls.
 //   @_HASHW_DeclareSharedMemory_cpp__omp_outlined___wrapper =
 //     local_unnamed_addr addrspace(4) constant i64 -4874776124079246075
@@ -507,9 +464,6 @@ int main(int argc, char **argv) {
     return 1;
 
   if (!runInliner(MOUT, Context))
-    return 1;
-
-  if (!link_needs_hostcall_buffer(argv[0], Context, L, Flags, MOUT))
     return 1;
 
   if (!removeStackSaveRestore(MOUT, Context))
