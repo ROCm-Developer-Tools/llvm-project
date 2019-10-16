@@ -88,6 +88,10 @@ endif()
 
 separate_arguments(mcpus)
 
+get_filename_component(devicertl_base_directory
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  DIRECTORY)
+
 macro(collect_sources name dir)
   set(cuda_sources)
   set(ocl_sources)
@@ -126,7 +130,8 @@ macro(add_cuda_bc_library name dir)
     -O${optimization_level}
     --cuda-gpu-arch=${mcpu}
     ${CUDA_DEBUG}
-    -I${CMAKE_CURRENT_SOURCE_DIR}/src)
+    -I${CMAKE_CURRENT_SOURCE_DIR}/src
+    -I${devicertl_base_directory})
 
   set(bc1_files)
 

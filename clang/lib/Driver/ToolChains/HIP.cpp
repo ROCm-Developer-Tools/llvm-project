@@ -101,12 +101,17 @@ const char *AMDGCN::Linker::constructOmpExtraCmds(Compilation &C,
         {Args.MakeArgString("libomptarget-amdgcn-" + SubArchName + ".bc"),
          Args.MakeArgString("libhostcall-amdgcn-" + SubArchName + ".bc"),
          "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc", WaveFrontSizeBC});
-  else
+  else{
     BCLibs.append(
         {Args.MakeArgString("libomptarget-amdgcn-" + SubArchName + ".bc"),
          Args.MakeArgString("libhostcall-amdgcn-" + SubArchName + ".bc"),
          Args.MakeArgString("libaompextras-amdgcn-" + SubArchName + ".bc"),
          "hip.amdgcn.bc", "hc.amdgcn.bc", "ockl.amdgcn.bc", WaveFrontSizeBC});
+
+    if(!Args.hasArg(options::OPT_nostdlibxx) && !Args.hasArg(options::OPT_nostdlib))
+      BCLibs.append({Args.MakeArgString("libm-amdgcn-" + SubArchName + ".bc")});
+  }
+
   for (auto Lib : BCLibs)
     addBCLib(C.getDriver(), Args, CmdArgs, LibraryPaths, Lib,
                       /* PostClang Link? */ false);

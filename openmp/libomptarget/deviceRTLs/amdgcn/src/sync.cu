@@ -200,14 +200,7 @@ EXTERN void __kmpc_flush(kmp_Ident *loc) {
 // Vote
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifdef __AMDGCN__
-EXTERN __kmpc_impl_lanemask_t __kmpc_warp_active_thread_mask64() {
-  PRINT0(LD_IO, "call __kmpc_warp_active_thread_mask64\n");
-  return __kmpc_impl_activemask();
-}
-#else
 EXTERN __kmpc_impl_lanemask_t __kmpc_warp_active_thread_mask() {
   PRINT0(LD_IO, "call __kmpc_warp_active_thread_mask\n");
   return __kmpc_impl_activemask();
 }
-#endif
