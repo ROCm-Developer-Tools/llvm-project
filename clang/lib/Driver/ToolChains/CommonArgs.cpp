@@ -1795,8 +1795,8 @@ void tools::AddStaticDeviceLibs(Compilation *C,
   // Build list of Static Device Libraries SDLs specified by -l option
   SmallVector<std::string, 16> SDL_Names;
   for (std::string SDL_Name : DriverArgs.getAllArgValues(options::OPT_l)) {
-    // No SDL for -lomp or -lcudart, they only have host libs
-    if (SDL_Name != "omp" && SDL_Name != "cudart") {
+    // No SDL for -lomp or -lcudart, they only have host libs, SDL for -lm added automatically
+    if (SDL_Name != "omp" && SDL_Name != "cudart" && SDL_Name != "m") {
       bool inSDL_Names = false;
       for (std::string OldName : SDL_Names) {
         if (OldName == SDL_Name)
