@@ -3335,11 +3335,6 @@ static void RenderDebugOptions(const ToolChain &TC, const Driver &D,
     }
   }
 
-  // FIXME: temporarily Turn off debuging on GPUs for openmp
-  if ((T.getArch() == llvm::Triple::amdgcn) ||
-      (T.getArch() == llvm::Triple::nvptx64))
-    DebugInfoKind = codegenoptions::NoDebugInfo;
-
   // Adjust the debug info kind for the given toolchain.
   TC.adjustDebugInfoKind(DebugInfoKind, Args);
 
