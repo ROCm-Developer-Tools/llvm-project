@@ -574,15 +574,17 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
   bool NeedWrapperFunction =
       getDebugInfo() &&
       CGM.getCodeGenOpts().getDebugInfo() >= codegenoptions::LimitedDebugInfo;
-  bool isKernel = (CapturedStmtInfo->getHelperName().str().find(
-                       "__omp_offloading_") != std::string::npos);
-
-  FunctionArgList Args;
-  llvm::MapVector<const Decl *, std::pair<const VarDecl *, Address>> LocalAddrs;
-  llvm::DenseMap<const Decl *, std::pair<const Expr *, llvm::Value *>> VLASizes;
+  // AMDGCN does not generate wrapper kernels properly, fails to launch kernel.
+  if (CGM.getTriple().getArch() == llvm::Triple::amdgcn)
+    NeedWrapperFunction = false;
   SmallString<256> Buffer;
   llvm::raw_svector_ostream Out(Buffer);
   Out << CapturedStmtInfo->getHelperName();
+  bool isKernel = (Out.str().find(
+                       "__omp_offloading_") != std::string::npos);
+  FunctionArgList Args;
+  llvm::MapVector<const Decl *, std::pair<const VarDecl *, Address>> LocalAddrs;
+  llvm::DenseMap<const Decl *, std::pair<const Expr *, llvm::Value *>> VLASizes;
   if (NeedWrapperFunction)
     Out << "_debug__";
   FunctionOptions FO(&S, !NeedWrapperFunction, /*RegisterCastedArgsOnly=*/false,
@@ -617,12 +619,17 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
   Args.clear();
   LocalAddrs.clear();
   VLASizes.clear();
-  isKernel = (CapturedStmtInfo->getHelperName().str().find(
+  SmallString<256> Buffer2;
+  llvm::raw_svector_ostream Out2(Buffer2);
+  Out2 << CapturedStmtInfo->getHelperName();
+  isKernel = (Out2.str().find(
                   "__omp_offloading_") != std::string::npos);
 
   llvm::Function *WrapperF = emitOutlinedFunctionPrologue(
       WrapperCGF, Args, LocalAddrs, VLASizes, WrapperCGF.CXXThisValue,
       WrapperFO, isKernel);
+  if ((CGM.getTriple().getArch() == llvm::Triple::amdgcn) && isKernel)
+    WrapperF->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
 
   llvm::SmallVector<llvm::Value *, 4> CallArgs;
   for (const auto *Arg : Args) {
