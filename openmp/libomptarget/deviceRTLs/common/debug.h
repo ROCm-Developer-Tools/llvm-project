@@ -118,13 +118,9 @@
 
 #if OMPTARGET_NVPTX_DEBUG
 #define OMPTARGET_NVPTX_WARNING (LT_SET_SAFETY)
-#define _SAFEMALLOC(_size, _msg) SafeMalloc(_size, _msg)
-#define _SAFEFREE(_ptr, _msg) SafeFree(_ptr, _msg)
 #else
 #undef OMPTARGET_NVPTX_WARNING
 #undef OMPTARGET_NVPTX_TEST
-#define _SAFEMALLOC(_size, _msg) malloc(_size)
-#define _SAFEFREE(_ptr, _msg) free(_ptr)
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
