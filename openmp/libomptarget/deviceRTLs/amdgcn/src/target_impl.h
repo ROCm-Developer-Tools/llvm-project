@@ -20,13 +20,56 @@
 #ifndef _TARGET_IMPL_H_
 #define _TARGET_IMPL_H_
 
-#include <stdint.h>
-
-#include "option.h"
-
 #ifndef __AMDGCN__
 #error "amdgcn target_impl.h expects to be compiled under __AMDGCN__"
 #endif
+
+#include <stdint.h>
+#include "amdgcn_interface.h"
+#include "cuda_shim.h"
+
+#define INLINE __inline__ __device__
+#define NOINLINE __noinline__ __device__
+
+////////////////////////////////////////////////////////////////////////////////
+// Kernel options
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+// The following def must match the absolute limit hardwired in the host RTL
+// max number of threads per team
+#define MAX_THREADS_PER_TEAM 1024
+
+#define WARPSIZE 64
+
+
+// The named barrier for active parallel threads of a team in an L1 parallel
+// region to synchronize with each other.
+#define L1_BARRIER (1)
+
+// Maximum number of preallocated arguments to an outlined parallel/simd function.
+// Anything more requires dynamic memory allocation.
+#define MAX_SHARED_ARGS 20
+
+// Maximum number of omp state objects per SM allocated statically in global
+// memory.
+#define OMP_STATE_COUNT 32
+#define MAX_SM 64
+
+
+#define OMP_ACTIVE_PARALLEL_LEVEL 128
+
+// Data sharing related quantities, need to match what is used in the compiler.
+enum DATA_SHARING_SIZES {
+  // The maximum number of workers in a kernel.
+  DS_Max_Worker_Threads = 960,
+  // The size reserved for data in a shared memory slot.
+  DS_Slot_Size = 256,
+  // The slot size that should be reserved for a working warp.
+  DS_Worker_Warp_Slot_Size = WARPSIZE * DS_Slot_Size,
+  // The maximum number of warps in use
+  DS_Max_Warp_Number = 16,
+};
 
 // warp vote function
 EXTERN uint64_t __ballot64(int predicate);
@@ -38,6 +81,12 @@ EXTERN uint64_t __lanemask_lt();
 EXTERN uint64_t __lanemask_gt();
 
 EXTERN void llvm_amdgcn_s_barrier();
+
+// CU id
+EXTERN unsigned __smid();
+
+// named sync
+EXTERN void __named_sync(const int barrier, const int num_threads);
 
 INLINE void __kmpc_impl_unpack(uint64_t val, uint32_t &lo, uint32_t &hi) {
   lo = (uint32_t)(val & 0x00000000FFFFFFFFL);
@@ -59,6 +108,10 @@ INLINE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
   return __lanemask_gt();
 }
 
+INLINE uint32_t __kmpc_impl_smid() {
+  return __smid();
+}
+
 INLINE uint64_t __kmpc_impl_ffs(uint64_t x) { return __ffsll(x); }
 
 INLINE uint64_t __kmpc_impl_popc(uint64_t x) { return __popcll(x); }
@@ -78,5 +131,12 @@ INLINE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t Var,
 }
 
 INLINE void __kmpc_impl_syncthreads() { llvm_amdgcn_s_barrier(); }
+
+INLINE void __kmpc_impl_named_sync(int barrier, uint32_t num_threads) {
+  // we have protected the master warp from releasing from its barrier
+  // due to a full workgroup barrier in the middle of a work function.
+  // So it is ok to issue a full workgroup barrier here.
+  __builtin_amdgcn_s_barrier();
+}
 
 #endif

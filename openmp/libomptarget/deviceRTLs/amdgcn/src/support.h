@@ -14,14 +14,6 @@
 // Execution Parameters
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef __AMDGCN__
-// function defined in cuda header
-EXTERN void __device_trap();
-
-// CU id
-EXTERN unsigned __smid();
-
-// named sync
-EXTERN void __named_sync(const int barrier, const int num_threads);
 
 // memory allocation
 EXTERN void *__malloc(size_t);
@@ -108,11 +100,6 @@ INLINE unsigned long PadBytes(unsigned long size, unsigned long alignment);
   ((void *)((char *)((void *)(_addr)) + (_bytes)))
 #define SUB_BYTES(_addr, _bytes)                                               \
   ((void *)((char *)((void *)(_addr)) - (_bytes)))
-
-////////////////////////////////////////////////////////////////////////////////
-// Named Barrier Routines
-////////////////////////////////////////////////////////////////////////////////
-INLINE void named_sync(const int barrier, const int num_threads);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Teams Reduction Scratchpad Helpers
