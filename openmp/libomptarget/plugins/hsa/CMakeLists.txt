@@ -71,17 +71,7 @@ endif()
 ################################################################################
 pkg_check_modules(LIBOMPTARGET_SEARCH_LIBHSA QUIET libhsa-runtime64)
 
-find_path (
-  LIBOMPTARGET_DEP_LIBHSA_INCLUDE_DIRS
-  NAMES
-  hsa.h
-  PATHS
-  $ENV{HSA_RUNTIME_PATH}/include/hsa
-  $ENV{HOME}/rocm/aomp/include/hsa
-  /opt/rocm/rocm/aomp/include/hsa
-  /opt/rocm/include/hsa
-  /usr/local/include
-  )
+set(LIBOMPTARGET_DEP_LIBHSA_INCLUDE_DIRS $ENV{HSA_RUNTIME_PATH}/include/hsa)
 
 # This is usually found on /opt/rocm/lib or /usr/lib/rocm/lib
 find_path (
@@ -130,7 +120,6 @@ endif()
 
 include_directories(
   ${LIBOMPTARGET_DEP_LIBHSA_INCLUDE_DIRS}
-  ${LIBOMPTARGET_DEP_LIBHSA_INCLUDE_DIRS}/hsa
   ${CLANG_INCLUDE_DIRS}
 )
 
