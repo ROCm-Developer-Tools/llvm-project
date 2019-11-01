@@ -28,8 +28,9 @@
 #include "amdgcn_interface.h"
 #include "cuda_shim.h"
 
-#define INLINE __inline__ __device__
-#define NOINLINE __noinline__ __device__
+#define DEVICE __device__
+#define INLINE __inline__ DEVICE
+#define NOINLINE __noinline__ DEVICE
 
 ////////////////////////////////////////////////////////////////////////////////
 // Kernel options
