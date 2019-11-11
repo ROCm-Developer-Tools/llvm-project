@@ -79,6 +79,7 @@ find_path (
   NAMES
   libhsa-runtime64.so
   PATHS
+  ${ROCM_DIR}/lib
   $ENV{HSA_RUNTIME_PATH}/lib
   $ENV{HOME}/rocm/aomp/lib
   $ENV{ROCM_DIR}/lib
