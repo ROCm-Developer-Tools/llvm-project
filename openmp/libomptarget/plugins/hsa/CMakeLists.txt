@@ -81,6 +81,7 @@ find_path (
   PATHS
   $ENV{HSA_RUNTIME_PATH}/lib
   $ENV{HOME}/rocm/aomp/lib
+  $ENV{ROCM_DIR}/lib
   /opt/rocm/aomp/lib
   /opt/rocm/lib
   /usr/lib/rocm/lib
