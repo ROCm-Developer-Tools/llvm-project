@@ -331,40 +331,25 @@ EXTERN int omp_get_team_num() {
   return rc;
 }
 
-__device__ static unsigned getWarpId() { return threadIdx.x / WARPSIZE; }
-
 EXTERN int omp_ext_get_warp_id() {
-  int rc = getWarpId();
+  int rc = GetWarpId();
   PRINT(LD_IO, "call omp_ext_get_warp_id() returns %d\n", rc);
   return rc;
 }
 
-__device__ static unsigned getLaneId() { return threadIdx.x % WARPSIZE; }
-
 EXTERN int omp_ext_get_lane_id() {
-  int rc = getLaneId();
+  int rc = GetLaneId();
   PRINT(LD_IO, "call omp_ext_get_lane_id() returns %d\n", rc);
   return rc;
 }
 
-__device__ static unsigned getNumThreads() { return blockDim.x; }
 __device__ static unsigned getMasterThreadId() {
   unsigned Mask = WARPSIZE - 1;
-  return (getNumThreads() - 1) & (~Mask);
-}
-
-INLINE unsigned smid() {
-#ifdef __AMDGCN__
-  return __smid();
-#else
-  unsigned id;
-  asm("mov.u32 %0, %%smid;" : "=r"(id));
-  return id;
-#endif
+  return (GetNumberOfThreadsInBlock() - 1) & (~Mask);
 }
 
 EXTERN int omp_ext_get_smid() {
-  int rc = smid();
+  int rc = __kmpc_impl_smid();
   PRINT(LD_IO, "call omp_ext_get_smid() returns %d\n", rc);
   return rc;
 }
@@ -449,7 +434,7 @@ EXTERN void omp_set_lock(omp_lock_t *lock) {
       now = clock();
 #endif
       clock_t cycles = now > start ? now - start : now + (0xffffffff - start);
-      if (cycles >= __OMP_SPIN * blockIdx.x) {
+      if (cycles >= __OMP_SPIN * GetBlockIdInKernel()) {
         break;
       }
     }
