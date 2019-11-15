@@ -124,8 +124,7 @@ include_directories(
 )
 
 add_library(omptarget.rtl.hsa SHARED
-  src/rtl.cpp 
-  src/elf_utils.c )
+   src/rtl.cpp )
 
 # Install plugin under the lib destination folder.
 # When we build for debug, OPENMP_LIBDIR_SUFFIX get set to -debug
