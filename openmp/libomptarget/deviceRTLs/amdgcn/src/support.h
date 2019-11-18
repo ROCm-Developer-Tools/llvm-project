@@ -99,8 +99,8 @@ DEVICE int GetNumberOfProcsInDevice(bool isSPMDExecutionMode);
 DEVICE int IsTeamMaster(int ompThreadId);
 
 // Parallel level
-DEVICE void IncParallelLevel(bool ActiveParallel);
-DEVICE void DecParallelLevel(bool ActiveParallel);
+DEVICE void IncParallelLevel(bool ActiveParallel, __kmpc_impl_lanemask_t Mask);
+DEVICE void DecParallelLevel(bool ActiveParallel, __kmpc_impl_lanemask_t Mask);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Memory
