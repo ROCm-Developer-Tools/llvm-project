@@ -60,9 +60,15 @@ if(LIBOMPTARGET_NVPTX_DEBUG)
   set(CUDA_DEBUG -DOMPTARGET_NVPTX_DEBUG=-1)
 endif()
 
-file(GLOB cuda_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu)
+get_filename_component(devicertl_base_directory
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  DIRECTORY)
+
+file(GLOB cuda_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu
+                       ${devicertl_base_directory}/common/src/*.cu)
 file(GLOB llvm_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.ll)
-file(GLOB h_files ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
+file(GLOB h_files ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h
+                  ${devicertl_base_directory}/common/*.h)
 
 # for both in-tree and out-of-tree build
 if (NOT CMAKE_ARCHIVE_OUTPUT_DIRECTORY)
@@ -80,10 +86,6 @@ else()
 endif()
 
 separate_arguments(mcpus)
-
-get_filename_component(devicertl_base_directory
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  DIRECTORY)
 
 macro(add_cuda_bc_library)
   set(cu_cmd ${AOMP_BINDIR}/clang++
