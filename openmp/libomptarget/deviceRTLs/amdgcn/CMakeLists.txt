@@ -33,18 +33,12 @@ else()
   return()
 endif()
 
-set(AOMP_DIR_FOUND ${LLVM_DIR})
 set(AOMP_INSTALL_PREFIX ${LLVM_INSTALL_PREFIX})
-set(AOMP_MAIN_INCDIR ${LLVM_BUILD_MAIN_INCLUDE_DIR})
 
 if (AOMP_INSTALL_PREFIX)
   set(AOMP_BINDIR ${AOMP_INSTALL_PREFIX}/bin)
-  set(AOMP_INCDIR ${AOMP_INSTALL_PREFIX}/include)
-  set(AOMP_LIBDIR ${AOMP_INSTALL_PREFIX}/lib)
 else()
   set(AOMP_BINDIR ${LLVM_BUILD_BINARY_DIR}/bin)
-  set(AOMP_INCDIR ${LLVM_BUILD_BINARY_DIR}/include)
-  set(AOMP_LIBDIR ${LLVM_LIBRARY_DIRS})
 endif()
 
 # Pass check
@@ -66,10 +60,9 @@ if(LIBOMPTARGET_NVPTX_DEBUG)
   set(CUDA_DEBUG -DOMPTARGET_NVPTX_DEBUG=-1)
 endif()
 
-file(GLOB sources
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cl
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/*.ll)
+file(GLOB cuda_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu)
+file(GLOB llvm_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.ll)
+file(GLOB h_files ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
 
 # for both in-tree and out-of-tree build
 if (NOT CMAKE_ARCHIVE_OUTPUT_DIRECTORY)
@@ -92,34 +85,7 @@ get_filename_component(devicertl_base_directory
   ${CMAKE_CURRENT_SOURCE_DIR}
   DIRECTORY)
 
-macro(collect_sources name dir)
-  set(cuda_sources)
-  set(ocl_sources)
-  set(llvm_sources)
-  foreach(file ${ARGN})
-    file(RELATIVE_PATH rfile ${dir} ${file})
-    get_filename_component(rdir ${rfile} DIRECTORY)
-    get_filename_component(fname ${rfile} NAME_WE)
-    get_filename_component(fext ${rfile} EXT)
-    #file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${rdir})
-    if (fext STREQUAL ".cu")
-      set(cfile ${CMAKE_CURRENT_BINARY_DIR}/${rdir}/${fname}.cu)
-      list(APPEND cuda_sources ${cfile})
-    endif()
-
-    if (fext STREQUAL ".cl")
-      set(cfile ${CMAKE_CURRENT_BINARY_DIR}/${rdir}/${fname}.cl)
-      list(APPEND ocl_sources ${cfile})
-    endif()
-    if (fext STREQUAL ".ll")
-      list(APPEND csources ${file})
-      set(cfile ${CMAKE_CURRENT_BINARY_DIR}/${rdir}/${fname}.ll)
-      list(APPEND llvm_sources ${cfile})
-    endif()
-  endforeach()
-endmacro()
-
-macro(add_cuda_bc_library name dir)
+macro(add_cuda_bc_library)
   set(cu_cmd ${AOMP_BINDIR}/clang++
     -std=c++11
     -fcuda-rdc
@@ -136,19 +102,13 @@ macro(add_cuda_bc_library name dir)
   set(bc1_files)
 
   foreach(file ${ARGN})
-    file(RELATIVE_PATH rfile ${dir} ${file})
-    get_filename_component(rdir ${rfile} DIRECTORY)
-    get_filename_component(fname ${rfile} NAME_WE)
-    get_filename_component(fext ${rfile} EXT)
-
+    get_filename_component(fname ${file} NAME_WE)
     set(bc1_filename ${fname}.${mcpu}.bc)
-
-    file(GLOB h_files "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
 
     add_custom_command(
       OUTPUT ${bc1_filename}
-      COMMAND ${cu_cmd} ${CMAKE_CURRENT_SOURCE_DIR}/src/${fname}.cu -o ${bc1_filename}
-      DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/${fname}.cu" ${h_files}
+      COMMAND ${cu_cmd} ${file} -o ${bc1_filename}
+      DEPENDS ${file} ${h_files}
       )
 
     list(APPEND bc1_files ${bc1_filename})
@@ -164,21 +124,22 @@ macro(add_cuda_bc_library name dir)
 endmacro()
 
 set(libname "omptarget-amdgcn")
-collect_sources(${libname} ${CMAKE_CURRENT_SOURCE_DIR} ${sources})
 
 foreach(mcpu ${mcpus})
   set(bc_files)
-  add_cuda_bc_library(${libname} ${CMAKE_CURRENT_SOURCE_DIR} ${cuda_sources})
-  list(APPEND bc_files ${CMAKE_CURRENT_SOURCE_DIR}/src/cuda_shim.ll)
+  add_cuda_bc_library(${cuda_sources})
+  list(APPEND bc_files ${llvm_sources})
+
+  set(bc_libname lib${libname}-${mcpu}.bc)
   add_custom_command(
-    OUTPUT lib${libname}-${mcpu}.bc
-    COMMAND ${AOMP_BINDIR}/llvm-link ${bc_files} | ${AOMP_BINDIR}/opt --always-inline -o ${OUTPUTDIR}/lib${libname}-${mcpu}.bc
+    OUTPUT ${bc_libname}
+    COMMAND ${AOMP_BINDIR}/llvm-link ${bc_files} | ${AOMP_BINDIR}/opt --always-inline -o ${OUTPUTDIR}/${bc_libname}
     DEPENDS ${bc_files}
     )
 
-  add_custom_target(lib${libname}-${mcpu} ALL DEPENDS lib${libname}-${mcpu}.bc)
+  add_custom_target(lib${libname}-${mcpu} ALL DEPENDS ${bc_libname})
 
-  install(FILES ${OUTPUTDIR}/lib${libname}-${mcpu}.bc 
+  install(FILES ${OUTPUTDIR}/${bc_libname}
      DESTINATION "lib${OPENMP_LIBDIR_SUFFIX}/libdevice"
   )
 endforeach()
