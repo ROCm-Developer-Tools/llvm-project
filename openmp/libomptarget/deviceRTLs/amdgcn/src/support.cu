@@ -247,6 +247,25 @@ DEVICE int GetNumberOfProcsInTeam(bool isSPMDExecutionMode) {
 // Memory
 ////////////////////////////////////////////////////////////////////////////////
 
+#ifdef __AMDGCN__
+
+// memory allocation
+EXTERN void *__malloc(size_t);
+EXTERN void __free(void *);
+
+#ifdef malloc
+#undef malloc
+#endif
+#define malloc __malloc
+
+#ifdef free
+#undef free
+#endif
+#define free __free
+
+// end if AMDGCN
+#endif 
+
 DEVICE unsigned long PadBytes(unsigned long size,
                               unsigned long alignment) // must be a power of 2
 {
