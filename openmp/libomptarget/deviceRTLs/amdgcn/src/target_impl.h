@@ -43,7 +43,6 @@
 
 #define WARPSIZE 64
 
-
 // The named barrier for active parallel threads of a team in an L1 parallel
 // region to synchronize with each other.
 #define L1_BARRIER (1)
@@ -81,8 +80,6 @@ EXTERN uint64_t __lanemask_lt();
 // thread's lane number in the warp
 EXTERN uint64_t __lanemask_gt();
 
-EXTERN void llvm_amdgcn_s_barrier();
-
 // CU id
 EXTERN unsigned __smid();
 
@@ -113,9 +110,9 @@ INLINE uint32_t __kmpc_impl_smid() {
   return __smid();
 }
 
-INLINE uint64_t __kmpc_impl_ffs(uint64_t x) { return __ffsll(x); }
+INLINE uint64_t __kmpc_impl_ffs(uint64_t x) { return __builtin_ffsl(x); }
 
-INLINE uint64_t __kmpc_impl_popc(uint64_t x) { return __popcll(x); }
+INLINE uint64_t __kmpc_impl_popc(uint64_t x) { return __builtin_popcountl(x); }
 
 INLINE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
   return __ballot64(1);
@@ -131,7 +128,7 @@ INLINE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t Var,
   return __shfl_down(Var, Delta, Width);
 }
 
-INLINE void __kmpc_impl_syncthreads() { llvm_amdgcn_s_barrier(); }
+INLINE void __kmpc_impl_syncthreads() { __builtin_amdgcn_s_barrier(); }
 
 INLINE void __kmpc_impl_syncwarp(__kmpc_impl_lanemask_t) {
   // AMDGCN doesn't need to sync threads in a warp
