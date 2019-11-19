@@ -60,33 +60,12 @@ static constexpr int warpSize = 64;
 __OVERL__ int __shfl_down(int a, unsigned int b, int c);
 __OVERL__
 int __shfl(int var, int src_lane, int width = warpSize);
-__OVERL__
-unsigned int __shfl(unsigned int var, int src_lane, int width = warpSize);
 
-// Declare here, defined in IR as shims around nvvm.member.gl et al
-// Using asm() to rename the symbol works, but marks the symbols as convergent
-// which changes the CFG
 extern "C" {
-__device__ void __nvvm_membar_gl(void);
-__device__ void __nvvm_membar_cta(void);
-__device__ void __nvvm_membar_sys(void);
-__device__ int32_t __nvvm_read_ptx_sreg_tid_x(void);
-__device__ int32_t __nvvm_read_ptx_sreg_tid_y(void);
-__device__ int32_t __nvvm_read_ptx_sreg_tid_z(void);
-__device__ int32_t __nvvm_read_ptx_sreg_ctaid_x(void);
-__device__ int32_t __nvvm_read_ptx_sreg_ctaid_y(void);
-__device__ int32_t __nvvm_read_ptx_sreg_ctaid_z(void);
-__device__ int32_t __nvvm_read_ptx_sreg_ntid_x(void);
-__device__ int32_t __nvvm_read_ptx_sreg_ntid_y(void);
-__device__ int32_t __nvvm_read_ptx_sreg_ntid_z(void);
-__device__ int32_t __nvvm_read_ptx_sreg_nctaid_x(void);
-__device__ int32_t __nvvm_read_ptx_sreg_nctaid_y(void);
-__device__ int32_t __nvvm_read_ptx_sreg_nctaid_z(void);
+__device__ void __threadfence(void);
+__device__ void __threadfence_block(void);
+__device__ void __threadfence_system(void);
 }
-
-__device__ static void __threadfence(void) { __nvvm_membar_gl(); }
-__device__ static void __threadfence_block(void) { __nvvm_membar_cta(); }
-__device__ static void __threadfence_system(void) { __nvvm_membar_sys(); }
 
 __device__ static long long __clock64(void) {
 #if __AMDGCN__ > 800
@@ -97,15 +76,16 @@ __device__ static long long __clock64(void) {
 #endif
 }
 
-extern "C" {
-__device__ int __nv_popcll(long long);
-__device__ int __nv_ffsll(long long);
-__device__ int __nv_min(int, int);
+__device__ static int32_t min(int32_t __a, int32_t __b) {
+  return __a < __b ? __a : __b;
 }
-
-__device__ static int __popcll(long long __a) { return __nv_popcll(__a); }
-__device__ static int __ffsll(long long __a) { return __nv_ffsll(__a); }
-__device__ static int min(int __a, int __b) { return __nv_min(__a, __b); }
+__device__ static uint32_t min(uint32_t __a, uint32_t __b) {
+  return __a < __b ? __a : __b;
+}
+__device__ static uint32_t min(uint32_t __a, int32_t __b) {
+  // resolve ambiguous call
+  return min(__a, (uint32_t)__b);
+}
 
 // atomics shim
 #ifdef __cplusplus
@@ -161,36 +141,34 @@ __OVERL__ unsigned long long atomicCAS(unsigned long long *address,
   __attribute__((device)) TypeName *operator&() const __DELETE
 
 struct __cuda_builtin_threadIdx_t {
-  __CUDA_DEVICE_BUILTIN(x, __nvvm_read_ptx_sreg_tid_x());
-  __CUDA_DEVICE_BUILTIN(y, __nvvm_read_ptx_sreg_tid_y());
-  __CUDA_DEVICE_BUILTIN(z, __nvvm_read_ptx_sreg_tid_z());
+  __CUDA_DEVICE_BUILTIN(x, __builtin_amdgcn_workitem_id_x());
 
 private:
   __CUDA_DISALLOW_BUILTINVAR_ACCESS(__cuda_builtin_threadIdx_t);
 };
 
 struct __cuda_builtin_blockIdx_t {
-  __CUDA_DEVICE_BUILTIN(x, __nvvm_read_ptx_sreg_ctaid_x());
-  __CUDA_DEVICE_BUILTIN(y, __nvvm_read_ptx_sreg_ctaid_y());
-  __CUDA_DEVICE_BUILTIN(z, __nvvm_read_ptx_sreg_ctaid_z());
+  __CUDA_DEVICE_BUILTIN(x, __builtin_amdgcn_workgroup_id_x());
 
 private:
   __CUDA_DISALLOW_BUILTINVAR_ACCESS(__cuda_builtin_blockIdx_t);
 };
 
+extern "C" __device__ uint64_t __ockl_get_local_size(uint32_t);
 struct __cuda_builtin_blockDim_t {
-  __CUDA_DEVICE_BUILTIN(x, __nvvm_read_ptx_sreg_ntid_x());
-  __CUDA_DEVICE_BUILTIN(y, __nvvm_read_ptx_sreg_ntid_y());
-  __CUDA_DEVICE_BUILTIN(z, __nvvm_read_ptx_sreg_ntid_z());
+  __CUDA_DEVICE_BUILTIN(x, __ockl_get_local_size(0));
+  __CUDA_DEVICE_BUILTIN(y, __ockl_get_local_size(1));
+  __CUDA_DEVICE_BUILTIN(z, __ockl_get_local_size(2));
 
 private:
   __CUDA_DISALLOW_BUILTINVAR_ACCESS(__cuda_builtin_blockDim_t);
 };
 
+extern "C" __device__ uint64_t __ockl_get_num_groups(uint32_t);
 struct __cuda_builtin_gridDim_t {
-  __CUDA_DEVICE_BUILTIN(x, __nvvm_read_ptx_sreg_nctaid_x());
-  __CUDA_DEVICE_BUILTIN(y, __nvvm_read_ptx_sreg_nctaid_y());
-  __CUDA_DEVICE_BUILTIN(z, __nvvm_read_ptx_sreg_nctaid_z());
+  __CUDA_DEVICE_BUILTIN(x, __ockl_get_num_groups(0));
+  __CUDA_DEVICE_BUILTIN(y, __ockl_get_num_groups(1));
+  __CUDA_DEVICE_BUILTIN(z, __ockl_get_num_groups(2));
 
 private:
   __CUDA_DISALLOW_BUILTINVAR_ACCESS(__cuda_builtin_gridDim_t);

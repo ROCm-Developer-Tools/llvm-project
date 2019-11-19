@@ -25,7 +25,6 @@
 #define SIZE_OF_HEAP SIZE_MALLOC
 
 #ifndef nullptr
-//#define nullptr((void *)0)
 #define nullptr 0
 #endif
 
@@ -34,16 +33,12 @@
 #define hipBlockDim_z blockDim.z
 
 #define hipBlockIdx_x blockIdx.x
-#define hipBlockIdx_y blockIdx.y
-#define hipBlockIdx_z blockIdx.z
 
 #define hipGridDim_x gridDim.x
 #define hipGridDim_y gridDim.y
 #define hipGridDim_z gridDim.z
 
 #define hipThreadIdx_x threadIdx.x
-#define hipThreadIdx_y threadIdx.y
-#define hipThreadIdx_z threadIdx.z
 
 __device__ char gpuHeap[SIZE_OF_HEAP];
 __device__ uint32_t gpuFlags[NUM_PAGES];

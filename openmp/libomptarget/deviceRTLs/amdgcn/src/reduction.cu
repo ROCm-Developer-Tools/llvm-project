@@ -537,23 +537,14 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
   //         by returning 1 in the thread holding the reduction result.
 
   // Check if this is the very last team.
-#ifdef __AMDGCN__
-  unsigned NumRecs = (NumTeams<num_of_records) ? NumTeams : num_of_records;
-#else  
   unsigned NumRecs = min(NumTeams, num_of_records);
-#endif
-  
   if (ChunkTeamCount == NumTeams - Bound - 1) {
     //
     // Last team processing.
     //
     if (ThreadId >= NumRecs)
       return 0;
-#ifdef __AMDGCN__
-    NumThreads = roundToWarpsize((NumThreads < NumRecs) ? NumThreads : NumRecs);
-#else
     NumThreads = roundToWarpsize(min(NumThreads, NumRecs));
-#endif
     if (ThreadId >= NumThreads)
       return 0;
 
@@ -568,11 +559,7 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
 
       // When we have more than [warpsize] number of threads
       // a block reduction is performed here.
-#ifdef __AMDGCN__
-      uint32_t ActiveThreads = (NumRecs<NumThreads) ? NumRecs : NumThreads;
-#else      
       uint32_t ActiveThreads = min(NumRecs, NumThreads);
-#endif
       if (ActiveThreads > WARPSIZE) {
         uint32_t WarpsNeeded = (ActiveThreads + WARPSIZE - 1) / WARPSIZE;
         // Gather all the reduced values from each warp
