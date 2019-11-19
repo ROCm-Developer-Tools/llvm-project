@@ -19,25 +19,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Execution Parameters
 ////////////////////////////////////////////////////////////////////////////////
-#ifdef __AMDGCN__
-
-// memory allocation
-EXTERN void *__malloc(size_t);
-EXTERN void __free(void *);
-
-#ifdef malloc
-#undef malloc
-#endif
-#define malloc __malloc
-
-#ifdef free
-#undef free
-#endif
-#define free __free
-
-// end if AMDGCN
-#endif 
-
 enum ExecutionMode {
   Spmd = 0x00u,
   Generic = 0x01u,
