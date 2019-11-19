@@ -63,17 +63,17 @@ public:
     // Free any memory allocated for outlined parallel function with a large
     // number of arguments.
     if (nArgs > MAX_SHARED_ARGS) {
-      _SAFEFREE(args, (char *)"new extended args");
+      SafeFree(args, "new extended args");
       Init();
     }
   }
   INLINE void EnsureSize(size_t size) {
     if (size > nArgs) {
       if (nArgs > MAX_SHARED_ARGS) {
-        _SAFEFREE(args, (char *)"new extended args");
+        SafeFree(args, "new extended args");
       }
-      args = (void **)_SAFEMALLOC(size * sizeof(void *),
-                                  (char *)"new extended args");
+      args = (void **)SafeMalloc(size * sizeof(void *),
+                                "new extended args");
       nArgs = size;
     }
   }
