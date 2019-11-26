@@ -14,7 +14,7 @@
 #include "omptarget-nvptx.h"
 #include "target_impl.h"
 #include "device_environment.h"
-#include <ctime>
+#include <time.h>
 
 // Timer precision is 1ns
 #define TIMER_PRECISION ((double)1E-9)
