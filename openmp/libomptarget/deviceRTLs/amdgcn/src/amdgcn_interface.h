@@ -10,6 +10,7 @@
 #define _AMDGCN_INTERFACE_H_
 
 #include <stdint.h>
+#include <stddef.h>
 
 #define EXTERN extern "C" __attribute__((device))
 typedef uint64_t __kmpc_impl_lanemask_t;
