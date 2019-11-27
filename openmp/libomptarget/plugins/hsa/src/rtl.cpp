@@ -938,6 +938,10 @@ int32_t __tgt_rtl_data_submit(int device_id, void *tgt_ptr, void *hst_ptr,
   assert(device_id <
              (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
          "Device ID too large");
+  // Return success if we are not doing host to target.
+  if (!hst_ptr)
+    return OFFLOAD_SUCCESS;
+
   DP("Submit data %ld bytes, (hst:%016llx) -> (tgt:%016llx).\n", size,
      (long long unsigned)(Elf64_Addr)hst_ptr,
      (long long unsigned)(Elf64_Addr)tgt_ptr);
@@ -956,6 +960,9 @@ int32_t __tgt_rtl_data_retrieve(int device_id, void *hst_ptr, void *tgt_ptr,
   assert(device_id <
              (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
          "Device ID too large");
+  // Return success if we are not copying back to host from target.
+  if (!hst_ptr)
+    return OFFLOAD_SUCCESS;
   atmi_status_t err;
   DP("Retrieve data %ld bytes, (tgt:%016llx) -> (hst:%016llx).\n", size,
      (long long unsigned)(Elf64_Addr)tgt_ptr,
