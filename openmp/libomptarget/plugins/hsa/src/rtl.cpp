@@ -960,7 +960,7 @@ int32_t __tgt_rtl_data_retrieve(int device_id, void *hst_ptr, void *tgt_ptr,
   assert(device_id <
              (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
          "Device ID too large");
-  // Return success if we are not copyign back to host from target.
+  // Return success if we are not copying back to host from target.
   if (!hst_ptr)
     return OFFLOAD_SUCCESS;
   atmi_status_t err;
