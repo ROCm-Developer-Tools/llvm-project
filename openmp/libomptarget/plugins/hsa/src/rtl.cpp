@@ -718,7 +718,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
                                             1, ATMI_DEVTYPE_GPU, e->name);
 
     if (stat != ATMI_STATUS_SUCCESS) {
-      fprintf(stderr, "atmi_kernel_create failed %d\n", stat);
+      DP("atmi_kernel_create failed %d\n", stat);
       return NULL;
     }
     // default value GENERIC (in case symbol is missing from cubin file)
