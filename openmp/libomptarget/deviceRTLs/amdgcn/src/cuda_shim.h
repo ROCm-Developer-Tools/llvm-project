@@ -30,10 +30,6 @@
 #define __noinline__ __attribute__((noinline))
 #endif
 
-#ifndef __forceinline__
-#define __forceinline__ __attribute__((always_inline))
-#endif
-
 #ifndef __align__
 #define __align__(n) __attribute__((aligned(n)))
 #endif
@@ -88,21 +84,15 @@ __device__ int32_t __nvvm_read_ptx_sreg_nctaid_y(void);
 __device__ int32_t __nvvm_read_ptx_sreg_nctaid_z(void);
 }
 
-__device__ __forceinline__ static void __threadfence(void) {
-  __nvvm_membar_gl();
-}
-__device__ __forceinline__ static void __threadfence_block(void) {
-  __nvvm_membar_cta();
-}
-__device__ __forceinline__ static void __threadfence_system(void) {
-  __nvvm_membar_sys();
-}
+__device__ static void __threadfence(void) { __nvvm_membar_gl(); }
+__device__ static void __threadfence_block(void) { __nvvm_membar_cta(); }
+__device__ static void __threadfence_system(void) { __nvvm_membar_sys(); }
 
-__device__ __forceinline__ static long long __clock64(void) {
+__device__ static long long __clock64(void) {
 #if __AMDGCN__ > 800
   return __builtin_amdgcn_s_memrealtime();
 #else
-  __device__ __forceinline__ long long __llvm_amdgcn_s_memrealtime(void);
+  __device__ long long __llvm_amdgcn_s_memrealtime(void);
   return __llvm_amdgcn_s_memrealtime();
 #endif
 }
@@ -113,15 +103,9 @@ __device__ int __nv_ffsll(long long);
 __device__ int __nv_min(int, int);
 }
 
-__device__ __forceinline__ static int __popcll(long long __a) {
-  return __nv_popcll(__a);
-}
-__device__ __forceinline__ static int __ffsll(long long __a) {
-  return __nv_ffsll(__a);
-}
-__device__ __forceinline__ static int min(int __a, int __b) {
-  return __nv_min(__a, __b);
-}
+__device__ static int __popcll(long long __a) { return __nv_popcll(__a); }
+__device__ static int __ffsll(long long __a) { return __nv_ffsll(__a); }
+__device__ static int min(int __a, int __b) { return __nv_min(__a, __b); }
 
 // atomics shim
 #ifdef __cplusplus
