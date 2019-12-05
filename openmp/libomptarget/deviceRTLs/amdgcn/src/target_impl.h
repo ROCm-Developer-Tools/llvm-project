@@ -31,6 +31,8 @@
 #define DEVICE __attribute__((device))
 #define INLINE inline DEVICE
 #define NOINLINE __attribute__((noinline)) DEVICE
+#define SHARED __attribute__((shared))
+#define ALIGN(N) __attribute__((aligned(N)))
 
 ////////////////////////////////////////////////////////////////////////////////
 // Kernel options
@@ -87,8 +89,8 @@ EXTERN unsigned __smid();
 EXTERN void __named_sync(const int barrier, const int num_threads);
 
 INLINE void __kmpc_impl_unpack(uint64_t val, uint32_t &lo, uint32_t &hi) {
-  lo = (uint32_t)(val & 0x00000000FFFFFFFFL);
-  hi = (uint32_t)((val & 0xFFFFFFFF00000000L) >> 32);
+  lo = (uint32_t)(val & UINT64_C(0x00000000FFFFFFFF));
+  hi = (uint32_t)((val & UINT64_C(0xFFFFFFFF00000000)) >> 32);
 }
 
 INLINE uint64_t __kmpc_impl_pack(uint32_t lo, uint32_t hi) {

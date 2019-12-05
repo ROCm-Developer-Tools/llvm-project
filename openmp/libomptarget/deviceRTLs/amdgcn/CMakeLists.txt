@@ -1,18 +1,14 @@
 ##===----------------------------------------------------------------------===##
 #
-#                     The LLVM Compiler Infrastructure
-#
-# This file is dual licensed under the MIT and the University of Illinois Open
-# Source Licenses. See LICENSE.txt for details.
-##===----------------------------------------------------------------------===##
-#
-# amdgcn/CMakeLists.txt
-# Written by Greg Rodgers (Gregory.Rodgers@amd.com)
+# Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 ##===----------------------------------------------------------------------===##
-
-################################################################################
-# Add check for required compiler
+#
+# Build the AMDGCN Device RTL if the ROCM tools are available
+#
+##===----------------------------------------------------------------------===##
 
 find_package(LLVM QUIET CONFIG
   PATHS
@@ -23,8 +19,7 @@ find_package(LLVM QUIET CONFIG
   ${LIBOMPTARGET_NVPTX_CUDA_COMPILER_DIR}
   ${LIBOMPTARGET_NVPTX_CUDA_LINKER_DIR}
   ${CMAKE_CXX_COMPILER_DIR}
-  NO_DEFAULT_PATH
-  )
+  NO_DEFAULT_PATH)
 
 if (LLVM_DIR)
   libomptarget_say("Found LLVM ${LLVM_PACKAGE_VERSION}. Configure: ${LLVM_DIR}/LLVMConfig.cmake")
@@ -41,12 +36,7 @@ else()
   set(AOMP_BINDIR ${LLVM_BUILD_BINARY_DIR}/bin)
 endif()
 
-# Pass check
-libomptarget_say("Building AMDGCN device RTL. LLVM_COMPILER_PATH=${AOMP_BINDIR} ")
-
-###############################################################################
-# Main project
-###############################################################################
+libomptarget_say("Building AMDGCN device RTL. LLVM_COMPILER_PATH=${AOMP_BINDIR}")
 
 project(omptarget-amdgcn)
 
@@ -110,8 +100,7 @@ macro(add_cuda_bc_library)
     add_custom_command(
       OUTPUT ${bc1_filename}
       COMMAND ${cu_cmd} ${file} -o ${bc1_filename}
-      DEPENDS ${file} ${h_files}
-      )
+      DEPENDS ${file} ${h_files})
 
     list(APPEND bc1_files ${bc1_filename})
   endforeach()
@@ -119,8 +108,7 @@ macro(add_cuda_bc_library)
   add_custom_command(
     OUTPUT linkout.cuda.${mcpu}.bc
     COMMAND ${AOMP_BINDIR}/llvm-link ${bc1_files} -o linkout.cuda.${mcpu}.bc
-    DEPENDS ${bc1_files}
-    )
+    DEPENDS ${bc1_files})
 
   list(APPEND bc_files linkout.cuda.${mcpu}.bc)
 endmacro()
@@ -136,12 +124,11 @@ foreach(mcpu ${mcpus})
   add_custom_command(
     OUTPUT ${bc_libname}
     COMMAND ${AOMP_BINDIR}/llvm-link ${bc_files} | ${AOMP_BINDIR}/opt --always-inline -o ${OUTPUTDIR}/${bc_libname}
-    DEPENDS ${bc_files}
-    )
+    DEPENDS ${bc_files})
 
   add_custom_target(lib${libname}-${mcpu} ALL DEPENDS ${bc_libname})
 
   install(FILES ${OUTPUTDIR}/${bc_libname}
-     DESTINATION "lib${OPENMP_LIBDIR_SUFFIX}/libdevice"
+     DESTINATION "${OPENMP_INSTALL_LIBDIR}/libdevice"
   )
 endforeach()
