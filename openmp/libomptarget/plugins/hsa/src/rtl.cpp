@@ -41,7 +41,6 @@
 #endif
 
 int print_kernel_trace;
-int max_threads_limit;
 
 #ifdef OMPTARGET_DEBUG
 static int DebugLevel = 0;
