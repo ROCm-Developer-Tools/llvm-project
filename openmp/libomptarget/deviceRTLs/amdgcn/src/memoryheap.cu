@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "omptarget-nvptx.h"
+#include "common/omptarget.h"
 #include <stdio.h>
 
 #ifdef __AMDGCN__
