@@ -79,8 +79,25 @@ find_path (
   NAMES
   libhsa-runtime64.so
   PATHS
+  ${ROCM_DIR}/hsa/lib
   $ENV{HSA_RUNTIME_PATH}/lib
   $ENV{HOME}/rocm/aomp/lib
+  $ENV{ROCM_DIR}/lib
+  /opt/rocm/aomp/lib
+  /opt/rocm/lib
+  /usr/lib/rocm/lib
+  )
+
+find_path (
+  LIBOMPTARGET_DEP_LIBHSAKMT_LIBRARIES_DIRS
+  NAMES
+  libhsakmt.so
+  PATHS
+  ${ROCM_DIR}/lib64
+  ${ROCM_DIR}/lib
+  $ENV{HSA_RUNTIME_PATH}/lib
+  $ENV{HOME}/rocm/aomp/lib
+  $ENV{ROCM_DIR}/lib
   /opt/rocm/aomp/lib
   /opt/rocm/lib
   /usr/lib/rocm/lib
@@ -135,7 +152,7 @@ install(TARGETS omptarget.rtl.hsa LIBRARY DESTINATION "lib${OPENMP_LIBDIR_SUFFIX
 target_link_libraries(
   omptarget.rtl.hsa
   -L${AOMP_LIBDIR}${OPENMP_LIBDIR_SUFFIX} -latmi_runtime -Wl,-rpath,${AOMP_LIBDIR}${OPENMP_LIBDIR_SUFFIX}
-  -L${LIBOMPTARGET_DEP_LIBHSA_LIBRARIES_DIRS} -lhsa-runtime64 -lhsakmt  -Wl,-rpath,${LIBOMPTARGET_DEP_LIBHSA_LIBRARIES_DIRS} 
+  -L${LIBOMPTARGET_DEP_LIBHSA_LIBRARIES_DIRS} -L${LIBOMPTARGET_DEP_LIBHSAKMT_LIBRARIES_DIRS} -lhsa-runtime64 -lhsakmt  -Wl,-rpath,${LIBOMPTARGET_DEP_LIBHSA_LIBRARIES_DIRS},-rpath,${LIBOMPTARGET_DEP_LIBHSAKMT_LIBRARIES_DIRS}
   -L${AOMP_LIBDIR} -lLLVMAMDGPUDesc -lLLVMAMDGPUUtils -lLLVMMC -lLLVMCore -lLLVMSupport -Wl,-rpath,${AOMP_LIBDIR}
   -lelf
   "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exports"
