@@ -51,10 +51,6 @@ __device__ int printf(const char *, ...);
 #define __OVERL__ __attribute__((device, always_inline, overloadable)) const
 #endif
 
-#ifndef __NOOVL__
-#define __NOOVL__ extern "C" __attribute__((device, always_inline)) const
-#endif
-
 // shuffle
 static constexpr int warpSize = 64;
 __OVERL__ int __shfl_down(int a, unsigned int b, int c);
@@ -87,39 +83,6 @@ __device__ static uint32_t min(uint32_t __a, int32_t __b) {
   return min(__a, (uint32_t)__b);
 }
 
-// atomics shim
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-__OVERL__ unsigned atomicAdd(unsigned *address, unsigned val);
-__OVERL__ int atomicAdd(int *address, int val);
-__OVERL__ unsigned long long atomicAdd(unsigned long long *address,
-                                       unsigned long long val);
-
-__OVERL__ unsigned atomicInc(unsigned *address);
-__OVERL__ unsigned atomicInc(unsigned *address, unsigned max);
-__OVERL__ int atomicInc(int *address);
-
-__OVERL__ int atomicMax(int *address, int val);
-__OVERL__ unsigned atomicMax(unsigned *address, unsigned val);
-__OVERL__ unsigned long long atomicMax(unsigned long long *address,
-                                       unsigned long long val);
-
-__OVERL__ int atomicExch(int *address, int val);
-__OVERL__ unsigned atomicExch(unsigned *address, unsigned val);
-__OVERL__ unsigned long long atomicExch(unsigned long long *address,
-                                        unsigned long long val);
-
-__OVERL__ unsigned atomicCAS(unsigned *address, unsigned compare, unsigned val);
-__OVERL__ int atomicCAS(int *address, int compare, int val);
-__OVERL__ unsigned long long atomicCAS(unsigned long long *address,
-                                       unsigned long long compare,
-                                       unsigned long long val);
-
-#ifdef __cplusplus
-}
-#endif
 
 #define __CUDA_DEVICE_BUILTIN(FIELD, INTRINSIC)                                \
   __declspec(property(get = __fetch_builtin_##FIELD)) unsigned int FIELD;      \
