@@ -12,8 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "common/omptarget.h"
+#include "common/device_environment.h"
 #include "target_impl.h"
-#include "device_environment.h"
+
 #include <time.h>
 
 // Timer precision is 1ns
