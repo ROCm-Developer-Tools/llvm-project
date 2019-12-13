@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "common/omptarget.h"
-#include "device_environment.h"
+#include "common/device_environment.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // global device environment

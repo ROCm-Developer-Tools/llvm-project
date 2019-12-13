@@ -28,7 +28,7 @@
 #ifndef _OMPTARGET_NVPTX_DEBUG_H_
 #define _OMPTARGET_NVPTX_DEBUG_H_
 
-#include "device_environment.h"
+#include "common/device_environment.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // set desired level of debugging
