@@ -6,9 +6,9 @@
 #
 # ##===----------------------------------------------------------------------===##
 #
-# Build a device RTL for each available machine available.
+# Build a device RTL for each available machine.
 #
 ##===----------------------------------------------------------------------===##
 
-add_subdirectory(nvptx)
 add_subdirectory(amdgcn)
+add_subdirectory(nvptx)

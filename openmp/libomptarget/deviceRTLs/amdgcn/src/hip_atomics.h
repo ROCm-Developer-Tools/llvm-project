@@ -6,6 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef OMPTARGET_AMDGCN_HIP_ATOMICS_H
+#define OMPTARGET_AMDGCN_HIP_ATOMICS_H
+
 #include "target_impl.h"
 
 DEVICE unsigned atomicAdd(unsigned *address, unsigned val);
@@ -32,3 +35,5 @@ DEVICE int atomicCAS(int *address, int compare, int val);
 DEVICE unsigned long long atomicCAS(unsigned long long *address,
                                     unsigned long long compare,
                                     unsigned long long val);
+
+#endif

@@ -8,8 +8,7 @@
 //
 //  This file contains all the definitions that are relevant to
 //  the interface. The first section contains the interface as
-//  declared by OpenMP.  A second section includes library private calls
-//  (mostly debug, temporary?) The third section includes the compiler
+//  declared by OpenMP.  The second section includes the compiler
 //  specific interfaces.
 //
 //===----------------------------------------------------------------------===//

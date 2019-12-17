@@ -22,18 +22,6 @@
 #define __device__ __attribute__((device))
 #endif
 
-#ifndef __shared__
-#define __shared__ __attribute__((shared))
-#endif
-
-#ifndef __noinline__
-#define __noinline__ __attribute__((noinline))
-#endif
-
-#ifndef __align__
-#define __align__(n) __attribute__((aligned(n)))
-#endif
-
 // device libc
 extern "C" {
 __device__ __attribute__((noreturn)) void
