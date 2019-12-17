@@ -25,6 +25,8 @@
 #endif
 
 #include <stdint.h>
+#include <stddef.h>
+
 #include "amdgcn_interface.h"
 #include "cuda_shim.h"
 
