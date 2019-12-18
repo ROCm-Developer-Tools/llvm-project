@@ -42,6 +42,17 @@
 
 int print_kernel_trace;
 
+static int dbg_trace(const char *fmt, ...) {
+  int rc = 0;
+  if (print_kernel_trace > 1) {
+    va_list args;
+    va_start(args, fmt);
+    rc = vfprintf(stderr, fmt, args);
+    va_end(args);
+  }
+  return rc;
+}
+
 #ifdef OMPTARGET_DEBUG
 static int DebugLevel = 0;
 
@@ -428,8 +439,8 @@ int32_t __tgt_rtl_init_device(int device_id) {
     DeviceInfo.ComputeUnits[device_id] = compute_units;
     DP("Using %d compute unis per grid\n", DeviceInfo.ComputeUnits[device_id]);
   }
-  if (print_kernel_trace > 1)
-    fprintf(stderr, "Device#%-2d CU's: %2d\n", device_id,
+  
+  dbg_trace("Device#%-2d CU's: %2d\n", device_id,
             DeviceInfo.ComputeUnits[device_id]);
 
   // Query attributes to determine number of threads/block and blocks/grid.
@@ -1048,20 +1059,16 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
   if (Max_Teams > DeviceInfo.HardTeamLimit)
     Max_Teams = DeviceInfo.HardTeamLimit;
 
-  if (print_kernel_trace > 1) {
-    fprintf(stderr, "RTLDeviceInfoTy::Max_Teams: %d\n",
-            RTLDeviceInfoTy::Max_Teams);
-    fprintf(stderr, "Max_Teams: %d\n", Max_Teams);
-    fprintf(stderr, "RTLDeviceInfoTy::Warp_Size: %d\n",
-            RTLDeviceInfoTy::Warp_Size);
-    fprintf(stderr, "RTLDeviceInfoTy::Max_WG_Size: %d\n",
-            RTLDeviceInfoTy::Max_WG_Size);
-    fprintf(stderr, "RTLDeviceInfoTy::Default_WG_Size: %d\n",
+  dbg_trace("RTLDeviceInfoTy::Max_Teams: %d\n", RTLDeviceInfoTy::Max_Teams);
+  dbg_trace("Max_Teams: %d\n", Max_Teams);
+  dbg_trace("RTLDeviceInfoTy::Warp_Size: %d\n", RTLDeviceInfoTy::Warp_Size);
+  dbg_trace("RTLDeviceInfoTy::Max_WG_Size: %d\n", RTLDeviceInfoTy::Max_WG_Size);
+  dbg_trace("RTLDeviceInfoTy::Default_WG_Size: %d\n",
             RTLDeviceInfoTy::Default_WG_Size);
-    fprintf(stderr, "thread_limit: %d\n", thread_limit);
-    fprintf(stderr, "threadsPerGroup: %d\n", threadsPerGroup);
-    fprintf(stderr, "ConstWGSize: %d\n", ConstWGSize);
-  }
+  dbg_trace("thread_limit: %d\n", thread_limit);
+  dbg_trace("threadsPerGroup: %d\n", threadsPerGroup);
+  dbg_trace("ConstWGSize: %d\n", ConstWGSize);
+
   // check for thread_limit() clause
   if (thread_limit > 0) {
     threadsPerGroup = thread_limit;
@@ -1081,8 +1088,8 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
     DP("Reduced threadsPerGroup to flat-attr-group-size limit %d\n",
        threadsPerGroup);
   }
-  if (print_kernel_trace > 1)
-    fprintf(stderr, "threadsPerGroup: %d\n", threadsPerGroup);
+
+  dbg_trace("threadsPerGroup: %d\n", threadsPerGroup);
   DP("Preparing %d threads\n", threadsPerGroup);
 
   // Set default num_groups (teams)
@@ -1094,10 +1101,8 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
     num_groups = Max_Teams;
   DP("Set default num of groups %d\n", num_groups);
 
-  if (print_kernel_trace > 1) {
-    fprintf(stderr, "num_groups: %d\n", num_groups);
-    fprintf(stderr, "num_teams: %d\n", num_teams);
-  }
+  dbg_trace("num_groups: %d\n", num_groups);
+  dbg_trace("num_teams: %d\n", num_teams);
 
   // Reduce num_groups if threadsPerGroup exceeds RTLDeviceInfoTy::Max_WG_Size
   // This reduction is typical for default case (no thread_limit clause).
@@ -1114,11 +1119,10 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
   if (num_teams > 0) {
     num_groups = (num_teams < num_groups) ? num_teams : num_groups;
   }
-  if (print_kernel_trace > 1) {
-    fprintf(stderr, "num_groups: %d\n", num_groups);
-    fprintf(stderr, "DeviceInfo.EnvNumTeams %d\n", DeviceInfo.EnvNumTeams);
-    fprintf(stderr, "DeviceInfo.EnvTeamLimit %d\n", DeviceInfo.EnvTeamLimit);
-  }
+
+  dbg_trace("num_groups: %d\n", num_groups);
+  dbg_trace("DeviceInfo.EnvNumTeams %d\n", DeviceInfo.EnvNumTeams);
+  dbg_trace("DeviceInfo.EnvTeamLimit %d\n", DeviceInfo.EnvTeamLimit);
 
   if (DeviceInfo.EnvNumTeams > 0) {
     num_groups = (DeviceInfo.EnvNumTeams < num_groups) ? DeviceInfo.EnvNumTeams
@@ -1147,15 +1151,13 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
     }
     if (num_groups > Max_Teams) {
       num_groups = Max_Teams;
-      if (print_kernel_trace > 1)
-        fprintf(stderr, "Limiting num_groups %d to Max_Teams %d \n", num_groups,
+      dbg_trace("Limiting num_groups %d to Max_Teams %d \n", num_groups,
                 Max_Teams);
     }
     if (num_groups > num_teams && num_teams > 0) {
       num_groups = num_teams;
-      if (print_kernel_trace > 1)
-        fprintf(stderr, "Limiting num_groups %d to clause num_teams %d \n",
-                num_groups, num_teams);
+      dbg_trace("Limiting num_groups %d to clause num_teams %d \n", num_groups,
+                num_teams);
     }
   }
 
@@ -1167,11 +1169,11 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
         num_groups > DeviceInfo.EnvMaxTeamsDefault)
       num_groups = DeviceInfo.EnvMaxTeamsDefault;
   }
-  if (print_kernel_trace > 1) {
-    fprintf(stderr, "threadsPerGroup: %d\n", threadsPerGroup);
-    fprintf(stderr, "num_groups: %d\n", num_groups);
-    fprintf(stderr, "loop_tripcount: %ld\n", loop_tripcount);
-  }
+
+  dbg_trace("threadsPerGroup: %d\n", threadsPerGroup);
+  dbg_trace("num_groups: %d\n", num_groups);
+  dbg_trace("loop_tripcount: %ld\n", loop_tripcount);
+
   DP("Final %d num_groups and %d threadsPerGroup\n", num_groups,
      threadsPerGroup);
 }
