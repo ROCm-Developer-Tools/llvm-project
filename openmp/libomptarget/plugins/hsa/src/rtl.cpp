@@ -97,10 +97,10 @@ struct KernelTy {
   // 1 - Generic mode (with master warp)
   int8_t ExecutionMode;
   int16_t ConstWGSize;
-  const char* Name;
+  const char *Name;
 
   KernelTy(ATMIfunction _Func, int8_t _ExecutionMode, int16_t _ConstWGSize,
-           const char* _Name)
+           const char *_Name)
       : Func(_Func), ExecutionMode(_ExecutionMode), ConstWGSize(_ConstWGSize),
         Name(_Name) {
     DP("Construct kernelinfo: ExecMode %d\n", ExecutionMode);
@@ -117,6 +117,7 @@ class RTLDeviceInfoTy {
   int NumberOfiGPUs;
   int NumberOfdGPUs;
   int NumberOfCPUs;
+
 public:
   int NumberOfDevices;
 
@@ -149,18 +150,18 @@ public:
   static const int HardTeamLimit = 1 << 20; // 1 Meg
   static const int DefaultNumTeams = 128;
   static const int Max_Teams =
-    clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Max_Teams];
+      clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Max_Teams];
   static const int Warp_Size =
-    clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Warp_Size];
+      clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Warp_Size];
   static const int Max_WG_Size =
-    clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Max_WG_Size];
+      clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Max_WG_Size];
   static const int Default_WG_Size =
-    clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Default_WG_Size];
+      clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Default_WG_Size];
 
   // Record entry point associated with device
   void addOffloadEntry(int32_t device_id, __tgt_offload_entry entry) {
     assert(device_id < (int32_t)FuncGblEntries.size() &&
-        "Unexpected device id!");
+           "Unexpected device id!");
     FuncOrGblEntryTy &E = FuncGblEntries[device_id].back();
 
     E.Entries.push_back(entry);
@@ -169,7 +170,7 @@ public:
   // Return true if the entry is associated with device
   bool findOffloadEntry(int32_t device_id, void *addr) {
     assert(device_id < (int32_t)FuncGblEntries.size() &&
-         "Unexpected device id!");
+           "Unexpected device id!");
     FuncOrGblEntryTy &E = FuncGblEntries[device_id].back();
 
     for (auto &it : E.Entries) {
@@ -183,7 +184,7 @@ public:
   // Return the pointer to the target entries table
   __tgt_target_table *getOffloadEntriesTable(int32_t device_id) {
     assert(device_id < (int32_t)FuncGblEntries.size() &&
-         "Unexpected device id!");
+           "Unexpected device id!");
     FuncOrGblEntryTy &E = FuncGblEntries[device_id].back();
 
     int32_t size = E.Entries.size();
@@ -205,14 +206,14 @@ public:
   // Clear entries table for a device
   void clearOffloadEntriesTable(int device_id) {
     assert(device_id < (int32_t)FuncGblEntries.size() &&
-         "Unexpected device id!");
+           "Unexpected device id!");
     FuncGblEntries[device_id].emplace_back();
     FuncOrGblEntryTy &E = FuncGblEntries[device_id].back();
-    for(std::vector<__tgt_offload_entry>::iterator it = E.Entries.begin();
-        it != E.Entries.end(); it++) {
-        KernelTy *kernel_info = (KernelTy *)it->addr;
-        if (kernel_info->Func.handle != 0ull)
-            atmi_kernel_release(kernel_info->Func);
+    for (std::vector<__tgt_offload_entry>::iterator it = E.Entries.begin();
+         it != E.Entries.end(); it++) {
+      KernelTy *kernel_info = (KernelTy *)it->addr;
+      if (kernel_info->Func.handle != 0ull)
+        atmi_kernel_release(kernel_info->Func);
     }
     E.Entries.clear();
     E.Table.EntriesBegin = E.Table.EntriesEnd = 0;
@@ -417,19 +418,19 @@ int32_t __tgt_rtl_init_device(int device_id) {
 
   // Get number of Compute Unit
   uint32_t compute_units = 0;
-  err = hsa_agent_get_info(agent,
-    (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, &compute_units);
+  err = hsa_agent_get_info(
+      agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT,
+      &compute_units);
   if (err != HSA_STATUS_SUCCESS) {
     DeviceInfo.ComputeUnits[device_id] = 1;
     DP("Error getting compute units : settiing to 1\n");
   } else {
     DeviceInfo.ComputeUnits[device_id] = compute_units;
-    DP("Using %d compute unis per grid\n",
-       DeviceInfo.ComputeUnits[device_id]);
+    DP("Using %d compute unis per grid\n", DeviceInfo.ComputeUnits[device_id]);
   }
   if (print_kernel_trace > 1)
     fprintf(stderr, "Device#%-2d CU's: %2d\n", device_id,
-       DeviceInfo.ComputeUnits[device_id]);
+            DeviceInfo.ComputeUnits[device_id]);
 
   // Query attributes to determine number of threads/block and blocks/grid.
   uint16_t workgroup_max_dim[3];
@@ -481,14 +482,13 @@ int32_t __tgt_rtl_init_device(int device_id) {
     DeviceInfo.WarpSize[device_id] = wavefront_size;
   } else {
     DP("Default wavefront size: %d\n",
-      clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Warp_Size]);
+       clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Warp_Size]);
     DeviceInfo.WarpSize[device_id] =
-      clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Warp_Size];
+        clang::GPU::AMDGPUGpuGridValues[clang::GPU::GVIDX::GV_Warp_Size];
   }
 
-  err = hsa_agent_get_info(agent,
-                           (hsa_agent_info_t)HSA_AGENT_INFO_NAME,
-                           (void*)GPUName);
+  err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AGENT_INFO_NAME,
+                           (void *)GPUName);
   DP("Name of gpu:%s\n", GPUName);
 
   // Adjust teams to the env variables
@@ -608,23 +608,24 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
   // https://github.com/RadeonOpenCompute/atmi-staging/issues/65
 
   static int visited = 0;
-  if(!visited) {
-  atmi_platform_type_t platform = (useBrig ? BRIG : AMDGCN);
-  void *new_img = malloc(img_size);
-  memcpy(new_img, image->ImageStart, img_size);
-  err = atmi_module_register_from_memory((void **)&new_img,
-                                                       &img_size, &platform,
-                                                       1);
+  if (!visited) {
+    atmi_platform_type_t platform = (useBrig ? BRIG : AMDGCN);
+    void *new_img = malloc(img_size);
+    memcpy(new_img, image->ImageStart, img_size);
+    err = atmi_module_register_from_memory((void **)&new_img, &img_size,
+                                           &platform, 1);
 
-  free(new_img);
-  check("Module registering", err);
-  if (err != ATMI_STATUS_SUCCESS) {
-    fprintf(stderr, "Possible gpu arch mismatch: %s, please check"
-            " compiler: -march=<gpu> flag\n", GPUName);
-    return NULL;
-  }
-  new_img = NULL;
-  visited = 1;
+    free(new_img);
+    check("Module registering", err);
+    if (err != ATMI_STATUS_SUCCESS) {
+      fprintf(stderr,
+              "Possible gpu arch mismatch: %s, please check"
+              " compiler: -march=<gpu> flag\n",
+              GPUName);
+      return NULL;
+    }
+    new_img = NULL;
+    visited = 1;
   }
 
   DP("ATMI module successfully loaded!\n");
@@ -690,7 +691,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
           DP("Error when copying USM\n");
         DP("Copy linked variable host address (" DPxMOD ")"
            "to device address (" DPxMOD ")\n",
-          DPxPTR(*((void**)e->addr)), DPxPTR(varptr));
+           DPxPTR(*((void **)e->addr)), DPxPTR(varptr));
       }
 
       continue;
@@ -701,20 +702,20 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
     atmi_kernel_t kernel;
     uint32_t kernel_segment_size;
-    err = atmi_interop_hsa_get_kernel_info(place, e->name,
-               HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
-               &kernel_segment_size);
+    err = atmi_interop_hsa_get_kernel_info(
+        place, e->name, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
+        &kernel_segment_size);
 
     // each arg is a void * in this openmp implementation
     uint32_t arg_num = kernel_segment_size / sizeof(void *);
     std::vector<size_t> arg_sizes(arg_num);
-    for(std::vector<size_t>::iterator it = arg_sizes.begin();
-                       it != arg_sizes.end(); it++) {
-       *it = sizeof(void *);
+    for (std::vector<size_t>::iterator it = arg_sizes.begin();
+         it != arg_sizes.end(); it++) {
+      *it = sizeof(void *);
     }
 
-    atmi_status_t stat = atmi_kernel_create(&kernel, arg_num, &arg_sizes[0],
-                                            1, ATMI_DEVTYPE_GPU, e->name);
+    atmi_status_t stat = atmi_kernel_create(&kernel, arg_num, &arg_sizes[0], 1,
+                                            ATMI_DEVTYPE_GPU, e->name);
 
     if (stat != ATMI_STATUS_SUCCESS) {
       DP("atmi_kernel_create failed %d\n", stat);
@@ -760,7 +761,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
       // Check structure size against recorded size.
       if ((size_t)KernDescSize != KernDescVal.TSize)
         DP("KernDescVal size %lu does not match advertized size %d for '%s'\n",
-          sizeof(KernDescVal),   KernDescVal.TSize, KernDescName);
+           sizeof(KernDescVal), KernDescVal.TSize, KernDescName);
 
       DP("After loading global for %s KernDesc \n", KernDescName);
       DP("KernDesc: Version: %d\n", KernDescVal.Version);
@@ -815,7 +816,8 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
           return NULL;
         }
       } else {
-        DP("Loading global exec_mode '%s' - symbol missing, using default value "
+        DP("Loading global exec_mode '%s' - symbol missing, using default "
+           "value "
            "GENERIC (1)\n",
            ExecModeName);
       }
@@ -832,7 +834,8 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
                                              &WGSize);
       if (err == ATMI_STATUS_SUCCESS) {
         if ((size_t)WGSize != sizeof(int16_t)) {
-          DP("Loading global computation properties '%s' - size mismatch (%u != "
+          DP("Loading global computation properties '%s' - size mismatch (%u "
+             "!= "
              "%lu)\n",
              WGSizeName, WGSize, sizeof(int16_t));
           return NULL;
@@ -845,8 +848,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
              DPxPTR(&WGSizeVal), DPxPTR(WGSizePtr), WGSize);
           return NULL;
         }
-        DP("After loading global for %s WGSize = %d\n", WGSizeName,
-           WGSizeVal);
+        DP("After loading global for %s WGSize = %d\n", WGSizeName, WGSizeVal);
 
         if (WGSizeVal < RTLDeviceInfoTy::Default_WG_Size ||
             WGSizeVal > RTLDeviceInfoTy::Max_WG_Size) {
@@ -869,7 +871,6 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     entry.addr = (void *)&KernelsList.back();
     DeviceInfo.addOffloadEntry(device_id, entry);
     DP("Entry point %ld maps to %s\n", e - HostBegin, e->name);
-
   }
 
   { // send device environment here
@@ -879,9 +880,9 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     host_device_env.device_num = device_id;
     host_device_env.debug_level = 0;
 #ifdef OMPTARGET_DEBUG
-     if (char *envStr = getenv("LIBOMPTARGET_DEVICE_RTL_DEBUG")) {
-       host_device_env.debug_level = std::stoi(envStr);
-     }
+    if (char *envStr = getenv("LIBOMPTARGET_DEVICE_RTL_DEBUG")) {
+      host_device_env.debug_level = std::stoi(envStr);
+    }
 #endif
 
     const char *device_env_Name = "omptarget_device_environment";
@@ -899,7 +900,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
         return NULL;
       }
 
-      err = atmi_memcpy(device_env_Ptr, &host_device_env, (size_t) varsize);
+      err = atmi_memcpy(device_env_Ptr, &host_device_env, (size_t)varsize);
       if (err != ATMI_STATUS_SUCCESS) {
         DP("Error when copying data from host to device. Pointers: "
            "host = " DPxMOD ", device = " DPxMOD ", size = %u\n",
@@ -1037,24 +1038,26 @@ void retrieveDeviceEnv(int32_t device_id) {
 // Inputs: Max_Teams, Max_WG_Size, Warp_Size, ExecutionMode,
 //         EnvTeamLimit, EnvNumTeams, num_teams, thread_limit,
 //         loop_tripcount.
-void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
-    int ConstWGSize,
-    int ExecutionMode,
-    int EnvTeamLimit, int EnvNumTeams, int num_teams, int thread_limit,
-    uint64_t loop_tripcount) {
+void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
+                   int ExecutionMode, int EnvTeamLimit, int EnvNumTeams,
+                   int num_teams, int thread_limit, uint64_t loop_tripcount) {
 
-    int Max_Teams = DeviceInfo.EnvMaxTeamsDefault > 0
+  int Max_Teams = DeviceInfo.EnvMaxTeamsDefault > 0
                       ? DeviceInfo.EnvMaxTeamsDefault
                       : DeviceInfo.Max_Teams;
-    if (Max_Teams > DeviceInfo.HardTeamLimit)
-      Max_Teams = DeviceInfo.HardTeamLimit;
+  if (Max_Teams > DeviceInfo.HardTeamLimit)
+    Max_Teams = DeviceInfo.HardTeamLimit;
 
   if (print_kernel_trace > 1) {
-    fprintf(stderr, "RTLDeviceInfoTy::Max_Teams: %d\n", RTLDeviceInfoTy::Max_Teams);
+    fprintf(stderr, "RTLDeviceInfoTy::Max_Teams: %d\n",
+            RTLDeviceInfoTy::Max_Teams);
     fprintf(stderr, "Max_Teams: %d\n", Max_Teams);
-    fprintf(stderr, "RTLDeviceInfoTy::Warp_Size: %d\n", RTLDeviceInfoTy::Warp_Size);
-    fprintf(stderr, "RTLDeviceInfoTy::Max_WG_Size: %d\n", RTLDeviceInfoTy::Max_WG_Size);
-    fprintf(stderr, "RTLDeviceInfoTy::Default_WG_Size: %d\n", RTLDeviceInfoTy::Default_WG_Size);
+    fprintf(stderr, "RTLDeviceInfoTy::Warp_Size: %d\n",
+            RTLDeviceInfoTy::Warp_Size);
+    fprintf(stderr, "RTLDeviceInfoTy::Max_WG_Size: %d\n",
+            RTLDeviceInfoTy::Max_WG_Size);
+    fprintf(stderr, "RTLDeviceInfoTy::Default_WG_Size: %d\n",
+            RTLDeviceInfoTy::Default_WG_Size);
     fprintf(stderr, "thread_limit: %d\n", thread_limit);
     fprintf(stderr, "threadsPerGroup: %d\n", threadsPerGroup);
     fprintf(stderr, "ConstWGSize: %d\n", ConstWGSize);
@@ -1084,7 +1087,9 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
 
   // Set default num_groups (teams)
   if (DeviceInfo.EnvTeamLimit > 0)
-    num_groups = (Max_Teams<DeviceInfo.EnvTeamLimit) ? Max_Teams : DeviceInfo.EnvTeamLimit;
+    num_groups = (Max_Teams < DeviceInfo.EnvTeamLimit)
+                     ? Max_Teams
+                     : DeviceInfo.EnvTeamLimit;
   else
     num_groups = Max_Teams;
   DP("Set default num of groups %d\n", num_groups);
@@ -1099,25 +1104,30 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
   // or when user goes crazy with num_teams clause.
   // FIXME: We cant distinguish between a constant or variable thread limit.
   // So we only handle constant thread_limits.
-  if (threadsPerGroup > RTLDeviceInfoTy::Default_WG_Size) //  256 < threadsPerGroup <= 1024
-    // Should we round threadsPerGroup up to nearest RTLDeviceInfoTy::Warp_Size here?
+  if (threadsPerGroup >
+      RTLDeviceInfoTy::Default_WG_Size) //  256 < threadsPerGroup <= 1024
+    // Should we round threadsPerGroup up to nearest RTLDeviceInfoTy::Warp_Size
+    // here?
     num_groups = (Max_Teams * RTLDeviceInfoTy::Max_WG_Size) / threadsPerGroup;
 
   // check for num_teams() clause
   if (num_teams > 0) {
-    num_groups = (num_teams<num_groups) ? num_teams : num_groups;
+    num_groups = (num_teams < num_groups) ? num_teams : num_groups;
   }
   if (print_kernel_trace > 1) {
     fprintf(stderr, "num_groups: %d\n", num_groups);
-    fprintf(stderr, "DeviceInfo.EnvNumTeams %d\n",DeviceInfo.EnvNumTeams);
+    fprintf(stderr, "DeviceInfo.EnvNumTeams %d\n", DeviceInfo.EnvNumTeams);
     fprintf(stderr, "DeviceInfo.EnvTeamLimit %d\n", DeviceInfo.EnvTeamLimit);
   }
 
   if (DeviceInfo.EnvNumTeams > 0) {
-    num_groups = (DeviceInfo.EnvNumTeams<num_groups) ? DeviceInfo.EnvNumTeams : num_groups;
+    num_groups = (DeviceInfo.EnvNumTeams < num_groups) ? DeviceInfo.EnvNumTeams
+                                                       : num_groups;
     DP("Modifying teams based on EnvNumTeams %d\n", DeviceInfo.EnvNumTeams);
   } else if (DeviceInfo.EnvTeamLimit > 0) {
-    num_groups = (DeviceInfo.EnvTeamLimit<num_groups) ? DeviceInfo.EnvTeamLimit : num_groups;
+    num_groups = (DeviceInfo.EnvTeamLimit < num_groups)
+                     ? DeviceInfo.EnvTeamLimit
+                     : num_groups;
     DP("Modifying teams based on EnvTeamLimit%d\n", DeviceInfo.EnvTeamLimit);
   } else {
     if (num_teams <= 0) {
@@ -1132,14 +1142,14 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
            "threads per block %d\n",
            num_groups, loop_tripcount, threadsPerGroup);
       }
-    }  else {
+    } else {
       num_groups = num_teams;
     }
     if (num_groups > Max_Teams) {
       num_groups = Max_Teams;
       if (print_kernel_trace > 1)
-        fprintf(stderr, "Limiting num_groups %d to Max_Teams %d \n",
-                num_groups, Max_Teams);
+        fprintf(stderr, "Limiting num_groups %d to Max_Teams %d \n", num_groups,
+                Max_Teams);
     }
     if (num_groups > num_teams && num_teams > 0) {
       num_groups = num_teams;
@@ -1162,8 +1172,8 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups,
     fprintf(stderr, "num_groups: %d\n", num_groups);
     fprintf(stderr, "loop_tripcount: %ld\n", loop_tripcount);
   }
-  DP("Final %d num_groups and %d threadsPerGroup\n",
-     num_groups, threadsPerGroup);
+  DP("Final %d num_groups and %d threadsPerGroup\n", num_groups,
+     threadsPerGroup);
 }
 
 int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
@@ -1199,26 +1209,26 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
 
   int threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
 
-  getLaunchVals(threadsPerGroup, num_groups,
-    KernelInfo->ConstWGSize,
-    KernelInfo->ExecutionMode,
-    DeviceInfo.EnvTeamLimit,
-    DeviceInfo.EnvNumTeams,
-    num_teams,      // From run_region arg
-    thread_limit,    // From run_region arg
-    loop_tripcount  // From run_region arg
-    );
+  getLaunchVals(threadsPerGroup, num_groups, KernelInfo->ConstWGSize,
+                KernelInfo->ExecutionMode, DeviceInfo.EnvTeamLimit,
+                DeviceInfo.EnvNumTeams,
+                num_teams,     // From run_region arg
+                thread_limit,  // From run_region arg
+                loop_tripcount // From run_region arg
+  );
 
   if (print_kernel_trace > 0)
     // enum modes are SPMD, GENERIC, NONE 0,1,2
-    fprintf(stderr, "DEVID:%2d SGN:%1d ConstWGSize:%-4d args:%2d teamsXthrds:(%4dX%4d) reqd:(%4dX%4d) n:%s\n",
-      device_id, KernelInfo->ExecutionMode, KernelInfo->ConstWGSize,
-      arg_num, num_groups, threadsPerGroup,
-      num_teams, thread_limit, KernelInfo->Name);
+    fprintf(stderr,
+            "DEVID:%2d SGN:%1d ConstWGSize:%-4d args:%2d teamsXthrds:(%4dX%4d) "
+            "reqd:(%4dX%4d) n:%s\n",
+            device_id, KernelInfo->ExecutionMode, KernelInfo->ConstWGSize,
+            arg_num, num_groups, threadsPerGroup, num_teams, thread_limit,
+            KernelInfo->Name);
 
   // Run on the device.
   atmi_kernel_t kernel = KernelInfo->Func;
-  ATMI_LPARM_1D(lparm, num_groups*threadsPerGroup);
+  ATMI_LPARM_1D(lparm, num_groups * threadsPerGroup);
   lparm->groupDim[0] = threadsPerGroup;
   lparm->synchronous = ATMI_TRUE;
   lparm->groupable = ATMI_FALSE;
