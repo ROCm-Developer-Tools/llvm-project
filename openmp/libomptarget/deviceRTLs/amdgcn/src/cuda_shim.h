@@ -54,18 +54,6 @@ __device__ static long long __clock64(void) {
 #endif
 }
 
-__device__ static int32_t min(int32_t __a, int32_t __b) {
-  return __a < __b ? __a : __b;
-}
-__device__ static uint32_t min(uint32_t __a, uint32_t __b) {
-  return __a < __b ? __a : __b;
-}
-__device__ static uint32_t min(uint32_t __a, int32_t __b) {
-  // resolve ambiguous call
-  return min(__a, (uint32_t)__b);
-}
-
-
 #define __CUDA_DEVICE_BUILTIN(FIELD, INTRINSIC)                                \
   __declspec(property(get = __fetch_builtin_##FIELD)) unsigned int FIELD;      \
   static inline __attribute__((always_inline))                                 \
