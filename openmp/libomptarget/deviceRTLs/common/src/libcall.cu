@@ -1,4 +1,4 @@
-//===------------ libcall.cu - NVPTX OpenMP user calls ----------- CUDA -*-===//
+//===------------ libcall.cu - OpenMP GPU user calls ------------- CUDA -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -17,22 +17,14 @@
 
 #include <time.h>
 
-// Timer precision is 1ns
-#define TIMER_PRECISION ((double)1E-9)
-
 EXTERN double omp_get_wtick(void) {
-  PRINT(LD_IO, "omp_get_wtick() returns %g\n", TIMER_PRECISION);
-  return TIMER_PRECISION;
+  double rc = __target_impl_get_wtick();
+  PRINT(LD_IO, "omp_get_wtick() returns %g\n", rc);
+  return rc;
 }
 
 EXTERN double omp_get_wtime(void) {
-#ifdef __AMDGCN__
-  double rc = ((double)1.0 / 745000000.0) * __clock64();
-#else
-  unsigned long long nsecs;
-  asm("mov.u64  %0, %%globaltimer;" : "=l"(nsecs));
-  double rc = (double)nsecs * TIMER_PRECISION;
-#endif
+  double rc = __target_impl_get_wtime();
   PRINT(LD_IO, "call omp_get_wtime() returns %g\n", rc);
   return rc;
 }

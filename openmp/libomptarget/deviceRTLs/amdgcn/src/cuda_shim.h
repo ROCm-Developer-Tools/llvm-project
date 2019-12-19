@@ -45,11 +45,11 @@ __OVERL__ int __shfl_down(int a, unsigned int b, int c);
 __OVERL__
 int __shfl(int var, int src_lane, int width = warpSize);
 
-__device__ static long long __clock64(void) {
+__device__ static uint64_t __clock64(void) {
 #if __AMDGCN__ > 800
   return __builtin_amdgcn_s_memrealtime();
 #else
-  __device__ long long __llvm_amdgcn_s_memrealtime(void);
+  __device__ uint64_t __llvm_amdgcn_s_memrealtime(void);
   return __llvm_amdgcn_s_memrealtime();
 #endif
 }
