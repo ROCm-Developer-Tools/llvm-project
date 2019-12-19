@@ -116,6 +116,12 @@ INLINE uint32_t __kmpc_impl_smid() {
   return __smid();
 }
 
+INLINE double __target_impl_get_wtick() { return ((double)1E-9); }
+
+INLINE double __target_impl_get_wtime() {
+  return ((double)1.0 / 745000000.0) * __clock64();
+}
+
 INLINE uint64_t __kmpc_impl_ffs(uint64_t x) { return __builtin_ffsl(x); }
 
 INLINE uint64_t __kmpc_impl_popc(uint64_t x) { return __builtin_popcountl(x); }
