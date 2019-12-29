@@ -126,6 +126,7 @@ public:
   INLINE int IsTaskConstruct() const { return !IsParallelConstruct(); }
   // methods for other fields
   INLINE uint16_t &ThreadId() { return items.threadId; }
+  INLINE uint8_t &ParLev() { return items.parLev; }
   INLINE uint64_t &RuntimeChunkSize() { return items.runtimeChunkSize; }
   INLINE omptarget_nvptx_TaskDescr *GetPrevTaskDescr() const { return prev; }
   INLINE void SetPrevTaskDescr(omptarget_nvptx_TaskDescr *taskDescr) {
@@ -167,7 +168,7 @@ private:
 
   struct TaskDescr_items {
     uint8_t flags; // 6 bit used (see flag above)
-    uint8_t unused;
+    uint8_t parLev;
     uint16_t threadId;         // thread id
     uint64_t runtimeChunkSize; // runtime chunk size
   } items;
