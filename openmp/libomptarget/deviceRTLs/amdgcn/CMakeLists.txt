@@ -56,6 +56,7 @@ get_filename_component(devicertl_base_directory
 
 file(GLOB cuda_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu
                        ${devicertl_base_directory}/common/src/*.cu)
+file(GLOB hip_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hip)
 file(GLOB llvm_sources ${CMAKE_CURRENT_SOURCE_DIR}/src/*.ll)
 file(GLOB h_files ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h
                   ${devicertl_base_directory}/common/*.h)
@@ -117,7 +118,7 @@ set(libname "omptarget-amdgcn")
 
 foreach(mcpu ${mcpus})
   set(bc_files)
-  add_cuda_bc_library(${cuda_sources})
+  add_cuda_bc_library(${cuda_sources} ${hip_sources})
   list(APPEND bc_files ${llvm_sources})
 
   set(bc_libname lib${libname}-${mcpu}.bc)
