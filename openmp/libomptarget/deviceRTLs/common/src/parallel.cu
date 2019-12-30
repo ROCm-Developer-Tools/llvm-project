@@ -386,9 +386,11 @@ EXTERN void __kmpc_serialized_parallel(kmp_Ident *loc, uint32_t global_tid) {
   // NumberTeams * NumberThreads * NumParallelLevels
   // we calculate the max number of elements here
   // Note that ParLev is the current parallel depth.
-  long CSIdx = blockDim.x * gridDim.x * ParLev;
+  long CSIdx = GetNumberOfThreadsInBlock() * GetNumberOfBlocksInKernel() *
+	       ParLev;
   // Now we compute this threads location in the above array.
-  CSIdx += blockIdx.x * blockDim.x + threadIdx.x;
+  CSIdx += GetBlockIdInKernel() * GetNumberOfThreadsInBlock() +
+           GetThreadIdInBlock();
   CSIdx *= sizeof(omptarget_nvptx_TaskDescr);
 
   omptarget_nvptx_TaskDescr *V = (omptarget_nvptx_TaskDescr*)

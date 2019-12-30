@@ -1243,8 +1243,9 @@ static void *AllocateNestedParallelCallMemory(int MaxParLevel, int NumGroups,
   void *TgtPtr = NULL;
   atmi_status_t err = atmi_malloc(&TgtPtr, NestedMemSize, place);
   err = atmi_memcpy(CallStackAddr, &TgtPtr, sizeof(void*));
-  if (print_kernel_trace > 1)
-    fprintf(stderr, "CallSck %lx TgtPtr %lx *TgtPtr %lx \n", CallStackAddr, &TgtPtr, TgtPtr);
+  if (print_kernel_trace > 2)
+    fprintf(stderr, "CallSck %lx TgtPtr %lx *TgtPtr %lx \n",
+                    (long)CallStackAddr, (long)&TgtPtr, (long)TgtPtr);
   if (err != ATMI_STATUS_SUCCESS) {
     fprintf(stderr, "Mem not wrtten to target, err %d\n", err);
   }
