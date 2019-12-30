@@ -77,21 +77,6 @@ enum DATA_SHARING_SIZES {
   DS_Max_Warp_Number = 16,
 };
 
-// warp vote function
-EXTERN uint64_t __ballot64(int predicate);
-// initialized with a 64-bit mask with bits set in positions less than the
-// thread's lane number in the warp
-EXTERN uint64_t __lanemask_lt();
-// initialized with a 64-bit mask with bits set in positions greater than the
-// thread's lane number in the warp
-EXTERN uint64_t __lanemask_gt();
-
-// CU id
-EXTERN unsigned __smid();
-
-// named sync
-EXTERN void __named_sync(const int barrier, const int num_threads);
-
 INLINE void __kmpc_impl_unpack(uint64_t val, uint32_t &lo, uint32_t &hi) {
   lo = (uint32_t)(val & UINT64_C(0x00000000FFFFFFFF));
   hi = (uint32_t)((val & UINT64_C(0xFFFFFFFF00000000)) >> 32);
@@ -104,21 +89,15 @@ INLINE uint64_t __kmpc_impl_pack(uint32_t lo, uint32_t hi) {
 static const __kmpc_impl_lanemask_t __kmpc_impl_all_lanes =
     UINT64_C(0xffffffffffffffff);
 
-INLINE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_lt() {
-  return __lanemask_lt();
-}
+DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_lt();
 
-INLINE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
-  return __lanemask_gt();
-}
+DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt();
 
-INLINE uint32_t __kmpc_impl_smid() {
-  return __smid();
-}
+DEVICE uint32_t __kmpc_impl_smid();
 
-INLINE double __target_impl_get_wtick() { return ((double)1E-9); }
+INLINE double __kmpc_impl_get_wtick() { return ((double)1E-9); }
 
-INLINE double __target_impl_get_wtime() {
+INLINE double __kmpc_impl_get_wtime() {
   return ((double)1.0 / 745000000.0) * __clock64();
 }
 
@@ -130,9 +109,7 @@ template <typename T> INLINE T __kmpc_impl_min(T x, T y) {
   return x < y ? x : y;
 }
 
-INLINE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
-  return __ballot64(1);
-}
+DEVICE __kmpc_impl_lanemask_t __kmpc_impl_activemask();
 
 INLINE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t, int32_t Var,
                                      int32_t SrcLane) {
