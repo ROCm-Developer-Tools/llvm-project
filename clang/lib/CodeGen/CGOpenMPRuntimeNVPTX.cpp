@@ -1832,6 +1832,11 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   case OMPRTL_NVPTX__kmpc_serialized_parallel: {
     // Build void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
     // global_tid);
+    unsigned DiagID = CGM.getDiags().getCustomDiagID(
+            DiagnosticsEngine::Remark,
+            "Nested parallel pragma, this will be serialized on device");
+        CGM.getDiags().Report(DiagID);
+
     llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
     auto *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);

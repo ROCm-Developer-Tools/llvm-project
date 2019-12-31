@@ -356,8 +356,6 @@ EXTERN void __kmpc_kernel_end_parallel() {
 // support for parallel that goes sequential
 ////////////////////////////////////////////////////////////////////////////////
 
-extern DEVICE void *omptarget_nest_par_call_stack;
-
 EXTERN void __kmpc_serialized_parallel(kmp_Ident *loc, uint32_t global_tid) {
   PRINT0(LD_IO, "call to __kmpc_serialized_parallel\n");
 
@@ -382,10 +380,12 @@ EXTERN void __kmpc_serialized_parallel(kmp_Ident *loc, uint32_t global_tid) {
   // allocate new task descriptor and copy value from current one, set prev to
   // it
 
+#ifdef __AMDGCN__
   // Each kernel has a precalculated call stack per thread.
   // NumberTeams * NumberThreads * NumParallelLevels
   // we calculate the max number of elements here
   // Note that ParLev is the current parallel depth.
+  extern DEVICE void *omptarget_nest_par_call_stack;
   long CSIdx = GetNumberOfThreadsInBlock() * GetNumberOfBlocksInKernel() *
 	       ParLev;
   // Now we compute this threads location in the above array.
@@ -396,7 +396,11 @@ EXTERN void __kmpc_serialized_parallel(kmp_Ident *loc, uint32_t global_tid) {
   omptarget_nvptx_TaskDescr *V = (omptarget_nvptx_TaskDescr*)
     ((char*)omptarget_nest_par_call_stack + CSIdx);
   omptarget_nvptx_TaskDescr *newTaskDescr = V;
-
+#else
+  omptarget_nvptx_TaskDescr *newTaskDescr =
+    (omptarget_nvptx_TaskDescr *)SafeMalloc(sizeof(omptarget_nvptx_TaskDescr),
+                                            "new seq parallel task");
+#endif
   newTaskDescr->CopyParent(currTaskDescr);
 
   // tweak values for serialized parallel case:
@@ -428,7 +432,10 @@ EXTERN void __kmpc_end_serialized_parallel(kmp_Ident *loc,
   // set new top
   omptarget_nvptx_threadPrivateContext->SetTopLevelTaskDescr(
       threadId, currTaskDescr->GetPrevTaskDescr());
-
+#ifndef __AMDGCN__
+  // free
+  SafeFree(currTaskDescr, "new seq parallel task");
+#endif
   currTaskDescr = getMyTopTaskDescriptor(threadId);
   currTaskDescr->RestoreLoopData();
 }
