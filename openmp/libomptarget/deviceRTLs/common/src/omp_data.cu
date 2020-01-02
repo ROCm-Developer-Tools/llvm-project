@@ -27,6 +27,10 @@ DEVICE
     omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext, OMP_STATE_COUNT>
         omptarget_nvptx_device_State[MAX_SM];
 
+DEVICE void * omptarget_nest_par_call_stack;
+DEVICE uint32_t omptarget_nest_par_call_struct_size =
+  sizeof (class omptarget_nvptx_TaskDescr);
+
 DEVICE omptarget_nvptx_SimpleMemoryManager
     omptarget_nvptx_simpleMemoryManager;
 DEVICE SHARED uint32_t usedMemIdx;

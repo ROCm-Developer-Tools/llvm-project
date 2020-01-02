@@ -1607,7 +1607,8 @@ public:
                           StringRef Name,
                           int16_t WG_Size,
                           int8_t Mode,
-                          int8_t HostServices);
+                          int8_t HostServices,
+                          int8_t MaxParallelLevel);
 
   /// Emits OpenMP-specific function prolog.
   /// Required for device constructs.

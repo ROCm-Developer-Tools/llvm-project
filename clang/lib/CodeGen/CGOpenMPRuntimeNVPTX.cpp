@@ -1276,7 +1276,10 @@ void CGOpenMPRuntimeNVPTX::GenerateMetaData(
   StringRef KernDescName = OutlinedFn->getName();
   CGOpenMPRuntime::emitStructureKernelDesc(CGM, KernDescName, FlatAttr,
                                            IsGeneric,
-                                           1); // Uses HostServices
+                                           1, // Uses HostServices
+                                           MaxParallelLevel);
+  // Reset it to zero for any subsequent kernel
+  MaxParallelLevel = 0;
 }
 
 void CGOpenMPRuntimeNVPTX::emitNonSPMDKernel(const OMPExecutableDirective &D,
@@ -1829,6 +1832,11 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   case OMPRTL_NVPTX__kmpc_serialized_parallel: {
     // Build void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
     // global_tid);
+    unsigned DiagID = CGM.getDiags().getCustomDiagID(
+            DiagnosticsEngine::Remark,
+            "Nested parallel pragma, this will be serialized on device");
+        CGM.getDiags().Report(DiagID);
+
     llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
     auto *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
@@ -2231,18 +2239,27 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitParallelOutlinedFunction(
   class NVPTXPrePostActionTy : public PrePostActionTy {
     bool &IsInParallelRegion;
     bool PrevIsInParallelRegion;
+    int &ParallelLevel;
+    int &MaxParallelLevel;
 
   public:
-    NVPTXPrePostActionTy(bool &IsInParallelRegion)
-        : IsInParallelRegion(IsInParallelRegion) {}
+    NVPTXPrePostActionTy(bool &IsInParallelRegion, int &ParallelLevel,
+		         int &MaxParallelLevel)
+       : IsInParallelRegion(IsInParallelRegion), ParallelLevel(ParallelLevel),
+         MaxParallelLevel(MaxParallelLevel) {}
     void Enter(CodeGenFunction &CGF) override {
       PrevIsInParallelRegion = IsInParallelRegion;
       IsInParallelRegion = true;
+      // Count the number of nested paralels.
+      if (ParallelLevel > MaxParallelLevel)
+        MaxParallelLevel = ParallelLevel;
+      ParallelLevel++;
     }
     void Exit(CodeGenFunction &CGF) override {
       IsInParallelRegion = PrevIsInParallelRegion;
+      ParallelLevel--;
     }
-  } Action(IsInParallelRegion);
+  } Action(IsInParallelRegion, ParallelLevel, MaxParallelLevel);
   CodeGen.setAction(Action);
   bool PrevIsInTTDRegion = IsInTTDRegion;
   IsInTTDRegion = false;
@@ -2264,7 +2281,6 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitParallelOutlinedFunction(
         createParallelDataSharingWrapper(OutlinedFun, D);
     WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   }
-
   return OutlinedFun;
 }
 
