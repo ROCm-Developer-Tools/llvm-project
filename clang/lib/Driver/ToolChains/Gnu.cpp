@@ -547,7 +547,7 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-latmi_runtime");
     CmdArgs.push_back("-lhip_hcc");
     CmdArgs.push_back("-rpath");
-    CmdArgs.push_back(Args.MakeArgString(D.Dir + "/../lib" +
+    CmdArgs.push_back(Args.MakeArgString(D.Dir + "/../lib:" +
                       D.Dir + "/../hcc/lib"));
   }
 
