@@ -42,6 +42,23 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
   return mask & ballot;
 }
 
+DEVICE bool __kmpc_impl_is_first_active_thread() {
+  __kmpc_impl_lanemask_t Mask = __kmpc_impl_activemask();
+  unsigned tid = GetThreadIdInBlock();
+  unsigned laneid = (tid & 0X3F);
+  int64_t Sh;
+  unsigned Shnum;
+  if (laneid < 32) {
+    Mask = Mask << 32;
+    Shnum = 32 - laneid;
+  } else {
+    Shnum = 64 - laneid;
+  }
+  Sh = Mask << Shnum;
+  //  unsigned popret = __popcll(Sh);
+  return (Sh == (unsigned long long)0);
+}
+
 // CU id
 EXTERN unsigned __smid();
 DEVICE uint32_t __kmpc_impl_smid() { return __smid(); }
