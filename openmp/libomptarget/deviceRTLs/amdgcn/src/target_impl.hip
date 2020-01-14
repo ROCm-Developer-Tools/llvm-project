@@ -1,4 +1,4 @@
-//===------------ target_impl.hip - AMDGCN OpenMP GPU options ----- HIP -*-===//
+//===------- target_impl.hip - AMDGCN OpenMP GPU implementation --- HIP -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -13,12 +13,6 @@
 #include "target_impl.h"
 
 // Implementations initially derived from hip/hcc_detail/device_functions.h
-
-// warp vote function
-DEVICE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
-  // 33 is ICMP_NE from llvm/include/llvm/IR/InstrTypes.h
-  return __builtin_amdgcn_uicmp(1, 0, 33);
-}
 
 EXTERN uint32_t __ockl_lane_u32(void);
 
@@ -42,6 +36,38 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
   return mask & ballot;
 }
 
+// CU id
+EXTERN unsigned __smid();
+DEVICE uint32_t __kmpc_impl_smid() { return __smid(); }
+
+DEVICE double __kmpc_impl_get_wtick() { return ((double)1E-9); }
+
+EXTERN uint64_t __clock64();
+DEVICE double __kmpc_impl_get_wtime() {
+  return ((double)1.0 / 745000000.0) * __clock64();
+}
+
+// warp vote function
+DEVICE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
+  // 33 is ICMP_NE from llvm/include/llvm/IR/InstrTypes.h
+  return __builtin_amdgcn_uicmp(1, 0, 33);
+}
+
+DEVICE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t, int32_t Var,
+                                     int32_t SrcLane) {
+  return __shfl(Var, SrcLane, WARPSIZE);
+}
+
+DEVICE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t Var,
+                                          uint32_t Delta, int32_t Width) {
+  return __shfl_down(Var, Delta, Width);
+}
+
+EXTERN uint64_t __ockl_get_local_size(uint32_t);
+EXTERN uint64_t __ockl_get_num_groups(uint32_t);
+DEVICE int GetNumberOfBlocksInKernel() { return __ockl_get_num_groups(0); }
+DEVICE int GetNumberOfThreadsInBlock() { return __ockl_get_local_size(0); }
+
 DEVICE bool __kmpc_impl_is_first_active_thread() {
   __kmpc_impl_lanemask_t Mask = __kmpc_impl_activemask();
   unsigned tid = GetThreadIdInBlock();
@@ -58,10 +84,6 @@ DEVICE bool __kmpc_impl_is_first_active_thread() {
   //  unsigned popret = __popcll(Sh);
   return (Sh == (unsigned long long)0);
 }
-
-// CU id
-EXTERN unsigned __smid();
-DEVICE uint32_t __kmpc_impl_smid() { return __smid(); }
 
 // Memory
 DEVICE void *__malloc(size_t);

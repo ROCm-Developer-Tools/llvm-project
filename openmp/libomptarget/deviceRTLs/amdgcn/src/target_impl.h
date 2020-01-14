@@ -1,4 +1,4 @@
-//===------------ target_impl.h - AMDGCN OpenMP GPU options ------ CUDA -*-===//
+//===------- target_impl.h - AMDGCN OpenMP GPU implementation ----- HIP -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Definitions of target specific functions
+// Declarations and definitions of target specific functions and constants
 //
 //===----------------------------------------------------------------------===//
 #ifndef __AMDGCN__
@@ -17,17 +17,18 @@
 #include "../../nvptx/src/target_impl.h"
 #endif
 
-#ifndef _TARGET_IMPL_H_
-#define _TARGET_IMPL_H_
+#ifndef OMPTARGET_AMDGCN_TARGET_IMPL_H
+#define OMPTARGET_AMDGCN_TARGET_IMPL_H
 
 #ifndef __AMDGCN__
 #error "amdgcn target_impl.h expects to be compiled under __AMDGCN__"
 #endif
 
-#include <stdint.h>
-#include <stddef.h>
-
 #include "amdgcn_interface.h"
+
+#include <stddef.h>
+#include <stdint.h>
+
 #include "cuda_shim.h"
 
 #define DEVICE __attribute__((device))
@@ -53,15 +54,14 @@
 // region to synchronize with each other.
 #define L1_BARRIER (1)
 
-// Maximum number of preallocated arguments to an outlined parallel/simd function.
-// Anything more requires dynamic memory allocation.
+// Maximum number of preallocated arguments to an outlined parallel/simd
+// function. Anything more requires dynamic memory allocation.
 #define MAX_SHARED_ARGS 40
 
 // Maximum number of omp state objects per SM allocated statically in global
 // memory.
 #define OMP_STATE_COUNT 32
 #define MAX_SM 64
-
 
 #define OMP_ACTIVE_PARALLEL_LEVEL 128
 
@@ -95,11 +95,9 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt();
 
 DEVICE uint32_t __kmpc_impl_smid();
 
-INLINE double __kmpc_impl_get_wtick() { return ((double)1E-9); }
+DEVICE double __kmpc_impl_get_wtick();
 
-INLINE double __kmpc_impl_get_wtime() {
-  return ((double)1.0 / 745000000.0) * __clock64();
-}
+DEVICE double __kmpc_impl_get_wtime();
 
 INLINE uint64_t __kmpc_impl_ffs(uint64_t x) { return __builtin_ffsl(x); }
 
@@ -111,15 +109,11 @@ template <typename T> INLINE T __kmpc_impl_min(T x, T y) {
 
 DEVICE __kmpc_impl_lanemask_t __kmpc_impl_activemask();
 
-INLINE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t, int32_t Var,
-                                     int32_t SrcLane) {
-  return __shfl(Var, SrcLane, WARPSIZE);
-}
+DEVICE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t, int32_t Var,
+                                     int32_t SrcLane);
 
-INLINE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t Var,
-                                          uint32_t Delta, int32_t Width) {
-  return __shfl_down(Var, Delta, Width);
-}
+DEVICE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t Var,
+                                          uint32_t Delta, int32_t Width);
 
 INLINE void __kmpc_impl_syncthreads() { __builtin_amdgcn_s_barrier(); }
 
@@ -139,12 +133,10 @@ EXTERN void __kmpc_impl_threadfence_block(void);
 EXTERN void __kmpc_impl_threadfence_system(void);
 
 // Calls to the AMDGCN layer (assuming 1D layout)
-EXTERN uint64_t __ockl_get_local_size(uint32_t);
-EXTERN uint64_t __ockl_get_num_groups(uint32_t);
 INLINE int GetThreadIdInBlock() { return __builtin_amdgcn_workitem_id_x(); }
 INLINE int GetBlockIdInKernel() { return __builtin_amdgcn_workgroup_id_x(); }
-INLINE int GetNumberOfBlocksInKernel() { return __ockl_get_num_groups(0); }
-INLINE int GetNumberOfThreadsInBlock() { return __ockl_get_local_size(0); }
+DEVICE int GetNumberOfBlocksInKernel();
+DEVICE int GetNumberOfThreadsInBlock();
 
 DEVICE bool __kmpc_impl_is_first_active_thread();
 
@@ -156,6 +148,16 @@ DEVICE void __kmpc_impl_unset_lock(omp_lock_t *lock);
 DEVICE int __kmpc_impl_test_lock(omp_lock_t *lock);
 
 // Memory
-EXTERN void *__kmpc_impl_malloc(size_t x);
-EXTERN void __kmpc_impl_free(void *x);
+DEVICE void *__kmpc_impl_malloc(size_t x);
+DEVICE void __kmpc_impl_free(void *x);
+
+// DEVICE versions of part of libc
+EXTERN __attribute__((noreturn)) void
+__assertfail(const char *, const char *, unsigned, const char *, size_t);
+INLINE void __assert_fail(const char *__message, const char *__file,
+                          unsigned int __line, const char *__function) {
+  __assertfail(__message, __file, __line, __function, sizeof(char));
+}
+EXTERN int printf(const char *, ...);
+
 #endif

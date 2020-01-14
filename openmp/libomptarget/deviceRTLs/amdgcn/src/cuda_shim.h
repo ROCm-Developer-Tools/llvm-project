@@ -22,19 +22,6 @@
 #define __device__ __attribute__((device))
 #endif
 
-// device libc
-extern "C" {
-__device__ __attribute__((noreturn)) void
-__assertfail(const char *, const char *, unsigned, const char *, size_t);
-__device__ static inline void __assert_fail(const char *__message,
-                                            const char *__file,
-                                            unsigned int __line,
-                                            const char *__function) {
-  __assertfail(__message, __file, __line, __function, sizeof(char));
-}
-__device__ int printf(const char *, ...);
-}
-
 #ifndef __OVERL__
 #define __OVERL__ __attribute__((device, always_inline, overloadable)) const
 #endif
