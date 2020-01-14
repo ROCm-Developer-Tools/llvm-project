@@ -324,55 +324,6 @@ EXTERN int omp_get_team_num() {
   return rc;
 }
 
-EXTERN int omp_ext_get_warp_id() {
-  int rc = GetWarpId();
-  PRINT(LD_IO, "call omp_ext_get_warp_id() returns %d\n", rc);
-  return rc;
-}
-
-EXTERN int omp_ext_get_lane_id() {
-  int rc = GetLaneId();
-  PRINT(LD_IO, "call omp_ext_get_lane_id() returns %d\n", rc);
-  return rc;
-}
-
-__device__ static unsigned getMasterThreadId() {
-  unsigned Mask = WARPSIZE - 1;
-  return (GetNumberOfThreadsInBlock() - 1) & (~Mask);
-}
-
-EXTERN int omp_ext_get_smid() {
-  int rc = __kmpc_impl_smid();
-  PRINT(LD_IO, "call omp_ext_get_smid() returns %d\n", rc);
-  return rc;
-}
-
-EXTERN int omp_ext_is_spmd_mode() {
-  int rc = isSPMDMode();
-  PRINT(LD_IO, "call omp_ext_is_spmd_mode() returns %d\n", rc);
-  return rc;
-}
-
-EXTERN int omp_ext_get_master_thread_id() {
-  int rc = getMasterThreadId();
-  PRINT(LD_IO, "call omp_ext_get_master_thread_id() returns %d\n", rc);
-  return rc;
-}
-
-#ifdef __AMDGCN__
-EXTERN unsigned long long omp_ext_get_active_threads_mask() {
-  unsigned long long rc = __kmpc_impl_activemask();
-  PRINT(LD_IO, "call omp_ext_get_active_threads_mask() returns %llx\n", rc);
-  return rc;
-}
-#else
-EXTERN unsigned long long omp_ext_get_active_threads_mask() {
-  unsigned rc = __kmpc_impl_activemask();
-  PRINT(LD_IO, "call omp_ext_get_active_threads_mask() returns %x\n", rc);
-  return (unsigned long long)rc;
-}
-#endif
-
 EXTERN int omp_is_initial_device(void) {
   PRINT0(LD_IO, "call omp_is_initial_device() returns 0\n");
   return 0; // 0 by def on device
