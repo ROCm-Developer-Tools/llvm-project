@@ -146,4 +146,7 @@ INLINE int GetBlockIdInKernel() { return __builtin_amdgcn_workgroup_id_x(); }
 INLINE int GetNumberOfBlocksInKernel() { return __ockl_get_num_groups(0); }
 INLINE int GetNumberOfThreadsInBlock() { return __ockl_get_local_size(0); }
 
+// Memory
+EXTERN void *__kmpc_impl_malloc(size_t x);
+EXTERN void __kmpc_impl_free(void *x);
 #endif
