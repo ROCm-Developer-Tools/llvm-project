@@ -11,29 +11,39 @@
 
 #include "target_impl.h"
 
-DEVICE unsigned atomicAdd(unsigned *address, unsigned val);
-DEVICE int atomicAdd(int *address, int val);
-DEVICE unsigned long long atomicAdd(unsigned long long *address,
-                                    unsigned long long val);
+namespace {
 
-DEVICE unsigned atomicInc(unsigned *address);
-DEVICE unsigned atomicInc(unsigned *address, unsigned max);
-DEVICE int atomicInc(int *address);
+template <typename T> DEVICE T atomicAdd(volatile T *x, T v) {
+  return __atomic_fetch_add(x, v, __ATOMIC_SEQ_CST);
+}
 
-DEVICE int atomicMax(int *address, int val);
-DEVICE unsigned atomicMax(unsigned *address, unsigned val);
-DEVICE unsigned long long atomicMax(unsigned long long *address,
-                                    unsigned long long val);
+template <typename T> DEVICE T atomicInc(T *x, T v) {
+  if (*x >= v) {
+    return *x;
+  } else {
+    return __atomic_fetch_add((volatile T *)x, 1, __ATOMIC_SEQ_CST);
+  }
+}
 
-DEVICE int atomicExch(int *address, int val);
-DEVICE unsigned atomicExch(unsigned *address, unsigned val);
-DEVICE unsigned long long atomicExch(unsigned long long *address,
-                                     unsigned long long val);
+template <typename T> DEVICE T atomicMax(volatile T *address, T val) {
+  return __opencl_atomic_fetch_max((_Atomic volatile T *)address, val,
+                                   __ATOMIC_SEQ_CST,
+                                   __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES);
+}
 
-DEVICE unsigned atomicCAS(unsigned *address, unsigned compare, unsigned val);
-DEVICE int atomicCAS(int *address, int compare, int val);
-DEVICE unsigned long long atomicCAS(unsigned long long *address,
-                                    unsigned long long compare,
-                                    unsigned long long val);
+template <typename T> DEVICE T atomicExch(volatile T *address, T val) {
+  return __opencl_atomic_exchange((_Atomic volatile T *)address, val,
+                                  __ATOMIC_SEQ_CST,
+                                  __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES);
+}
 
+template <typename T>
+DEVICE T atomicCAS(volatile T *address, T compare, T val) {
+  (void)__opencl_atomic_compare_exchange_strong(
+      (_Atomic volatile T *)address, &compare, val, __ATOMIC_SEQ_CST,
+      __ATOMIC_RELAXED, __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES);
+  return compare;
+}
+
+} // namespace
 #endif
