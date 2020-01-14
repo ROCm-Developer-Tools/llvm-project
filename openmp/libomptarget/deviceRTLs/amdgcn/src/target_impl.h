@@ -146,6 +146,13 @@ INLINE int GetBlockIdInKernel() { return __builtin_amdgcn_workgroup_id_x(); }
 INLINE int GetNumberOfBlocksInKernel() { return __ockl_get_num_groups(0); }
 INLINE int GetNumberOfThreadsInBlock() { return __ockl_get_local_size(0); }
 
+// Locks
+DEVICE void __kmpc_impl_init_lock(omp_lock_t *lock);
+DEVICE void __kmpc_impl_destroy_lock(omp_lock_t *lock);
+DEVICE void __kmpc_impl_set_lock(omp_lock_t *lock);
+DEVICE void __kmpc_impl_unset_lock(omp_lock_t *lock);
+DEVICE int __kmpc_impl_test_lock(omp_lock_t *lock);
+
 // Memory
 EXTERN void *__kmpc_impl_malloc(size_t x);
 EXTERN void __kmpc_impl_free(void *x);

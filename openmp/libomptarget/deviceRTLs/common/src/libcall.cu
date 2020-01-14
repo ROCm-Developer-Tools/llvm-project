@@ -16,8 +16,6 @@
 #include "common/target_atomic.h"
 #include "target_impl.h"
 
-#include <time.h>
-
 EXTERN double omp_get_wtick(void) {
   double rc = __kmpc_impl_get_wtick();
   PRINT(LD_IO, "omp_get_wtick() returns %g\n", rc);
@@ -396,66 +394,34 @@ EXTERN int omp_get_max_task_priority(void) {
 // locks
 ////////////////////////////////////////////////////////////////////////////////
 
-#define __OMP_SPIN 1000
-#define UNSET 0u
-#define SET 1u
-
 EXTERN void omp_init_lock(omp_lock_t *lock) {
-  omp_unset_lock(lock);
+  __kmpc_impl_init_lock(lock);
   PRINT0(LD_IO, "call omp_init_lock()\n");
 }
 
 EXTERN void omp_destroy_lock(omp_lock_t *lock) {
-  omp_unset_lock(lock);
+  __kmpc_impl_destroy_lock(lock);
   PRINT0(LD_IO, "call omp_destroy_lock()\n");
 }
 
 EXTERN void omp_set_lock(omp_lock_t *lock) {
-  // int atomicCAS(int* address, int compare, int val);
-  // (old == compare ? val : old)
-
-  // TODO: not sure spinning is a good idea here..
-  while (__kmpc_atomic_cas(lock, UNSET, SET) != UNSET) {
-#ifdef __AMDGCN__
-    clock_t start = __clock64();
-#else
-    clock_t start = clock();
-#endif
-    clock_t now;
-    for (;;) {
-#ifdef __AMDGCN__
-      now = __clock64();
-#else
-      now = clock();
-#endif
-      clock_t cycles = now > start ? now - start : now + (0xffffffff - start);
-      if (cycles >= __OMP_SPIN * GetBlockIdInKernel()) {
-        break;
-      }
-    }
-  } // wait for 0 to be the read value
-
+  __kmpc_impl_set_lock(lock);
   PRINT0(LD_IO, "call omp_set_lock()\n");
 }
 
 EXTERN void omp_unset_lock(omp_lock_t *lock) {
-  (void)__kmpc_atomic_exchange(lock, UNSET);
-
+  __kmpc_impl_unset_lock(lock);
   PRINT0(LD_IO, "call omp_unset_lock()\n");
 }
 
 EXTERN int omp_test_lock(omp_lock_t *lock) {
-  // int atomicCAS(int* address, int compare, int val);
-  // (old == compare ? val : old)
-  int ret = __kmpc_atomic_add(lock, 0u);
-
-  PRINT(LD_IO, "call omp_test_lock() return %d\n", ret);
-
-  return ret;
+  int rc = __kmpc_impl_test_lock(lock);
+  PRINT(LD_IO, "call omp_test_lock() return %d\n", rc);
+  return rc;
 }
 
-// for xlf Fotran
-// Fotran, the return is LOGICAL type
+// for xlf Fortran
+// Fortran, the return is LOGICAL type
 
 #define FLOGICAL long
 EXTERN FLOGICAL __xlf_omp_is_initial_device_i8() {
