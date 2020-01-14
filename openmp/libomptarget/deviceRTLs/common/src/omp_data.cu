@@ -1,4 +1,4 @@
-//===------------ omp_data.cu - NVPTX OpenMP GPU objects --------- CUDA -*-===//
+//===------------ omp_data.cu - OpenMP GPU objects --------------- CUDA -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -57,6 +57,7 @@ volatile DEVICE SHARED omptarget_nvptx_WorkFn omptarget_nvptx_workFn;
 volatile DEVICE SHARED bool omptarget_workers_active;
 volatile DEVICE SHARED bool omptarget_master_active;
 #endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // OpenMP kernel execution parameters
 ////////////////////////////////////////////////////////////////////////////////
