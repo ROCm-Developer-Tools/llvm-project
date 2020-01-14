@@ -45,3 +45,14 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
 // CU id
 EXTERN unsigned __smid();
 DEVICE uint32_t __kmpc_impl_smid() { return __smid(); }
+
+// Memory
+DEVICE void *__malloc(size_t);
+DEVICE void *__kmpc_impl_malloc(size_t x) {
+  return __malloc(x);
+}
+
+DEVICE void __free(void *);
+DEVICE void __kmpc_impl_free(void *x) {
+  __free(x);
+}

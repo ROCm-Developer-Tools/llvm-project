@@ -250,7 +250,7 @@ DEVICE unsigned long PadBytes(unsigned long size,
 
 DEVICE void *SafeMalloc(size_t size, const char *msg) // check if success
 {
-  void *ptr = malloc(size);
+  void *ptr = __kmpc_impl_malloc(size);
 #if OMPTARGET_NVPTX_DEBUG || !defined(__AMDGCN__)
     PRINT(LD_MEM, "malloc data of size %llu for %s: 0x%llx\n",
         (unsigned long long)size, msg, (unsigned long long)ptr);
@@ -262,7 +262,7 @@ DEVICE void *SafeFree(void *ptr, const char *msg) {
 #if OMPTARGET_NVPTX_DEBUG || !defined(__AMDGCN__)
   PRINT(LD_MEM, "free data ptr 0x%llx for %s\n", (unsigned long long)ptr, msg);
 #endif
-  free(ptr);
+  __kmpc_impl_free(ptr);
   return NULL;
 }
 
