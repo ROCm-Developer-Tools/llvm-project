@@ -1,4 +1,4 @@
-//===----- data_sharing.cu - NVPTX OpenMP debug utilities -------- CUDA -*-===//
+//===----- data_sharing.cu - OpenMP GPU data sharing ------------- CUDA -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of data sharing environments/
+// This file contains the implementation of data sharing environments
 //
 //===----------------------------------------------------------------------===//
 #include "common/omptarget.h"
@@ -324,7 +324,7 @@ __kmpc_get_data_sharing_environment_frame(int32_t SourceThreadID,
                                           int16_t IsOMPRuntimeInitialized) {
   DSPRINT0(DSFLAG, "Entering __kmpc_get_data_sharing_environment_frame\n");
 
-  // If the runtime has been elided, use __shared__ memory for master-worker
+  // If the runtime has been elided, use shared memory for master-worker
   // data sharing.  We're reusing the statically allocated data structure
   // that is used for standard data sharing.
   if (!IsOMPRuntimeInitialized)

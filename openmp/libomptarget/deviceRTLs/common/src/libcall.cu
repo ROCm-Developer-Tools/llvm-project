@@ -13,6 +13,7 @@
 
 #include "common/omptarget.h"
 #include "common/device_environment.h"
+#include "common/target_atomic.h"
 #include "target_impl.h"
 
 #include <time.h>
@@ -396,8 +397,8 @@ EXTERN int omp_get_max_task_priority(void) {
 ////////////////////////////////////////////////////////////////////////////////
 
 #define __OMP_SPIN 1000
-#define UNSET 0
-#define SET 1
+#define UNSET 0u
+#define SET 1u
 
 EXTERN void omp_init_lock(omp_lock_t *lock) {
   omp_unset_lock(lock);
@@ -414,7 +415,7 @@ EXTERN void omp_set_lock(omp_lock_t *lock) {
   // (old == compare ? val : old)
 
   // TODO: not sure spinning is a good idea here..
-  while (atomicCAS(lock, UNSET, SET) != UNSET) {
+  while (__kmpc_atomic_cas(lock, UNSET, SET) != UNSET) {
 #ifdef __AMDGCN__
     clock_t start = __clock64();
 #else
@@ -438,7 +439,7 @@ EXTERN void omp_set_lock(omp_lock_t *lock) {
 }
 
 EXTERN void omp_unset_lock(omp_lock_t *lock) {
-  (void)atomicExch(lock, UNSET);
+  (void)__kmpc_atomic_exchange(lock, UNSET);
 
   PRINT0(LD_IO, "call omp_unset_lock()\n");
 }
@@ -446,7 +447,7 @@ EXTERN void omp_unset_lock(omp_lock_t *lock) {
 EXTERN int omp_test_lock(omp_lock_t *lock) {
   // int atomicCAS(int* address, int compare, int val);
   // (old == compare ? val : old)
-  int ret = atomicAdd(lock, 0);
+  int ret = __kmpc_atomic_add(lock, 0u);
 
   PRINT(LD_IO, "call omp_test_lock() return %d\n", ret);
 
