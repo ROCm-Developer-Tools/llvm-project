@@ -20,31 +20,6 @@
 #define _PFT_ % 16lx
 #endif
 
-// Return true if this is the first active thread in the warp.
-INLINE static bool IsWarpMasterActiveThread() {
-#ifdef __AMDGCN__
-  __kmpc_impl_lanemask_t Mask = __kmpc_impl_activemask();
-  unsigned tid = threadIdx.x;
-  unsigned laneid = (tid & 0X3F);
-  int64_t Sh;
-  unsigned Shnum;
-  if (laneid < 32) {
-    Mask = Mask << 32;
-    Shnum = 32 - laneid;
-  } else {
-    Shnum = 64 - laneid;
-  }
-  Sh = Mask << Shnum;
-  //  unsigned popret = __popcll(Sh);
-  return (Sh == (unsigned long long)0);
-#else
-  unsigned long long Mask = __kmpc_impl_activemask();
-  unsigned long long ShNum = WARPSIZE - (GetThreadIdInBlock() % WARPSIZE);
-  unsigned long long Sh = Mask << ShNum;
-  // Truncate Sh to the 32 lower bits
-  return (unsigned)Sh == 0;
-#endif
-}
 // Return true if this is the master thread.
 INLINE static bool IsMasterThread(bool isSPMDExecutionMode) {
   return !isSPMDExecutionMode && GetMasterThreadID() == GetThreadIdInBlock();
@@ -121,7 +96,7 @@ EXTERN void *__kmpc_data_sharing_environment_begin(
 
   DSPRINT0(DSFLAG, "Entering __kmpc_data_sharing_environment_begin\n");
 
-  // If the runtime has been elided, used __shared__ memory for master-worker
+  // If the runtime has been elided, used shared memory for master-worker
   // data sharing.
   if (!IsOMPRuntimeInitialized)
     return (void *)&DataSharingState;
@@ -152,7 +127,7 @@ EXTERN void *__kmpc_data_sharing_environment_begin(
   DSPRINT(DSFLAG, "Active threads: _PFT_ \n", (unsigned)ActiveT);
 
   // Only the warp active master needs to grow the stack.
-  if (IsWarpMasterActiveThread()) {
+  if (__kmpc_impl_is_first_active_thread()) {
     // Save the current active threads.
     ActiveT = CurActiveThreads;
 
@@ -253,7 +228,7 @@ EXTERN void __kmpc_data_sharing_environment_end(
   unsigned WID = GetWarpId();
 
   if (IsEntryPoint) {
-    if (IsWarpMasterActiveThread()) {
+    if (__kmpc_impl_is_first_active_thread()) {
       DSPRINT0(DSFLAG, "Doing clean up\n");
 
       // The master thread cleans the saved slot, because this is an environment
@@ -279,7 +254,7 @@ EXTERN void __kmpc_data_sharing_environment_end(
   // warp diverged and returns in different places). This only works if we
   // assume that threads will converge right after the call site that started
   // the environment.
-  if (IsWarpMasterActiveThread()) {
+  if (__kmpc_impl_is_first_active_thread()) {
     __kmpc_impl_lanemask_t &ActiveT = DataSharingState.ActiveThreads[WID];
 
     DSPRINT0(DSFLAG, "Before restoring the stack\n");
