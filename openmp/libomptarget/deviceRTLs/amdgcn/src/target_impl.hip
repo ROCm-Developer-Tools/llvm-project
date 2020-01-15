@@ -36,10 +36,6 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
   return mask & ballot;
 }
 
-// CU id
-EXTERN unsigned __smid();
-DEVICE uint32_t __kmpc_impl_smid() { return __smid(); }
-
 DEVICE double __kmpc_impl_get_wtick() { return ((double)1E-9); }
 
 EXTERN uint64_t __clock64();
