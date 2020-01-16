@@ -30,12 +30,17 @@ static const char *RTLNames[] = {
     /* HSA target     */ "libomptarget.rtl.hsa.so",
     /* AArch64 target */ "libomptarget.rtl.aarch64.so"};
 
-static const char *RTLQuickCheckFiles[] = {
-    /* open-power is unique to ppc      */ "/sys/firmware/devicetree/base/ibm,firmware-versions/open-power",
-    /* acpiis unique to x86             */ "/sys/firmware/acpi",
-    /* nvidia0 is unique to CUDA target */ "/dev/nvidia0",
-    /* kfd device is unique to HSA      */ "/dev/kfd",
-    /* FIXME find something for all arm */ "/sys/module/mdio_thunder/initstate"};
+// At least one of these quick check files must exist to load the plugin
+#define MAX_PLATFORM_CHECK_FILES 2
+static const char *RTLQuickCheckFiles[][MAX_PLATFORM_CHECK_FILES] = {
+  /* ppc64 has multiple platforms to check */
+  {"/sys/firmware/devicetree/base/ibm,firmware-versions/open-power",
+   "/sys/firmware/devicetree/base/cpus/ibm,powerpc-cpu-features"},
+  /* acpi is unique to x86            */ {"/sys/firmware/acpi"},
+  /* nvidia0 is unique to CUDA target */ {"/dev/nvidia0"},
+  /* kfd device is unique to HSA      */ {"/dev/kfd"},
+  /* FIXME find something for all arm */ {"/sys/module/mdio_thunder/initstate"}
+};
 
 RTLsTy RTLs;
 std::mutex RTLsMtx;
@@ -83,19 +88,23 @@ void RTLsTy::LoadRTLs() {
 
   DP("Loading RTLs...\n");
   struct stat stat_buffer;
-  int listptr = 0;
+  int platform_num = 0;
 
   // Attempt to open all the plugins and, if they exist, check if the interface
   // is correct and if they are supporting any devices.
   for (auto *Name : RTLNames) {
 
-    const char *QuickCheckName = RTLQuickCheckFiles[listptr++];
-    if (strcmp(QuickCheckName, "") &&
-        (stat(QuickCheckName, &stat_buffer) != 0)) {
-      DP("Unable to find file '%s', skipping dlopen for '%s' \n",
-         QuickCheckName, Name);
-      continue;
+    // Exit platform if we cannot find a single quick check file
+    bool found = false;
+    for (auto *QuickCheckName : RTLQuickCheckFiles[platform_num++]) {
+      if (QuickCheckName) {
+        if (!strcmp(QuickCheckName, "") ||
+          (stat(QuickCheckName, &stat_buffer) == 0))
+	  found = true;
+      }
     }
+    if (!found)
+      continue;
 
     strcpy(plugin_file_name, libomptarget_dir_name);
     strcat(plugin_file_name, "/");
