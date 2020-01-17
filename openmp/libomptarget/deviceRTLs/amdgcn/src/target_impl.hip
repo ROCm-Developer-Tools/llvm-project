@@ -12,14 +12,16 @@
 
 #include "target_impl.h"
 
-// Implementations initially derived from hip/hcc_detail/device_functions.h
+// Implementations initially derived from hcc
 
-EXTERN uint32_t __ockl_lane_u32(void);
+static DEVICE uint32_t getLaneId(void) {
+  return __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
+}
 
 // initialized with a 64-bit mask with bits set in positions less than the
 // thread's lane number in the warp
 DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_lt() {
-  uint32_t lane = __ockl_lane_u32();
+  uint32_t lane = getLaneId();
   int64_t ballot = __kmpc_impl_activemask();
   uint64_t mask = ((uint64_t)1 << lane) - (uint64_t)1;
   return mask & ballot;
@@ -28,7 +30,7 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_lt() {
 // initialized with a 64-bit mask with bits set in positions greater than the
 // thread's lane number in the warp
 DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
-  uint32_t lane = __ockl_lane_u32();
+  uint32_t lane = getLaneId();
   if (lane == 63)
     return 0;
   uint64_t ballot = __kmpc_impl_activemask();
@@ -49,14 +51,20 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
   return __builtin_amdgcn_uicmp(1, 0, 33);
 }
 
-DEVICE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t, int32_t Var,
-                                     int32_t SrcLane) {
-  return __shfl(Var, SrcLane, WARPSIZE);
+DEVICE int32_t __kmpc_impl_shfl_sync(__kmpc_impl_lanemask_t, int32_t var,
+                                     int32_t srcLane) {
+  int width = WARPSIZE;
+  int self = getLaneId();
+  int index = srcLane + (self & ~(width - 1));
+  return __builtin_amdgcn_ds_bpermute(index << 2, var);
 }
 
-DEVICE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t Var,
-                                          uint32_t Delta, int32_t Width) {
-  return __shfl_down(Var, Delta, Width);
+DEVICE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t var,
+                                          uint32_t laneDelta, int32_t width) {
+  int self = getLaneId();
+  int index = self + laneDelta;
+  index = (int)(laneDelta + (self & (width - 1))) >= width ? self : index;
+  return __builtin_amdgcn_ds_bpermute(index << 2, var);
 }
 
 EXTERN uint64_t __ockl_get_local_size(uint32_t);

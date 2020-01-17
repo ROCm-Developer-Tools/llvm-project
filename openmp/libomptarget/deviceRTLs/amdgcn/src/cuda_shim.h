@@ -22,16 +22,6 @@
 #define __device__ __attribute__((device))
 #endif
 
-#ifndef __OVERL__
-#define __OVERL__ __attribute__((device, always_inline, overloadable)) const
-#endif
-
-// shuffle
-static constexpr int warpSize = 64;
-__OVERL__ int __shfl_down(int a, unsigned int b, int c);
-__OVERL__
-int __shfl(int var, int src_lane, int width = warpSize);
-
 __device__ static uint64_t __clock64(void) {
 #if __AMDGCN__ > 800
   return __builtin_amdgcn_s_memrealtime();
