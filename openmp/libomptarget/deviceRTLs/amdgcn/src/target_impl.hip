@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "target_impl.h"
+#include "amdgcn_access_dimensions.h"
 
 // Implementations initially derived from hcc
 
@@ -67,10 +68,8 @@ DEVICE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t var,
   return __builtin_amdgcn_ds_bpermute(index << 2, var);
 }
 
-EXTERN uint64_t __ockl_get_local_size(uint32_t);
-EXTERN uint64_t __ockl_get_num_groups(uint32_t);
-DEVICE int GetNumberOfBlocksInKernel() { return __ockl_get_num_groups(0); }
-DEVICE int GetNumberOfThreadsInBlock() { return __ockl_get_local_size(0); }
+DEVICE int GetNumberOfBlocksInKernel() { return __amdgcn_grid_dim_x(); }
+DEVICE int GetNumberOfThreadsInBlock() { return __amdgcn_block_dim_x(); }
 
 DEVICE bool __kmpc_impl_is_first_active_thread() {
   __kmpc_impl_lanemask_t Mask = __kmpc_impl_activemask();
