@@ -17,12 +17,10 @@ template <typename T> DEVICE T atomicAdd(volatile T *x, T v) {
   return __atomic_fetch_add(x, v, __ATOMIC_SEQ_CST);
 }
 
-template <typename T> DEVICE T atomicInc(T *x, T v) {
-  if (*x >= v) {
-    return *x;
-  } else {
-    return __atomic_fetch_add((volatile T *)x, 1, __ATOMIC_SEQ_CST);
-  }
+// Only implemented for i32 as that's the only call site
+EXTERN uint32_t __amdgcn_atomic_inc_i32(uint32_t *, uint32_t);
+INLINE uint32_t atomicInc(uint32_t *address, uint32_t val) {
+  return __amdgcn_atomic_inc_i32(address, val);
 }
 
 template <typename T> DEVICE T atomicMax(volatile T *address, T val) {
