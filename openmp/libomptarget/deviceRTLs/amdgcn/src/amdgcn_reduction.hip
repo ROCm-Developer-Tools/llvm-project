@@ -19,7 +19,7 @@ EXTERN
 int32_t __gpu_block_reduce() {
   bool isSPMDExecutionMode = isSPMDMode();
   int nt = GetNumberOfOmpThreads(isSPMDExecutionMode);
-  if (nt != blockDim.x)
+  if (nt != GetNumberOfThreadsInBlock())
     return 0;
 
   __kmpc_impl_lanemask_t tnum = __kmpc_impl_activemask();
@@ -54,18 +54,18 @@ int32_t __kmpc_reduce_gpu(kmp_Ident *loc, int32_t global_tid, int32_t num_vars,
     return 1;
   if (!__gpu_block_reduce())
     return 2;
-  if (threadIdx.x == 0)
+  if (GetThreadIdInBlock() == 0)
     return 1;
   return 0;
 }
 
 EXTERN
 int32_t __kmpc_reduce_combined(kmp_Ident *loc) {
-  return threadIdx.x == 0 ? 2 : 0;
+  return GetThreadIdInBlock() == 0 ? 2 : 0;
 }
 
 EXTERN
 int32_t __kmpc_reduce_simd(kmp_Ident *loc) {
-  return (threadIdx.x % WARPSIZE == 0) ? 1 : 0;
+  return (GetThreadIdInBlock() % WARPSIZE == 0) ? 1 : 0;
 }
 
