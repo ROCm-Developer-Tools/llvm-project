@@ -41,7 +41,6 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
 
 DEVICE double __kmpc_impl_get_wtick() { return ((double)1E-9); }
 
-EXTERN uint64_t __clock64();
 DEVICE double __kmpc_impl_get_wtime() {
   return ((double)1.0 / 745000000.0) * __clock64();
 }
