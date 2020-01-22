@@ -41,10 +41,10 @@
 
 #define hipThreadIdx_x __builtin_amdgcn_workitem_id_x()
 
-__device__ char gpuHeap[SIZE_OF_HEAP];
-__device__ uint32_t gpuFlags[NUM_PAGES];
+DEVICE char gpuHeap[SIZE_OF_HEAP];
+DEVICE uint32_t gpuFlags[NUM_PAGES];
 
-__device__ void *__malloc(size_t size) {
+DEVICE void *__malloc(size_t size) {
   char *heap = (char *)gpuHeap;
   if (size > SIZE_OF_HEAP) {
     return (void *)nullptr;
@@ -77,7 +77,7 @@ __device__ void *__malloc(size_t size) {
   return ptr;
 }
 
-__device__ void __free(void *ptr) {
+DEVICE void __free(void *ptr) {
   if (ptr == nullptr) {
     return;
   }
