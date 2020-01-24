@@ -35,7 +35,8 @@
 #define SHARED __attribute__((shared))
 #else
 #define DEVICE
-#define SHARED //__attribute__((address_space(3)))
+// This doesn't work - need front end support
+#define SHARED __attribute__((address_space(3)))
 #endif
 
 #define INLINE inline DEVICE
