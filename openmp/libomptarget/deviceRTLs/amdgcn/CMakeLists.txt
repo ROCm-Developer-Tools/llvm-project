@@ -79,20 +79,21 @@ endif()
 separate_arguments(mcpus)
 
 macro(add_cuda_bc_library)
-  set(cu_cmd ${AOMP_BINDIR}/clang++
-    -std=c++11
-    -fcuda-rdc
-    -fvisibility=default
-    --cuda-device-only
-    -Wno-unused-value
-    -x hip
-    -O${optimization_level}
-    --cuda-gpu-arch=${mcpu}
-    ${CUDA_DEBUG}
-    -I${CMAKE_CURRENT_SOURCE_DIR}/src
-    -I${devicertl_base_directory})
+set(cu_cmd ${AOMP_BINDIR}/clang++
+  -std=c++11
+  -fvisibility=default
+  -emit-llvm -c
+  -Wno-unused-value
+  -x c++
+  -ffreestanding --target=amdgcn-amd-amdhsa
+  -O${optimization_level}
+  -march=${mcpu}
+  ${CUDA_DEBUG}
+  -I${CMAKE_CURRENT_SOURCE_DIR}/src
+  -I${devicertl_base_directory})
 
-  set(bc1_files)
+
+set(bc1_files)
 
   foreach(file ${ARGN})
     get_filename_component(fname ${file} NAME_WE)

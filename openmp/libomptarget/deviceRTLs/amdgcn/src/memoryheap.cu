@@ -13,7 +13,6 @@
 
 #include "common/omptarget.h"
 #include "amdgcn_access_dimensions.h"
-#include <stdio.h>
 
 #ifdef __AMDGCN__
 

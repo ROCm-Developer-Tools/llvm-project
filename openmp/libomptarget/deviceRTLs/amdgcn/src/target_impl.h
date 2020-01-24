@@ -30,11 +30,39 @@
 #include <stdint.h>
 
 
+#ifdef __HIP__
 #define DEVICE __attribute__((device))
+#define SHARED __attribute__((shared))
+#else
+#define DEVICE
+#define SHARED //__attribute__((address_space(3)))
+#endif
+
 #define INLINE inline DEVICE
 #define NOINLINE __attribute__((noinline)) DEVICE
-#define SHARED __attribute__((shared))
 #define ALIGN(N) __attribute__((aligned(N)))
+
+// DEVICE versions of non-freestanding parts of libc
+
+// Subset of <inttypes.h>
+#define PRIu64 "lu"
+#define PRId64 "ld"
+
+// Subset of <stdio.h>
+EXTERN int printf(const char *, ...);
+
+// Subset of <assert.h>
+#ifdef NDEBUG
+#define assert(x) (void)0
+#else
+#define assert(x) (void)((x) || (__assert_fail(), 0))
+INLINE void __assert_fail() {
+  // Ignore expr/line/file information for now
+  // May want to generate calls to printf iff printf
+  // is already linked into the executable
+  __builtin_trap();
+}
+#endif
 
 #include "hip_atomics.h"
 
@@ -159,14 +187,5 @@ DEVICE int __kmpc_impl_test_lock(omp_lock_t *lock);
 // Memory
 DEVICE void *__kmpc_impl_malloc(size_t x);
 DEVICE void __kmpc_impl_free(void *x);
-
-// DEVICE versions of part of libc
-EXTERN __attribute__((noreturn)) void
-__assertfail(const char *, const char *, unsigned, const char *, size_t);
-INLINE void __assert_fail(const char *__message, const char *__file,
-                          unsigned int __line, const char *__function) {
-  __assertfail(__message, __file, __line, __function, sizeof(char));
-}
-EXTERN int printf(const char *, ...);
 
 #endif

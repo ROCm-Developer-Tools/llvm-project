@@ -128,7 +128,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #if OMPTARGET_NVPTX_DEBUG || OMPTARGET_NVPTX_TEST || OMPTARGET_NVPTX_WARNING
-#include <stdio.h>
 #include "common/support.h"
 
 template <typename... Arguments>
@@ -139,7 +138,7 @@ NOINLINE static void log(const char *fmt, Arguments... parameters) {
 
 #endif
 #if OMPTARGET_NVPTX_TEST
-#include <assert.h>
+#include "common/support.h"
 
 template <typename... Arguments>
 NOINLINE static void check(bool cond, const char *fmt,

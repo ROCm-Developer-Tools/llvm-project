@@ -11,7 +11,6 @@
 //===----------------------------------------------------------------------===//
 #include "common/omptarget.h"
 #include "target_impl.h"
-#include <stdio.h>
 
 // Set the print format for active threads
 #ifdef __AMDGCN__
