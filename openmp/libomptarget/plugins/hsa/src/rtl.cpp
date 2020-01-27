@@ -29,6 +29,8 @@
 // Header from ATMI interface
 #include "atmi_interop_hsa.h"
 #include "atmi_runtime.h"
+// Header from hostcall
+#include "amd_hostcall.h"
 
 #include "omptargetplugin.h"
 
@@ -244,12 +246,14 @@ public:
       print_kernel_trace = 0;
 
     DP("Start initializing HSA-ATMI\n");
-
     atmi_status_t err = atmi_init(ATMI_DEVTYPE_GPU);
     if (err != ATMI_STATUS_SUCCESS) {
       DP("Error when initializing HSA-ATMI\n");
       return;
     }
+    // Init hostcall soon after initializing ATMI
+    atmi_hostcall_init();
+
     atmi_machine_t *machine = atmi_machine_get_info();
     NumberOfiGPUs = machine->device_count_by_type[ATMI_DEVTYPE_iGPU];
     NumberOfdGPUs = machine->device_count_by_type[ATMI_DEVTYPE_dGPU];
@@ -330,6 +334,8 @@ public:
 
   ~RTLDeviceInfoTy() {
     DP("Finalizing the HSA-ATMI DeviceInfo.\n");
+    // Terminate hostcall before finalizing ATMI
+    atmi_hostcall_terminate();
     atmi_finalize();
   }
 };
