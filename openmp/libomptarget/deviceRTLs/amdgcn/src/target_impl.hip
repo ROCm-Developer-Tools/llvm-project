@@ -19,7 +19,7 @@ static DEVICE uint32_t getLaneId(void) {
   return __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
 }
 
-// initialized with a 64-bit mask with bits set in positions less than the
+// Initialized with a 64-bit mask with bits set in positions less than the
 // thread's lane number in the warp
 DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_lt() {
   uint32_t lane = getLaneId();
@@ -28,11 +28,11 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_lt() {
   return mask & ballot;
 }
 
-// initialized with a 64-bit mask with bits set in positions greater than the
+// Initialized with a 64-bit mask with bits set in positions greater than the
 // thread's lane number in the warp
 DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
   uint32_t lane = getLaneId();
-  if (lane == 63)
+  if (lane == (WARPSIZE - 1))
     return 0;
   uint64_t ballot = __kmpc_impl_activemask();
   uint64_t mask = (~((uint64_t)0)) << (lane + 1);
@@ -45,7 +45,7 @@ DEVICE double __kmpc_impl_get_wtime() {
   return ((double)1.0 / 745000000.0) * __clock64();
 }
 
-// warp vote function
+// Warp vote function
 DEVICE __kmpc_impl_lanemask_t __kmpc_impl_activemask() {
   // 33 is ICMP_NE from llvm/include/llvm/IR/InstrTypes.h
   return __builtin_amdgcn_uicmp(1, 0, 33);
