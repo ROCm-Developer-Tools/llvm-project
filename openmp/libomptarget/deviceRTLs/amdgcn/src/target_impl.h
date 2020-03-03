@@ -38,16 +38,6 @@
 
 #include "hip_atomics.h"
 
-// Needed by get_wtime and currently used by locks
-INLINE uint64_t __clock64(void) {
-#if __AMDGCN__ > 800
-  return __builtin_amdgcn_s_memrealtime();
-#else
-  DEVICE uint64_t __llvm_amdgcn_s_memrealtime(void);
-  return __llvm_amdgcn_s_memrealtime();
-#endif
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Kernel options
 ////////////////////////////////////////////////////////////////////////////////
