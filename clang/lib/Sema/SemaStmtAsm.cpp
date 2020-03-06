@@ -260,6 +260,20 @@ StmtResult Sema::ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
   llvm::StringMap<bool> FeatureMap;
   Context.getFunctionFeatureMap(FeatureMap, FD);
 
+  // If we're compiling CUDA file and function attributes indicate that it's not
+  // for this compilation side, skip all the checks.
+  if ((!DeclAttrsMatchCUDAMode(getLangOpts(), getCurFunctionDecl())) ||
+      (this->getASTContext().getTargetInfo().getTriple().getArch() ==
+       llvm::Triple::amdgcn) ||
+      (this->getASTContext().getTargetInfo().getTriple().getArch() ==
+       llvm::Triple::nvptx64)) {
+    GCCAsmStmt *NS = new (Context)
+        GCCAsmStmt(Context, AsmLoc, IsSimple, IsVolatile, NumOutputs, NumInputs,
+                   Names, Constraints, Exprs.data(), AsmString, NumClobbers,
+                   Clobbers, NumLabels, RParenLoc);
+    return NS;
+  }
+
   for (unsigned i = 0; i != NumOutputs; i++) {
     StringLiteral *Literal = Constraints[i];
     assert(Literal->isAscii());

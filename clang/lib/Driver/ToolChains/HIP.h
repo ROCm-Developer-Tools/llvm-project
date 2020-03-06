@@ -37,12 +37,20 @@ public:
                     const char *LinkingOutput) const override;
 
 private:
+  /// \return output file name from build-select, prelink, and preopt
+  const char *constructOmpExtraCmds(Compilation &C, const JobAction &JA,
+                                    const InputInfoList &Inputs,
+                                    const llvm::opt::ArgList &Args,
+                                    llvm::StringRef SubArchName,
+                                    llvm::StringRef OutputFilePrefix) const;
+
   /// \return llvm-link output file name.
   const char *constructLLVMLinkCommand(Compilation &C, const JobAction &JA,
                                        const InputInfoList &Inputs,
                                        const llvm::opt::ArgList &Args,
                                        llvm::StringRef SubArchName,
-                                       llvm::StringRef OutputFilePrefix) const;
+                                       llvm::StringRef OutputFilePrefix,
+                                       llvm::StringRef overrideInputs) const;
 
   /// \return opt output file name.
   const char *constructOptCommand(Compilation &C, const JobAction &JA,
@@ -58,8 +66,7 @@ private:
                                   const llvm::opt::ArgList &Args,
                                   llvm::StringRef SubArchName,
                                   llvm::StringRef OutputFilePrefix,
-                                  const char *InputFileName,
-                                  bool OutputIsAsm = false) const;
+                                  const char *InputFileName) const;
 
   void constructLldCommand(Compilation &C, const JobAction &JA,
                            const InputInfoList &Inputs, const InputInfo &Output,
@@ -75,7 +82,8 @@ namespace toolchains {
 class LLVM_LIBRARY_VISIBILITY HIPToolChain : public ToolChain {
 public:
   HIPToolChain(const Driver &D, const llvm::Triple &Triple,
-                const ToolChain &HostTC, const llvm::opt::ArgList &Args);
+               const ToolChain &HostTC, const llvm::opt::ArgList &Args,
+               const Action::OffloadKind OK);
 
   const llvm::Triple *getAuxTriple() const override {
     return &HostTC.getTriple();
@@ -104,6 +112,9 @@ public:
   void AddClangCXXStdlibIncludeArgs(
       const llvm::opt::ArgList &Args,
       llvm::opt::ArgStringList &CC1Args) const override;
+  void
+  AddFlangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                            llvm::opt::ArgStringList &FlangArgs) const override;
   void AddIAMCUIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                            llvm::opt::ArgStringList &CC1Args) const override;
 
@@ -113,12 +124,15 @@ public:
   computeMSVCVersion(const Driver *D,
                      const llvm::opt::ArgList &Args) const override;
 
-  unsigned GetDefaultDwarfVersion() const override { return 4; }
+  unsigned GetDefaultDwarfVersion() const override { return 2; }
 
   const ToolChain &HostTC;
 
 protected:
   Tool *buildLinker() const override;
+
+private:
+  const Action::OffloadKind OK;
 };
 
 } // end namespace toolchains

@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
   Option
   ProfileData
   Support
+  Object
   )
 
 if(WIN32)

@@ -962,6 +962,11 @@ public:
       QualType VarTy = LocalVD->getType();
       if (VarTy->isReferenceType()) {
         Address Temp = CGF.CreateMemTemp(VarTy);
+        if (Temp.getElementType() != TempAddr.getPointer()->getType())
+          Temp = Address(CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                             Temp.getPointer(),
+                             TempAddr.getPointer()->getType()->getPointerTo()),
+                         TempAddr.getAlignment());
         CGF.Builder.CreateStore(TempAddr.getPointer(), Temp);
         TempAddr = Temp;
       }
@@ -3838,6 +3843,8 @@ public:
                                        ReturnValueSlot ReturnValue);
   RValue EmitAMDGPUDevicePrintfCallExpr(const CallExpr *E,
                                         ReturnValueSlot ReturnValue);
+  RValue EmitAMDGPUDevicePrintfCallExprOMP(const CallExpr *E,
+                                           ReturnValueSlot ReturnValue);
 
   RValue EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                          const CallExpr *E, ReturnValueSlot ReturnValue);

@@ -1761,6 +1761,10 @@ void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
     return;
   }
 
+  if (Addr.getElementType()->isPtrOrPtrVectorTy() &&
+      Value->getType() != Addr.getElementType())
+    Value = Builder.CreatePointerBitCastOrAddrSpaceCast(Value,
+                                                        Addr.getElementType());
   llvm::StoreInst *Store = Builder.CreateStore(Value, Addr, Volatile);
   if (isNontemporal) {
     llvm::MDNode *Node =

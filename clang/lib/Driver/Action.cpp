@@ -29,6 +29,8 @@ const char *Action::getClassName(ActionClass AC) {
   case AnalyzeJobClass: return "analyzer";
   case MigrateJobClass: return "migrator";
   case CompileJobClass: return "compiler";
+  case FortranFrontendJobClass:
+    return "fortran-frontend";
   case BackendJobClass: return "backend";
   case AssembleJobClass: return "assembler";
   case IfsMergeJobClass: return "interface-stub-merger";
@@ -50,8 +52,13 @@ const char *Action::getClassName(ActionClass AC) {
 
 void Action::propagateDeviceOffloadInfo(OffloadKind OKind, const char *OArch) {
   // Offload action set its own kinds on their dependences.
-  if (Kind == OffloadClass)
+  // But we still need to preserve OffloadingDeviceKind and OffloadingArch
+  // where toplevel action is an unbundle.
+  if (Kind == OffloadClass) {
+    OffloadingDeviceKind = OKind;
+    OffloadingArch = OArch;
     return;
+  }
   // Unbundling actions use the host kinds.
   if (Kind == OffloadUnbundlingJobClass)
     return;
@@ -175,6 +182,7 @@ void OffloadAction::anchor() {}
 
 OffloadAction::OffloadAction(const HostDependence &HDep)
     : Action(OffloadClass, HDep.getAction()), HostTC(HDep.getToolChain()) {
+
   OffloadingArch = HDep.getBoundArch();
   ActiveOffloadKindMask = HDep.getOffloadKinds();
   HDep.getAction()->propagateHostOffloadInfo(HDep.getOffloadKinds(),
@@ -349,6 +357,12 @@ void CompileJobAction::anchor() {}
 
 CompileJobAction::CompileJobAction(Action *Input, types::ID OutputType)
     : JobAction(CompileJobClass, Input, OutputType) {}
+
+void FortranFrontendJobAction::anchor() {}
+
+FortranFrontendJobAction::FortranFrontendJobAction(Action *Input,
+                                                   types::ID OutputType)
+    : JobAction(FortranFrontendJobClass, Input, OutputType) {}
 
 void BackendJobAction::anchor() {}
 

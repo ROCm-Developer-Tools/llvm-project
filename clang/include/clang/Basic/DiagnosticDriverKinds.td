@@ -65,6 +65,7 @@ def warn_drv_unknown_cuda_version: Warning<
   InGroup<CudaUnknownVersion>;
 def err_drv_cuda_host_arch : Error<"unsupported architecture '%0' for host compilation.">;
 def err_drv_mix_cuda_hip : Error<"Mixed Cuda and HIP compilation is not supported.">;
+def err_drv_hip_invalid_auto_header : Error<"Invalid --hip-auto-headers=: '%0'">;
 def err_drv_invalid_thread_model_for_target : Error<
   "invalid thread model '%0' in '%1' for this target">;
 def err_drv_invalid_linker_name : Error<
@@ -73,6 +74,10 @@ def err_drv_invalid_pgo_instrumentor : Error<
   "invalid PGO instrumentor in argument '%0'">;
 def err_drv_invalid_rtlib_name : Error<
   "invalid runtime library name in argument '%0'">;
+def err_drv_invalid_allocatable_mode : Error<
+  "invalid semantic mode for assignments to allocatables in argument '%0'">;
+def err_drv_unsupported_fixed_line_length : Error<
+  "unsupported fixed-format line length in argument '%0'">;
 def err_drv_unsupported_rtlib_for_platform : Error<
   "unsupported runtime library '%0' for platform '%1'">;
 def err_drv_invalid_unwindlib_name : Error<
@@ -310,6 +315,8 @@ def warn_drv_pch_not_first_include : Warning<
   "precompiled header '%0' was ignored because '%1' is not first '-include'">;
 def warn_missing_sysroot : Warning<"no such sysroot directory: '%0'">,
   InGroup<DiagGroup<"missing-sysroot">>;
+def warn_bc_notfound : Warning<"Device BC Library not found: '%0'">,
+  InGroup<DiagGroup<"bc-notfound">>;
 def warn_incompatible_sysroot : Warning<"using sysroot for '%0' but targeting '%1'">,
   InGroup<DiagGroup<"incompatible-sysroot">>;
 def warn_debug_compression_unavailable : Warning<"cannot compress debug sections (zlib not installed)">,
@@ -481,4 +488,7 @@ def warn_drv_libstdcxx_not_found : Warning<
   InGroup<DiagGroup<"stdlibcxx-not-found">>;
 
 def err_drv_cannot_mix_options : Error<"cannot specify '%1' along with '%0'">;
+def warn_drv_sdl_bundled_archive : Warning<
+  "Archives of bundled host and device libraries are deprecated, please create individual device libraries for each device for library '%0.a'">,
+  InGroup<Deprecated>;
 }

@@ -123,6 +123,13 @@ bool types::isAcceptedByClang(ID Id) {
 
   case TY_Asm:
   case TY_C: case TY_PP_C:
+    /* FIXME Fortran types may not be necessary, since they are not accepted by
+     * Clang directly */
+  case TY_Fortran:
+  case TY_PP_Fortran:
+  case TY_F_FixedForm:
+  case TY_PP_F_FixedForm:
+
   case TY_CL:
   case TY_CUDA: case TY_PP_CUDA:
   case TY_CUDA_DEVICE:
@@ -142,6 +149,33 @@ bool types::isAcceptedByClang(ID Id) {
   case TY_LLVM_IR: case TY_LLVM_BC:
     return true;
   }
+}
+
+bool types::isFortran(ID Id) {
+  switch (Id) {
+  default:
+    return false;
+
+  case TY_Fortran:
+  case TY_PP_Fortran:
+  case TY_F_FixedForm:
+  case TY_PP_F_FixedForm:
+    return true;
+  }
+}
+
+bool types::isFreeFormFortran(ID Id) {
+  if (!isFortran(Id))
+    return false;
+
+  return (Id == TY_Fortran || Id == TY_PP_Fortran);
+}
+
+bool types::isFixedFormFortran(ID Id) {
+  if (!isFortran(Id))
+    return false;
+
+  return (Id == TY_F_FixedForm || Id == TY_PP_F_FixedForm);
 }
 
 bool types::isObjC(ID Id) {
@@ -212,80 +246,75 @@ bool types::isHIP(ID Id) {
   }
 }
 
-bool types::isFortran(ID Id) {
-  switch (Id) {
-  default:
-    return false;
-
-  case TY_Fortran: case TY_PP_Fortran:
-    return true;
-  }
-}
-
 bool types::isSrcFile(ID Id) {
-  return Id != TY_Object && getPreprocessedType(Id) != TY_INVALID;
+  return Id != TY_Object &&
+         ((getPreprocessedType(Id) != TY_INVALID) || isFortran(Id));
 }
 
 types::ID types::lookupTypeForExtension(llvm::StringRef Ext) {
   return llvm::StringSwitch<types::ID>(Ext)
-           .Case("c", TY_C)
-           .Case("C", TY_CXX)
-           .Case("F", TY_Fortran)
-           .Case("f", TY_PP_Fortran)
-           .Case("h", TY_CHeader)
-           .Case("H", TY_CXXHeader)
-           .Case("i", TY_PP_C)
-           .Case("m", TY_ObjC)
-           .Case("M", TY_ObjCXX)
-           .Case("o", TY_Object)
-           .Case("S", TY_Asm)
-           .Case("s", TY_PP_Asm)
-           .Case("bc", TY_LLVM_BC)
-           .Case("cc", TY_CXX)
-           .Case("CC", TY_CXX)
-           .Case("cl", TY_CL)
-           .Case("cp", TY_CXX)
-           .Case("cu", TY_CUDA)
-           .Case("hh", TY_CXXHeader)
-           .Case("ii", TY_PP_CXX)
-           .Case("ll", TY_LLVM_IR)
-           .Case("mi", TY_PP_ObjC)
-           .Case("mm", TY_ObjCXX)
-           .Case("rs", TY_RenderScript)
-           .Case("adb", TY_Ada)
-           .Case("ads", TY_Ada)
-           .Case("asm", TY_PP_Asm)
-           .Case("ast", TY_AST)
-           .Case("ccm", TY_CXXModule)
-           .Case("cpp", TY_CXX)
-           .Case("CPP", TY_CXX)
-           .Case("c++", TY_CXX)
-           .Case("C++", TY_CXX)
-           .Case("cui", TY_PP_CUDA)
-           .Case("cxx", TY_CXX)
-           .Case("CXX", TY_CXX)
-           .Case("F90", TY_Fortran)
-           .Case("f90", TY_PP_Fortran)
-           .Case("F95", TY_Fortran)
-           .Case("f95", TY_PP_Fortran)
-           .Case("for", TY_PP_Fortran)
-           .Case("FOR", TY_PP_Fortran)
-           .Case("fpp", TY_Fortran)
-           .Case("FPP", TY_Fortran)
-           .Case("gch", TY_PCH)
-           .Case("hip", TY_HIP)
-           .Case("hpp", TY_CXXHeader)
-           .Case("iim", TY_PP_CXXModule)
-           .Case("lib", TY_Object)
-           .Case("mii", TY_PP_ObjCXX)
-           .Case("obj", TY_Object)
-           .Case("ifs", TY_IFS)
-           .Case("pch", TY_PCH)
-           .Case("pcm", TY_ModuleFile)
-           .Case("c++m", TY_CXXModule)
-           .Case("cppm", TY_CXXModule)
-           .Case("cxxm", TY_CXXModule)
-           .Default(TY_INVALID);
+      .Case("c", TY_C)
+      .Case("C", TY_CXX)
+      .Case("F", TY_F_FixedForm)
+      .Case("f", TY_PP_F_FixedForm)
+      .Case("h", TY_CHeader)
+      .Case("H", TY_CXXHeader)
+      .Case("i", TY_PP_C)
+      .Case("m", TY_ObjC)
+      .Case("M", TY_ObjCXX)
+      .Case("o", TY_Object)
+      .Case("S", TY_Asm)
+      .Case("s", TY_PP_Asm)
+      .Case("bc", TY_LLVM_BC)
+      .Case("cc", TY_CXX)
+      .Case("CC", TY_CXX)
+      .Case("cl", TY_CL)
+      .Case("cp", TY_CXX)
+      .Case("cu", TY_CUDA)
+      .Case("hh", TY_CXXHeader)
+      .Case("ii", TY_PP_CXX)
+      .Case("ll", TY_LLVM_IR)
+      .Case("mi", TY_PP_ObjC)
+      .Case("mm", TY_ObjCXX)
+      .Case("rs", TY_RenderScript)
+      .Case("adb", TY_Ada)
+      .Case("ads", TY_Ada)
+      .Case("asm", TY_PP_Asm)
+      .Case("ast", TY_AST)
+      .Case("ccm", TY_CXXModule)
+      .Case("cpp", TY_CXX)
+      .Case("CPP", TY_CXX)
+      .Case("c++", TY_CXX)
+      .Case("C++", TY_CXX)
+      .Case("cui", TY_PP_CUDA)
+      .Case("cxx", TY_CXX)
+      .Case("CXX", TY_CXX)
+      .Case("gch", TY_PCH)
+      .Case("hip", TY_HIP)
+      .Case("hpp", TY_CXXHeader)
+      .Case("iim", TY_PP_CXXModule)
+      .Case("lib", TY_Object)
+      .Case("for", TY_PP_F_FixedForm)
+      .Case("FOR", TY_PP_F_FixedForm)
+      .Case("fpp", TY_F_FixedForm)
+      .Case("FPP", TY_F_FixedForm)
+      .Case("f90", TY_PP_Fortran)
+      .Case("f95", TY_PP_Fortran)
+      .Case("f03", TY_PP_Fortran)
+      .Case("f08", TY_PP_Fortran)
+      .Case("F90", TY_Fortran)
+      .Case("F95", TY_Fortran)
+      .Case("F03", TY_Fortran)
+      .Case("F08", TY_Fortran)
+      .Case("mii", TY_PP_ObjCXX)
+      .Case("obj", TY_Object)
+      .Case("ifs", TY_IFS)
+      .Case("pch", TY_PCH)
+      .Case("pcm", TY_ModuleFile)
+      .Case("c++m", TY_CXXModule)
+      .Case("cppm", TY_CXXModule)
+      .Case("cxxm", TY_CXXModule)
+      .Default(TY_INVALID);
 }
 
 types::ID types::lookupTypeForTypeSpecifier(const char *Name) {

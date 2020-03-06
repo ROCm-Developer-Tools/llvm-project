@@ -92,10 +92,11 @@ else()
 endif()
 
 # create libraries
-set(mcpus gfx700 gfx701 gfx801 gfx803 gfx900)
+set(mcpus gfx700 gfx701 gfx801 gfx803 gfx900 gfx902 gfx906 gfx908)
 if (DEFINED LIBOMPTARGET_AMDGCN_GFXLIST)
   set(mcpus ${LIBOMPTARGET_AMDGCN_GFXLIST})
 endif()
+message("======> list of AMDGCN GPUs to build for :${mcpus}")
 
 macro(add_cuda_bc_library)
   set(cu_cmd ${AOMP_BINDIR}/clang++

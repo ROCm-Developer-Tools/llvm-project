@@ -114,15 +114,17 @@ mark_as_advanced(
 if (CUDA_TOOLKIT_ROOT_DIR)
   set(LIBOMPTARGET_CUDA_TOOLKIT_ROOT_DIR_PRESET TRUE)
 endif()
-find_package(CUDA QUIET)
 
-set(LIBOMPTARGET_DEP_CUDA_FOUND ${CUDA_FOUND})
-set(LIBOMPTARGET_DEP_CUDA_INCLUDE_DIRS ${CUDA_INCLUDE_DIRS})
+if("${CMAKE_BUILD_CUDA}" MATCHES 1)
+  find_package(CUDA QUIET)
 
-mark_as_advanced(
-  LIBOMPTARGET_DEP_CUDA_FOUND 
-  LIBOMPTARGET_DEP_CUDA_INCLUDE_DIRS)
+  set(LIBOMPTARGET_DEP_CUDA_FOUND ${CUDA_FOUND})
+  set(LIBOMPTARGET_DEP_CUDA_INCLUDE_DIRS ${CUDA_INCLUDE_DIRS})
 
+  mark_as_advanced(
+    LIBOMPTARGET_DEP_CUDA_FOUND
+    LIBOMPTARGET_DEP_CUDA_INCLUDE_DIRS)
+endif()
 ################################################################################
 # Looking for CUDA Driver API... (needed for CUDA plugin)
 ################################################################################

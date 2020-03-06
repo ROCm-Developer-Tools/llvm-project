@@ -507,6 +507,11 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     ToolChain.addFastMathRuntimeIfAvailable(Args, CmdArgs);
   }
 
+  if (JA.isHostOffloading(Action::OFK_HIP) ||
+      JA.isHostOffloading(Action::OFK_OpenMP)) {
+    addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
+    CmdArgs.push_back(Args.MakeArgString("-L" + D.Dir + "/../lib"));
+  }
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   Args.AddAllArgs(CmdArgs, options::OPT_u);
 
@@ -526,6 +531,26 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
   // The profile runtime also needs access to system libraries.
   getToolChain().addProfileRTLibs(Args, CmdArgs);
+
+  // Add Fortran runtime libraries
+  if (needFortranLibs(D, Args)) {
+    ToolChain.AddFortranStdlibLibArgs(Args, CmdArgs);
+    CmdArgs.push_back("-rpath");
+    CmdArgs.push_back(Args.MakeArgString(D.Dir + "/../lib"));
+  } else {
+    // Claim "no Flang libraries" arguments if any
+    for (auto Arg : Args.filtered(options::OPT_noFlangLibs)) {
+      Arg->claim();
+    }
+  }
+
+  if (JA.isHostOffloading(Action::OFK_HIP)) {
+    CmdArgs.push_back("-latmi_runtime");
+    CmdArgs.push_back("-lhip_hcc");
+    CmdArgs.push_back("-rpath");
+    CmdArgs.push_back(
+        Args.MakeArgString(D.Dir + "/../lib:" + D.Dir + "/../hcc/lib"));
+  }
 
   if (D.CCCIsCXX() &&
       !Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {

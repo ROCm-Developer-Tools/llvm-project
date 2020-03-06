@@ -13,6 +13,7 @@
 #include "AMDGPU.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/CodeGenOptions.h"
+#include "clang/Basic/GpuGridValues.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/MacroBuilder.h"
 #include "clang/Basic/TargetBuiltins.h"
@@ -279,6 +280,10 @@ AMDGPUTargetInfo::AMDGPUTargetInfo(const llvm::Triple &Triple,
   resetDataLayout(isAMDGCN(getTriple()) ? DataLayoutStringAMDGCN
                                         : DataLayoutStringR600);
   assert(DataLayout->getAllocaAddrSpace() == Private);
+  TLSSupported = false;
+  VLASupported = false;
+  GridValues = (const int *)&(GPU::AMDGPUGpuGridValues[0]);
+  LongGridValues = (const long long *)&(GPU::AMDGPUGpuLongGridValues[0]);
 
   setAddressSpaceMap(Triple.getOS() == llvm::Triple::Mesa3D ||
                      !isAMDGCN(Triple));
@@ -297,6 +302,12 @@ AMDGPUTargetInfo::AMDGPUTargetInfo(const llvm::Triple &Triple,
   }
 
   MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
+  // This is a workaround for HIP to get things going until
+  // https://reviews.llvm.org/D57831 is committed.
+#if _WIN32
+  WCharType = UnsignedShort;
+  WIntType = UnsignedShort;
+#endif
 }
 
 void AMDGPUTargetInfo::adjust(LangOptions &Opts) {
@@ -327,6 +338,8 @@ void AMDGPUTargetInfo::getTargetDefines(const LangOptions &Opts,
     StringRef CanonName = isAMDGCN(getTriple()) ?
       getArchNameAMDGCN(GPUKind) : getArchNameR600(GPUKind);
     Builder.defineMacro(Twine("__") + Twine(CanonName) + Twine("__"));
+    // Make AMDGCN be a useful numeric value
+    Builder.defineMacro("__AMDGCN__", CanonName.substr(3));
   }
 
   // TODO: __HAS_FMAF__, __HAS_LDEXPF__, __HAS_FP64__ are deprecated and will be

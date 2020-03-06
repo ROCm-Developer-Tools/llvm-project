@@ -94,6 +94,20 @@ using namespace clang;
 using namespace llvm::opt;
 
 // static
+static bool archiveContainsDeviceCode(const char *UBProgram,
+                                      std::string Archive,
+                                      std::string GpuName) {
+  std::vector<StringRef> UBArgs;
+  std::string InputArg("-input=" + Archive);
+  std::string OffloadArg("-offload-arch=" + GpuName);
+  UBArgs.push_back("clang-unbundle-archive");
+  UBArgs.push_back("-dry-run");
+  UBArgs.push_back(InputArg);
+  UBArgs.push_back(OffloadArg);
+  int ExecResult = llvm::sys::ExecuteAndWait(UBProgram, UBArgs);
+  return ExecResult == 0;
+}
+
 std::string Driver::GetResourcesPath(StringRef BinaryPath,
                                      StringRef CustomResourceDir) {
   // Since the resource directory is embedded in the module hash, it's important
@@ -275,9 +289,17 @@ phases::ID Driver::getFinalPhase(const DerivedArgList &DAL,
       (PhaseArg = DAL.getLastArg(options::OPT__SLASH_EP)) ||
       (PhaseArg = DAL.getLastArg(options::OPT_M, options::OPT_MM)) ||
       (PhaseArg = DAL.getLastArg(options::OPT__SLASH_P))) {
-    FinalPhase = phases::Preprocess;
+    if (IsFlangMode() && (DAL.getLastArg(options::OPT_E)))
+      FinalPhase = phases::FortranFrontend;
+    else
+      FinalPhase = phases::Preprocess;
 
-  // --precompile only runs up to precompilation.
+    // -fsyntax-only stops Fortran compilation after FortranFrontend
+  } else if (IsFlangMode() &&
+             (PhaseArg = DAL.getLastArg(options::OPT_fsyntax_only))) {
+    FinalPhase = phases::FortranFrontend;
+
+    // --precompile only runs up to precompilation.
   } else if ((PhaseArg = DAL.getLastArg(options::OPT__precompile))) {
     FinalPhase = phases::Precompile;
 
@@ -654,7 +676,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     auto &HIPTC = ToolChains[HIPTriple.str() + "/" + HostTriple.str()];
     if (!HIPTC) {
       HIPTC = std::make_unique<toolchains::HIPToolChain>(
-          *this, HIPTriple, *HostTC, C.getInputArgs());
+          *this, HIPTriple, *HostTC, C.getInputArgs(), OFK);
     }
     C.addOffloadDeviceToolChain(HIPTC.get(), OFK);
   }
@@ -714,8 +736,24 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                 CudaTC = std::make_unique<toolchains::CudaToolChain>(
                     *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP);
               TC = CudaTC.get();
-            } else
+            } else if (TT.getArch() == llvm::Triple::amdgcn) {
+              const ToolChain *HostTC =
+                  C.getSingleOffloadToolChain<Action::OFK_Host>();
+              const llvm::Triple &HostTriple = HostTC->getTriple();
+              StringRef DeviceTripleStr;
+              DeviceTripleStr = "amdgcn-amd-amdhsa";
+              llvm::Triple HIPTriple(DeviceTripleStr);
+              auto &HIPTC =
+                  ToolChains[HIPTriple.str() + "/" + HostTriple.str()];
+              if (!HIPTC) {
+                HIPTC = std::make_unique<toolchains::HIPToolChain>(
+                    *this, HIPTriple, *HostTC, C.getInputArgs(),
+                    Action::OFK_OpenMP);
+              }
+              TC = HIPTC.get();
+            } else {
               TC = &getToolChain(C.getInputArgs(), TT);
+            }
             C.addOffloadDeviceToolChain(TC, Action::OFK_OpenMP);
           }
         }
@@ -1148,7 +1186,18 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   }
 
   BuildJobs(*C);
-
+#if 0
+  PrintActions(*C);
+  printf("\n=========================> LOOP PRINT OF JOBS\n");
+  const driver::JobList &Jobs = C->getJobs();
+  for(const driver::Command &Cmd : Jobs) {
+     printf("\nCMD for action %s arch:%s\n",
+        Cmd.getSource().getClassName(),
+        Cmd.getSource().getOffloadingArch());
+     Cmd.Print(llvm::errs(),"\n",true);
+  }
+  printf("=========================> END PRINT OF JOBS\n\n");
+#endif
   return C;
 }
 
@@ -1272,8 +1321,8 @@ void Driver::generateCompilationDiagnostics(
   PrintVersion(C, llvm::errs());
 
   Diag(clang::diag::note_drv_command_failed_diag_msg)
-      << "PLEASE submit a bug report to " BUG_REPORT_URL " and include the "
-         "crash backtrace, preprocessed source, and associated run script.";
+      << "PLEASE open a git issue at " BUG_REPORT_URL " with a detailed"
+         " description of this problem.";
 
   // Suppress driver output and emit preprocessor output to temp file.
   Mode = CPPMode;
@@ -2387,9 +2436,9 @@ class OffloadingActionBuilder final {
                "We should have at least one GPU architecture.");
 
         // If the host input is not CUDA or HIP, we don't need to bother about
-        // this input.
-        if (IA->getType() != types::TY_CUDA &&
-            IA->getType() != types::TY_HIP) {
+        // this input. CUDA and HIP are allowed in cpp and c files.
+        if (IA->getType() != types::TY_CUDA && IA->getType() != types::TY_HIP &&
+            IA->getType() != types::TY_CXX && IA->getType() != types::TY_C) {
           // The builder will ignore this input.
           IsActive = false;
           return ABRT_Inactive;
@@ -2402,8 +2451,9 @@ class OffloadingActionBuilder final {
           return ABRT_Success;
 
         // Replicate inputs for each GPU architecture.
-        auto Ty = IA->getType() == types::TY_HIP ? types::TY_HIP_DEVICE
-                                                 : types::TY_CUDA_DEVICE;
+        auto Ty = AssociatedOffloadKind == Action::OFK_HIP
+                      ? types::TY_HIP_DEVICE
+                      : types::TY_CUDA_DEVICE;
         for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
           CudaDeviceActions.push_back(
               C.MakeAction<InputAction>(IA->getInputArg(), Ty));
@@ -2777,12 +2827,16 @@ class OffloadingActionBuilder final {
       }
 
       // By default, we produce an action for each device arch.
-      for (Action *&A : CudaDeviceActions)
+      bool LastActionIsCompile = false;
+      for (Action *&A : CudaDeviceActions) {
         A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A,
                                                AssociatedOffloadKind);
+        LastActionIsCompile =
+            (A->getKind() == Action::ActionClass::CompileJobClass);
+      }
 
-      return (CompileDeviceOnly && CurPhase == FinalPhase) ? ABRT_Ignore_Host
-                                                           : ABRT_Success;
+      return (CompileDeviceOnly && LastActionIsCompile) ? ABRT_Ignore_Host
+                                                        : ABRT_Success;
     }
 
     void appendLinkDependences(OffloadAction::DeviceDependences &DA) override {
@@ -2804,6 +2858,12 @@ class OffloadingActionBuilder final {
     /// The OpenMP actions for the current input.
     ActionList OpenMPDeviceActions;
 
+    bool CompileHostOnly = false;
+    bool CompileDeviceOnly = false;
+
+    /// List of GPU architectures to use in this compilation.
+    SmallVector<CudaArch, 4> GpuArchList;
+
     /// The linker inputs obtained for each toolchain.
     SmallVector<ActionList, 8> DeviceLinkerInputs;
 
@@ -2823,6 +2883,36 @@ class OffloadingActionBuilder final {
       assert(OpenMPDeviceActions.size() == ToolChains.size() &&
              "Number of OpenMP actions and toolchains do not match.");
 
+      // FIXME:  Is there an easier way to determine amdgcn at this point?
+      bool Is_amdgcn = false;
+      for (Arg *A : Args) {
+        if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
+          for (auto *V : A->getValues()) {
+            StringRef VStr = StringRef(V);
+            if (VStr.startswith("-march=")) {
+              if (StringRef(VStr.str().substr(7)).startswith("gfx"))
+                Is_amdgcn = true;
+            }
+          }
+        }
+      }
+#if 0
+      printf("  X  OPENMP getDeviceDependences C:%d B:%d A:%d L:%d  CURRENT:%d isamd:%d\n",
+         phases::Compile,
+         phases::Backend,
+         phases::Assemble,
+         phases::Link, 
+         CurPhase,
+         Is_amdgcn
+      );
+#endif
+
+      // amdgcn does not support linking of object files, therefore we skip
+      // backend and assemble phases to output LLVM IR.
+      if (Is_amdgcn &&
+          (CurPhase == phases::Backend || CurPhase == phases::Assemble))
+        return ABRT_Success;
+
       // The host only depends on device action in the linking phase, when all
       // the device images have to be embedded in the host image.
       if (CurPhase == phases::Link) {
@@ -2841,10 +2931,14 @@ class OffloadingActionBuilder final {
       }
 
       // By default, we produce an action for each device arch.
-      for (Action *&A : OpenMPDeviceActions)
+      bool LastActionIsCompile = false;
+      for (Action *&A : OpenMPDeviceActions) {
         A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A);
-
-      return ABRT_Success;
+        LastActionIsCompile =
+            (A->getKind() == Action::ActionClass::CompileJobClass);
+      }
+      return (CompileDeviceOnly && LastActionIsCompile) ? ABRT_Ignore_Host
+                                                        : ABRT_Success;
     }
 
     ActionBuilderReturnCode addDeviceDepences(Action *HostAction) override {
@@ -2866,16 +2960,53 @@ class OffloadingActionBuilder final {
         // Check if the type of the file is the same as the action. Do not
         // unbundle it if it is not. Do not unbundle .so files, for example,
         // which are not object files.
-        if (IA->getType() == types::TY_Object &&
-            (!llvm::sys::path::has_extension(FileName) ||
-             types::lookupTypeForExtension(
-                 llvm::sys::path::extension(FileName).drop_front()) !=
-                 types::TY_Object))
-          return ABRT_Inactive;
+
+        // TODO(JAN): Create new file type for archive (TY_Archive),
+        // but it would likely touch a lot of code (currently 32
+        // places in 9 files), because anywhere TY_Object is checked,
+        // a check for TY_Archive would have to be added.
+
+        if (IA->getType() == types::TY_Object) {
+          if (llvm::sys::path::has_extension(FileName)) {
+            StringRef Extension =
+                llvm::sys::path::extension(FileName).drop_front();
+            if ((types::lookupTypeForExtension(Extension) !=
+                 types::TY_Object) &&
+                Extension != "a") {
+              return ABRT_Inactive;
+            }
+          } else {
+            return ABRT_Inactive;
+          }
+        }
+
         for (unsigned I = 0; I < ToolChains.size(); ++I) {
+          bool foundDeviceCode = false;
+          for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
+            StringRef Extension =
+                llvm::sys::path::extension(FileName).drop_front();
+            if (Extension != "a" ||
+                archiveContainsDeviceCode(
+                    ToolChains[I]
+                        ->GetProgramPath("clang-unbundle-archive")
+                        .c_str(),
+                    FileName, CudaArchToString(GpuArchList[I]))) {
+              foundDeviceCode = true;
+            }
+          }
+          if (!foundDeviceCode)
+            return ABRT_Inactive;
+
           OpenMPDeviceActions.push_back(UA);
-          UA->registerDependentActionInfo(
-              ToolChains[I], /*BoundArch=*/StringRef(), Action::OFK_OpenMP);
+          if (GpuArchList.size())
+            for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
+              UA->registerDependentActionInfo(ToolChains[I],
+                                              CudaArchToString(GpuArchList[I]),
+                                              Action::OFK_OpenMP);
+            }
+          else
+            UA->registerDependentActionInfo(
+                ToolChains[I], /*BoundArch=*/StringRef(), Action::OFK_OpenMP);
         }
         return ABRT_Success;
       }
@@ -2895,7 +3026,12 @@ class OffloadingActionBuilder final {
         for (Action *&A : OpenMPDeviceActions) {
           assert(isa<CompileJobAction>(A));
           OffloadAction::DeviceDependences DDep;
-          DDep.add(*A, **TC, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+          if (GpuArchList.size())
+            for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
+              DDep.add(*A, **TC, CudaArchToString(GpuArchList[I]),
+                       Action::OFK_OpenMP);
+          else
+            DDep.add(*A, **TC, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
           A = C.MakeAction<OffloadAction>(HDep, DDep);
           ++TC;
         }
@@ -2915,7 +3051,12 @@ class OffloadingActionBuilder final {
       auto TI = ToolChains.begin();
       for (auto *A : OpenMPDeviceActions) {
         OffloadAction::DeviceDependences Dep;
-        Dep.add(*A, **TI, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+        if (GpuArchList.size())
+          for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
+            Dep.add(*A, **TI, CudaArchToString(GpuArchList[I]),
+                    Action::OFK_OpenMP);
+        else
+          Dep.add(*A, **TI, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
         AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
         ++TI;
       }
@@ -2923,6 +3064,8 @@ class OffloadingActionBuilder final {
       OpenMPDeviceActions.clear();
     }
 
+    // Why does the trunk now use appendLinkActions instead of
+    // appendLinkDependences?
     void appendLinkActions(ActionList &AL) override {
       assert(ToolChains.size() == DeviceLinkerInputs.size() &&
              "Toolchains and linker inputs sizes do not match.");
@@ -2930,13 +3073,26 @@ class OffloadingActionBuilder final {
       // Append a new link action for each device.
       auto TC = ToolChains.begin();
       for (auto &LI : DeviceLinkerInputs) {
-        auto *DeviceLinkAction =
-            C.MakeAction<LinkJobAction>(LI, types::TY_Image);
-        OffloadAction::DeviceDependences DeviceLinkDeps;
-        DeviceLinkDeps.add(*DeviceLinkAction, **TC, /*BoundArch=*/nullptr,
-		        Action::OFK_OpenMP);
-        AL.push_back(C.MakeAction<OffloadAction>(DeviceLinkDeps,
-            DeviceLinkAction->getType()));
+        if (GpuArchList.size()) {
+          for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
+            auto *DeviceLinkAction =
+                C.MakeAction<LinkJobAction>(LI, types::TY_Image);
+            OffloadAction::DeviceDependences DeviceLinkDeps;
+            DeviceLinkDeps.add(*DeviceLinkAction, **TC,
+                               CudaArchToString(GpuArchList[I]),
+                               Action::OFK_OpenMP);
+            AL.push_back(C.MakeAction<OffloadAction>(
+                DeviceLinkDeps, DeviceLinkAction->getType()));
+          }
+        } else {
+          auto *DeviceLinkAction =
+              C.MakeAction<LinkJobAction>(LI, types::TY_Image);
+          OffloadAction::DeviceDependences DeviceLinkDeps;
+          DeviceLinkDeps.add(*DeviceLinkAction, **TC, /*BoundArch=*/nullptr,
+                             Action::OFK_OpenMP);
+          AL.push_back(C.MakeAction<OffloadAction>(
+              DeviceLinkDeps, DeviceLinkAction->getType()));
+        }
         ++TC;
       }
       DeviceLinkerInputs.clear();
@@ -2953,7 +3109,74 @@ class OffloadingActionBuilder final {
         ToolChains.push_back(TI->second);
 
       DeviceLinkerInputs.resize(ToolChains.size());
-      return false;
+
+      // Collect all cuda_gpu_arch parameters, removing duplicates.
+      std::set<CudaArch> GpuArchs;
+      bool Error = false;
+
+      Arg *PartialCompilationArg = Args.getLastArg(
+          options::OPT_cuda_host_only, options::OPT_cuda_device_only,
+          options::OPT_cuda_compile_host_device);
+      CompileHostOnly =
+          PartialCompilationArg && PartialCompilationArg->getOption().matches(
+                                       options::OPT_cuda_host_only);
+      CompileDeviceOnly =
+          PartialCompilationArg && PartialCompilationArg->getOption().matches(
+                                       options::OPT_cuda_device_only);
+
+      // Add each -march from -Xopenmp before processing offload-arch flags
+      for (Arg *A : Args) {
+        if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
+          for (auto *V : A->getValues()) {
+            StringRef VStr = StringRef(V);
+            if (VStr.startswith("-march=")) {
+              CudaArch Arch = StringToCudaArch(StringRef(VStr.str().substr(7)));
+              if (Arch == CudaArch::UNKNOWN) {
+                C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch)
+                    << VStr;
+                Error = true;
+              }
+              GpuArchs.insert(Arch);
+            }
+          }
+          A->claim();
+        }
+      }
+
+      for (Arg *A : Args) {
+        if (!(A->getOption().matches(options::OPT_cuda_gpu_arch_EQ) ||
+              A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ)))
+          continue;
+        A->claim();
+
+        const StringRef ArchStr = A->getValue();
+        if (A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ) &&
+            ArchStr == "all") {
+          GpuArchs.clear();
+          continue;
+        }
+        CudaArch Arch = StringToCudaArch(ArchStr);
+        if (Arch == CudaArch::UNKNOWN) {
+          C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << ArchStr;
+          Error = true;
+        } else if (A->getOption().matches(options::OPT_cuda_gpu_arch_EQ))
+          GpuArchs.insert(Arch);
+        else if (A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ))
+          GpuArchs.erase(Arch);
+        else
+          llvm_unreachable("Unexpected option.");
+      }
+
+      // Collect list of GPUs remaining in the set.
+      for (CudaArch Arch : GpuArchs)
+        GpuArchList.push_back(Arch);
+
+      // Default to sm_20 which is the lowest common denominator for
+      // supported GPUs.  sm_20 code should work correctly, if
+      // suboptimally, on all newer GPUs.
+      if (GpuArchList.empty())
+        GpuArchList.push_back(CudaArch::SM_20);
+      return Error;
     }
 
     bool canUseBundlerUnbundler() const override {
@@ -3043,7 +3266,6 @@ public:
         ++InactiveBuilders;
         continue;
       }
-
       auto RetCode =
           SB->getDeviceDependences(DDeps, CurPhase, FinalPhase, Phases);
 
@@ -3347,7 +3569,6 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
 void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
                           const InputList &Inputs, ActionList &Actions) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation actions");
-
   if (!SuppressMissingInputWarning && Inputs.empty()) {
     Diag(clang::diag::err_drv_no_input_files);
     return;
@@ -3648,6 +3869,11 @@ Action *Driver::ConstructPhaseAction(
       return C.MakeAction<HeaderModulePrecompileJobAction>(Input, OutputTy,
                                                            ModName);
     return C.MakeAction<PrecompileJobAction>(Input, OutputTy);
+  }
+  case phases::FortranFrontend: {
+    if (Args.hasArg(options::OPT_fsyntax_only))
+      return C.MakeAction<FortranFrontendJobAction>(Input, types::TY_Nothing);
+    return C.MakeAction<FortranFrontendJobAction>(Input, types::TY_LLVM_IR);
   }
   case phases::Compile: {
     if (Args.hasArg(options::OPT_fsyntax_only))
@@ -4500,14 +4726,24 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
       CCGenDiagnostics) {
     StringRef Name = llvm::sys::path::filename(BaseInput);
     std::pair<StringRef, StringRef> Split = Name.split('.');
+    SmallString<128> fname(Split.first.str().c_str());
+    if (!BoundArch.empty()) {
+      fname += "-";
+      fname.append(BoundArch);
+    }
     SmallString<128> TmpName;
-    const char *Suffix = types::getTypeTempSuffix(JA.getType(), IsCLMode());
+    const char *Suffix = nullptr;
+    if (Split.second == "a")
+      Suffix = "a";
+    else
+      Suffix = types::getTypeTempSuffix(JA.getType(), IsCLMode());
+
     Arg *A = C.getArgs().getLastArg(options::OPT_fcrash_diagnostics_dir);
     if (CCGenDiagnostics && A) {
       SmallString<128> CrashDirectory(A->getValue());
       if (!getVFS().exists(CrashDirectory))
         llvm::sys::fs::create_directories(CrashDirectory);
-      llvm::sys::path::append(CrashDirectory, Split.first);
+      llvm::sys::path::append(CrashDirectory, fname);
       const char *Middle = Suffix ? "-%%%%%%." : "-%%%%%%";
       std::error_code EC = llvm::sys::fs::createUniqueFile(
           CrashDirectory + Middle + Suffix, TmpName);
@@ -4516,7 +4752,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
         return "";
       }
     } else {
-      TmpName = GetTemporaryPath(Split.first, Suffix);
+      TmpName = GetTemporaryPath(fname, Suffix);
     }
     return C.addTempFile(C.getArgs().MakeArgString(TmpName));
   }

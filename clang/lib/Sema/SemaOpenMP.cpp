@@ -16505,7 +16505,10 @@ static void checkMappableExpressionList(
                   isOpenMPTargetExecutionDirective(DKind)) ||
                  DKind == OMPD_target)) {
         DSAStackTy::DSAVarData DVar = DSAS->getTopDSA(VD, /*FromParent=*/false);
-        if (isOpenMPPrivate(DVar.CKind)) {
+        // OpenMP 5.0 allows reduction and map in a combination pragma
+        bool Use50Sema =
+            SemaRef.LangOpts.OpenMP >= 50 && DVar.CKind == OMPC_reduction;
+        if (isOpenMPPrivate(DVar.CKind) && !Use50Sema) {
           SemaRef.Diag(ELoc, diag::err_omp_variable_in_given_clause_and_dsa)
               << getOpenMPClauseName(DVar.CKind)
               << getOpenMPClauseName(OMPC_map)

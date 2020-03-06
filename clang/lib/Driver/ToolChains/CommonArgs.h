@@ -20,6 +20,8 @@ namespace clang {
 namespace driver {
 namespace tools {
 
+bool needFortranLibs(const Driver &D, const llvm::opt::ArgList &Args);
+
 void addPathIfExists(const Driver &D, const Twine &Path,
                      ToolChain::path_list &Paths);
 
@@ -44,6 +46,37 @@ void linkXRayRuntimeDeps(const ToolChain &TC,
 void AddRunTimeLibs(const ToolChain &TC, const Driver &D,
                     llvm::opt::ArgStringList &CmdArgs,
                     const llvm::opt::ArgList &Args);
+
+void AddStaticDeviceLibs(Compilation &C, const Tool &T, const JobAction &JA,
+                         const InputInfoList &Inputs,
+                         const llvm::opt::ArgList &DriverArgs,
+                         llvm::opt::ArgStringList &CmdArgs, StringRef ArchName,
+                         StringRef GpuArch, bool isBitCodeSDL,
+                         bool postClangLink);
+void AddStaticDeviceLibs(const Driver &D, const llvm::opt::ArgList &DriverArgs,
+                         llvm::opt::ArgStringList &CmdArgs, StringRef ArchName,
+                         StringRef GpuArch, bool isBitCodeSDL,
+                         bool postClangLink);
+void AddStaticDeviceLibs(Compilation *C, const Tool *T, const JobAction *JA,
+                         const InputInfoList *Inputs, const Driver &D,
+                         const llvm::opt::ArgList &DriverArgs,
+                         llvm::opt::ArgStringList &CmdArgs, StringRef ArchName,
+                         StringRef GpuArch, bool isBitCodeSDL,
+                         bool postClangLink);
+
+bool SDLSearch(const Driver &D, const llvm::opt::ArgList &DriverArgs,
+               llvm::opt::ArgStringList &CmdArgs,
+               SmallVector<std::string, 8> LibraryPaths, std::string libname,
+               StringRef ArchName, StringRef GpuArch, bool isBitCodeSDL,
+               bool postClangLink);
+
+bool SDLSearch(Compilation &C, const Driver &D, const Tool &T,
+               const JobAction &JA, const InputInfoList &Inputs,
+               const llvm::opt::ArgList &DriverArgs,
+               llvm::opt::ArgStringList &CC1Args,
+               SmallVector<std::string, 8> LibraryPaths, std::string libname,
+               StringRef ArchName, StringRef GpuArch, bool isBitCodeSDL,
+               bool postClangLink);
 
 void AddHIPLinkerScript(const ToolChain &TC, Compilation &C,
                         const InputInfo &Output, const InputInfoList &Inputs,
@@ -74,6 +107,8 @@ unsigned ParseDebugDefaultVersion(const ToolChain &TC,
 void AddAssemblerKPIC(const ToolChain &ToolChain,
                       const llvm::opt::ArgList &Args,
                       llvm::opt::ArgStringList &CmdArgs);
+
+std::string FindDebugInLibraryPath();
 
 void addArchSpecificRPath(const ToolChain &TC, const llvm::opt::ArgList &Args,
                           llvm::opt::ArgStringList &CmdArgs);
