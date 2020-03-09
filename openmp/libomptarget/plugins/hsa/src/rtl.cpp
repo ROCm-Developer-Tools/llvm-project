@@ -29,6 +29,8 @@
 // Header from ATMI interface
 #include "atmi_interop_hsa.h"
 #include "atmi_runtime.h"
+// Header from hostcall
+#include "amd_hostcall.h"
 
 #include "omptargetplugin.h"
 
@@ -244,12 +246,14 @@ public:
       print_kernel_trace = 0;
 
     DP("Start initializing HSA-ATMI\n");
-
     atmi_status_t err = atmi_init(ATMI_DEVTYPE_GPU);
     if (err != ATMI_STATUS_SUCCESS) {
       DP("Error when initializing HSA-ATMI\n");
       return;
     }
+    // Init hostcall soon after initializing ATMI
+    atmi_hostcall_init();
+
     atmi_machine_t *machine = atmi_machine_get_info();
     NumberOfiGPUs = machine->device_count_by_type[ATMI_DEVTYPE_iGPU];
     NumberOfdGPUs = machine->device_count_by_type[ATMI_DEVTYPE_dGPU];
@@ -330,6 +334,8 @@ public:
 
   ~RTLDeviceInfoTy() {
     DP("Finalizing the HSA-ATMI DeviceInfo.\n");
+    // Terminate hostcall before finalizing ATMI
+    atmi_hostcall_terminate();
     atmi_finalize();
   }
 };
@@ -788,21 +794,22 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
       MaxParLevVal = KernDescVal.MaxParallelLevel;
       if (MaxParLevVal > 0) {
         uint32_t varsize;
-        const char *CsNam = "omptarget_nest_par_call_stack";
-        err = atmi_interop_hsa_get_symbol_info(place, CsNam, &CallStackAddr,
-                                               &varsize);
+	const char * CsNam = "omptarget_nest_par_call_stack";
+          err = atmi_interop_hsa_get_symbol_info(place, CsNam,
+              &CallStackAddr, &varsize);
         if (err != ATMI_STATUS_SUCCESS) {
-          fprintf(stderr, "Addr of %s failed\n", CsNam);
-          return NULL;
-        }
-        void *StructSizePtr;
-        const char *SsNam = "omptarget_nest_par_call_struct_size";
-        err = atmi_interop_hsa_get_symbol_info(place, SsNam, &StructSizePtr,
-                                               &varsize);
+	  fprintf(stderr, "Addr of %s failed\n",CsNam);
+	  return NULL;
+	}
+	void *StructSizePtr;
+	const char * SsNam = "omptarget_nest_par_call_struct_size";
+        err = atmi_interop_hsa_get_symbol_info(place, SsNam,
+              &StructSizePtr, &varsize);
         if (err != ATMI_STATUS_SUCCESS) {
-          fprintf(stderr, "Addr of %s failed\n", SsNam);
-          return NULL;
-        }
+	  fprintf(stderr,
+	    "Addr of %s failed\n", SsNam);
+	  return NULL;
+	}
         err = atmi_memcpy(&TgtStackItemSize, StructSizePtr, (size_t)varsize);
         if (err != ATMI_STATUS_SUCCESS) {
           DP("Error when copying data from device to host. Pointers: "
@@ -810,7 +817,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
              DPxPTR(&TgtStackItemSize), DPxPTR(StructSizePtr), varsize);
           return NULL;
         }
-        DP("Size of our struct is %d\n", TgtStackItemSize);
+	DP("Size of our struct is %d\n", TgtStackItemSize);
       }
 
       // Get ExecMode
@@ -1222,29 +1229,29 @@ void getLaunchVals(int &threadsPerGroup, unsigned &num_groups, int ConstWGSize,
 }
 
 static void *AllocateNestedParallelCallMemory(int MaxParLevel, int NumGroups,
-                                              int ThreadsPerGroup,
+		                              int ThreadsPerGroup,
                                               int device_id,
                                               void *CallStackAddr, int SPMD) {
   if (print_kernel_trace > 1)
     fprintf(stderr, "MaxParLevel %d SPMD %d NumGroups %d NumThrds %d\n",
-            MaxParLevel, SPMD, NumGroups, ThreadsPerGroup);
+                    MaxParLevel, SPMD, NumGroups, ThreadsPerGroup);
   // Total memory needed is Teams * Threads * ParLevels
-  size_t NestedMemSize =
-      MaxParLevel * NumGroups * ThreadsPerGroup * TgtStackItemSize * 4;
+  size_t NestedMemSize = MaxParLevel * NumGroups * ThreadsPerGroup *
+	                 TgtStackItemSize * 4;
 
   if (print_kernel_trace > 1)
     fprintf(stderr, "NestedMemSize %ld \n", NestedMemSize);
   assert(device_id <
-             (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
+        (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
          "Device ID too large");
 
   atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
   void *TgtPtr = NULL;
   atmi_status_t err = atmi_malloc(&TgtPtr, NestedMemSize, place);
-  err = atmi_memcpy(CallStackAddr, &TgtPtr, sizeof(void *));
+  err = atmi_memcpy(CallStackAddr, &TgtPtr, sizeof(void*));
   if (print_kernel_trace > 2)
     fprintf(stderr, "CallSck %lx TgtPtr %lx *TgtPtr %lx \n",
-            (long)CallStackAddr, (long)&TgtPtr, (long)TgtPtr);
+                    (long)CallStackAddr, (long)&TgtPtr, (long)TgtPtr);
   if (err != ATMI_STATUS_SUCCESS) {
     fprintf(stderr, "Mem not wrtten to target, err %d\n", err);
   }
@@ -1295,9 +1302,10 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
   void *TgtCallStack = NULL;
   if (KernelInfo->MaxParLevel > 0)
     TgtCallStack = AllocateNestedParallelCallMemory(
-        KernelInfo->MaxParLevel, num_groups, threadsPerGroup,
-        KernelInfo->device_id, KernelInfo->CallStackAddr,
-        KernelInfo->ExecutionMode);
+		     KernelInfo->MaxParLevel, num_groups,
+                     threadsPerGroup, KernelInfo->device_id,
+                     KernelInfo->CallStackAddr,
+		     KernelInfo->ExecutionMode);
 
   if (print_kernel_trace > 0)
     // enum modes are SPMD, GENERIC, NONE 0,1,2
