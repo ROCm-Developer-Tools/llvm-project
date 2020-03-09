@@ -20,12 +20,14 @@
 #include <dlfcn.h>
 #include <mutex>
 #include <string>
+#include <sys/stat.h>
 
 // List of all plugins that can support offloading.
 static const char *RTLNames[] = {
     /* PowerPC target */ "libomptarget.rtl.ppc64.so",
     /* x86_64 target  */ "libomptarget.rtl.x86_64.so",
     /* CUDA target    */ "libomptarget.rtl.cuda.so",
+    /* HSA target     */ "libomptarget.rtl.hsa.so",
     /* AArch64 target */ "libomptarget.rtl.aarch64.so"};
 
 RTLsTy *RTLs;
@@ -64,27 +66,55 @@ void RTLsTy::LoadRTLs() {
   }
 #endif // OMPTARGET_DEBUG
 
+  // FIXME this is amdgcn specific.
+  // Propogate HIP_VISIBLE_DEVICES if set to ROCR_VISIBLE_DEVICES.
+  if (char *hipVisDevs = getenv("HIP_VISIBLE_DEVICES")) {
+    if (char *rocrVisDevs = getenv("ROCR_VISIBLE_DEVICES")) {
+      if (strcmp(hipVisDevs, rocrVisDevs) != 0)
+        fprintf(stderr,
+                "Warning both HIP_VISIBLE_DEVICES %s "
+                "and ROCR_VISIBLE_DEVICES %s set\n", hipVisDevs, rocrVisDevs);
+    }
+    DP("Setting ROCR_VISIBLE_DEVICES %s\n", hipVisDevs);
+    setenv("ROCR_VISIBLE_DEVICES", hipVisDevs, true);
+  }
+
   // Parse environment variable OMP_TARGET_OFFLOAD (if set)
   TargetOffloadPolicy = (kmp_target_offload_kind_t) __kmpc_get_target_offload();
   if (TargetOffloadPolicy == tgt_disabled) {
     return;
   }
 
+  // Plugins should be loaded from same directory as libomptarget.so
+  char libomptarget_dir_name[256];
+  char plugin_file_name[256];
+  void *handle = dlopen("libomptarget.so", RTLD_NOW);
+  if (!handle)
+    DP("dlopen() failed: %s\n", dlerror());
+  if (dlinfo(handle, RTLD_DI_ORIGIN, libomptarget_dir_name) == -1)
+    DP("RTLD_DI_ORIGIN failed: %s\n", dlerror());
+
   DP("Loading RTLs...\n");
+  struct stat stat_buffer;
+  int platform_num = 0;
 
   // Attempt to open all the plugins and, if they exist, check if the interface
   // is correct and if they are supporting any devices.
   for (auto *Name : RTLNames) {
-    DP("Loading library '%s'...\n", Name);
-    void *dynlib_handle = dlopen(Name, RTLD_NOW);
+
+    strcpy(plugin_file_name, libomptarget_dir_name);
+    strcat(plugin_file_name, "/");
+    strcat(plugin_file_name, Name);
+    DP("Loading library '%s'...\n", plugin_file_name);
+    void *dynlib_handle = dlopen(plugin_file_name, RTLD_NOW);
 
     if (!dynlib_handle) {
       // Library does not exist or cannot be found.
-      DP("Unable to load library '%s': %s!\n", Name, dlerror());
+      DP("Unable to load library '%s': %s!\n", plugin_file_name, dlerror());
       continue;
     }
 
-    DP("Successfully loaded library '%s'!\n", Name);
+    DP("Successfully loaded library '%s'!\n", plugin_file_name);
 
     // Retrieve the RTL information from the runtime library.
     RTLInfoTy R;
