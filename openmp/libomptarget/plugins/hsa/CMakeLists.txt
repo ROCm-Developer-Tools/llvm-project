@@ -83,7 +83,7 @@ install(TARGETS omptarget.rtl.hsa LIBRARY DESTINATION "lib${OPENMP_LIBDIR_SUFFIX
 # Also, the AOMP specific build of ATMI has seperate release and debug builds. 
 target_link_libraries(
   omptarget.rtl.hsa
-  -L${LLVM_LIBDIR}${OPENMP_LIBDIR_SUFFIX} -latmi_runtime -Wl,-rpath,${LLVM_LIBDIR}${OPENMP_LIBDIR_SUFFIX}
+  -L${LLVM_LIBDIR}${OPENMP_LIBDIR_SUFFIX} -lamd_hostcall -latmi_runtime -Wl,-rpath,${LLVM_LIBDIR}${OPENMP_LIBDIR_SUFFIX}
   -L${LIBOMPTARGET_DEP_LIBHSA_LIBRARIES_DIRS} -L${LIBOMPTARGET_DEP_LIBHSAKMT_LIBRARIES_DIRS} -lhsa-runtime64 -lhsakmt  -Wl,-rpath,${LIBOMPTARGET_DEP_LIBHSA_LIBRARIES_DIRS},-rpath,${LIBOMPTARGET_DEP_LIBHSAKMT_LIBRARIES_DIRS}
   -L${LLVM_LIBDIR} -lLLVMAMDGPUDesc -lLLVMAMDGPUUtils -lLLVMMC -lLLVMCore -lLLVMSupport -Wl,-rpath,${LLVM_LIBDIR}
   -lelf
