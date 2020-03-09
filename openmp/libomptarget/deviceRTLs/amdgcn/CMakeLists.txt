@@ -54,9 +54,14 @@ get_filename_component(devicertl_base_directory
   ${CMAKE_CURRENT_SOURCE_DIR}
   DIRECTORY)
 
-set(cuda_sources
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_smid.hip
+set(hip_sources
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_access_dimensions.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_libcall.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_locks.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_reduction.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_smid.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_sync.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/memoryheap.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/src/target_impl.hip
   ${devicertl_base_directory}/common/src/cancel.cu
   ${devicertl_base_directory}/common/src/critical.cu
@@ -71,7 +76,12 @@ set(cuda_sources
   ${devicertl_base_directory}/common/src/sync.cu
   ${devicertl_base_directory}/common/src/task.cu)
 
+set(llvm_sources
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_threadfence.ll
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/atomic_inc.ll)
+  
 set(h_files
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_access_dimensions.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/amdgcn_interface.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/hip_atomics.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/target_impl.h
@@ -138,7 +148,8 @@ set(libname "omptarget-amdgcn")
 
 foreach(mcpu ${mcpus})
   set(bc_files)
-  add_cuda_bc_library(${cuda_sources})
+  add_cuda_bc_library(${hip_sources})
+  list(APPEND bc_files ${llvm_sources})
 
   set(bc_libname lib${libname}-${mcpu}.bc)
   add_custom_command(

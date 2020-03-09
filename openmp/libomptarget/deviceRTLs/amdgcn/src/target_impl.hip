@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "target_impl.h"
+#include "amdgcn_access_dimensions.h"
 
 // Implementations initially derived from hcc
 
@@ -36,9 +37,13 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
 
 DEVICE double __kmpc_impl_get_wtick() { return ((double)1E-9); }
 
-EXTERN uint64_t __clock64();
 DEVICE double __kmpc_impl_get_wtime() {
-  return ((double)1.0 / 745000000.0) * __clock64();
+#if __AMDGCN__ > 800
+  uint64_t t = __builtin_amdgcn_s_memrealtime();
+#else
+  uint64_t t = __builtin_amdgcn_s_memtime();
+#endif
+  return ((double)1.0 / 745000000.0) * t;
 }
 
 // Warp vote function
@@ -62,11 +67,36 @@ DEVICE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t var,
   return __builtin_amdgcn_ds_bpermute(index << 2, var);
 }
 
-EXTERN uint64_t __ockl_get_local_size(uint32_t);
-EXTERN uint64_t __ockl_get_num_groups(uint32_t);
-DEVICE int GetNumberOfBlocksInKernel() { return __ockl_get_num_groups(0); }
-DEVICE int GetNumberOfThreadsInBlock() { return __ockl_get_local_size(0); }
+DEVICE int GetNumberOfBlocksInKernel() { return __amdgcn_grid_dim_x(); }
+DEVICE int GetNumberOfThreadsInBlock() { return __amdgcn_block_dim_x(); }
 DEVICE unsigned GetWarpId() { return GetThreadIdInBlock() / WARPSIZE; }
 DEVICE unsigned GetLaneId() {
   return __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
+}
+
+DEVICE bool __kmpc_impl_is_first_active_thread() {
+  __kmpc_impl_lanemask_t Mask = __kmpc_impl_activemask();
+  unsigned tid = GetThreadIdInBlock();
+  unsigned laneid = (tid & 0X3F);
+  int64_t Sh;
+  unsigned Shnum;
+  if (laneid < 32) {
+    Mask = Mask << 32;
+    Shnum = 32 - laneid;
+  } else {
+    Shnum = 64 - laneid;
+  }
+  Sh = Mask << Shnum;
+  return (Sh == (unsigned long long)0);
+}
+
+// Memory
+DEVICE void *__malloc(size_t);
+DEVICE void *__kmpc_impl_malloc(size_t x) {
+  return __malloc(x);
+}
+
+DEVICE void __free(void *);
+DEVICE void __kmpc_impl_free(void *x) {
+  __free(x);
 }
