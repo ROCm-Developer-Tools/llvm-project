@@ -13,6 +13,7 @@
 #define _TARGET_IMPL_H_
 
 #include <cuda.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "nvptx_interface.h"
