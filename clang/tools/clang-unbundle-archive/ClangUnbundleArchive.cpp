@@ -304,7 +304,7 @@ class ObjectFileHandler final : public FileHandler {
 
     StringRef S = *SectionName;
     // If it does not start with the reserved suffix, just skip this section.
-    if (S != "OFFLOAD_BUNDLER_MAGIC_STR")
+    if (!S.startswith(OFFLOAD_BUNDLER_MAGIC_STR))
       return false;
 
     // Return the triple that is right after the reserved prefix.
