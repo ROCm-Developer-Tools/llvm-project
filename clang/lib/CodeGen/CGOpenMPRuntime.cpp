@@ -1645,6 +1645,15 @@ Address CGOpenMPRuntime::getOrCreateDefaultLocation(unsigned Flags) {
           CGM.GetAddrOfConstantCString(";unknown;unknown;0;0;;").getPointer();
       DefaultOpenMPPSource =
           llvm::ConstantExpr::getBitCast(DefaultOpenMPPSource, CGM.Int8PtrTy);
+
+      if (CGM.getTriple().getArch() == llvm::Triple::amdgcn) {
+        // amdgcn llc rejects static initializers containing addrspace cast (and
+        // other things)
+        // LLVM ERROR: Unsupported expression in static initializer
+        // Emitting NULL instead of the string works around this. The real fix
+        // may involve extending llc
+        DefaultOpenMPPSource = llvm::ConstantInt::getNullValue(CGM.Int8PtrTy);
+      }
     }
 
     llvm::Constant *Data[] = {
