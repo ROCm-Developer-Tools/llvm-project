@@ -35,7 +35,20 @@ using namespace types;
 static cl::opt<bool> DisableOpenMPOptimizations(
     "openmp-opt-disable", cl::ZeroOrMore,
     cl::desc("Disable OpenMP specific optimizations."), cl::Hidden,
-    cl::init(false));
+    cl::init(true));
+
+// Disabled for AOMP branch.
+//
+// The deduplication logic looks for a good place to insert a call. This
+// sometimes chooses the start of the entry block.
+// Said entry block contains allocas which would be handled by llc.
+// When the inserted call is to a function with multiple basic blocks, the
+// inliner splices in multiple blocks above these alloca, thus moving them
+// out of the entry block. They then cause llc to raise errors.
+//
+// The right fix is going to be adjusting the insertion point to avoid
+// disturbing alloca in the entry block.
+// The quick fix is to disable this optimisation.
 
 STATISTIC(NumOpenMPRuntimeCallsDeduplicated,
           "Number of OpenMP runtime calls deduplicated");
