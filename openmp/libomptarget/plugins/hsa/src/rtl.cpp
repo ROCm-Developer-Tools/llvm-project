@@ -280,10 +280,8 @@ public:
     // Init hostcall soon after initializing ATMI
     atmi_hostcall_init();
 
-    {
-      atmi_machine_t *machine = atmi_machine_get_info();
-      NumberOfDevices = machine->device_count_by_type[ATMI_DEVTYPE_GPU];
-    }
+    HSAAgents = find_gpu_agents();
+    NumberOfDevices = (int)HSAAgents.size();   
 
     if (NumberOfDevices == 0) {
       DP("There are no devices supporting HSA.\n");
@@ -307,13 +305,6 @@ public:
       ComputeUnits[i] = 1;
       DP("Device %d: Initial groupsPerDevice %d & threadsPerGroup %d\n", i,
          GroupsPerDevice[i], ThreadsPerGroup[i]);
-    }
-
-    HSAAgents = find_gpu_agents();
-    if (HSAAgents.size() != (size_t)NumberOfDevices) {
-      DP("Found unexpected number of agents: %zu != %d\n", HSAAgents.size(),
-         NumberOfDevices);
-      return;
     }
 
     // Get environment variables regarding teams
