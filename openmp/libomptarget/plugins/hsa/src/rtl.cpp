@@ -92,10 +92,9 @@ enum ExecutionModeType {
   NONE
 };
 
-typedef atmi_kernel_t ATMIfunction;
 /// Use a single entity to encode a kernel and a set of flags
 struct KernelTy {
-  ATMIfunction Func;
+  atmi_kernel_t Func;
 
   // execution mode of kernel
   // 0 - SPMD mode (without master warp)
@@ -107,7 +106,7 @@ struct KernelTy {
   void *CallStackAddr;
   const char *Name;
 
-  KernelTy(ATMIfunction _Func, int8_t _ExecutionMode, int16_t _ConstWGSize,
+  KernelTy(atmi_kernel_t _Func, int8_t _ExecutionMode, int16_t _ConstWGSize,
            int8_t _MaxParLevel, int32_t _device_id, void *_CallStackAddr,
            const char *_Name)
       : Func(_Func), ExecutionMode(_ExecutionMode), ConstWGSize(_ConstWGSize),
@@ -129,7 +128,6 @@ public:
   int NumberOfDevices;
 
   // GPU devices
-  atmi_machine_t *Machine;
   std::vector<atmi_place_t> GPUPlaces;
   std::vector<atmi_mem_place_t> GPUMEMPlaces;
   std::vector<hsa_agent_t> HSAAgents;
@@ -250,8 +248,10 @@ public:
     // Init hostcall soon after initializing ATMI
     atmi_hostcall_init();
 
-    atmi_machine_t *machine = atmi_machine_get_info();
-    NumberOfDevices = machine->device_count_by_type[ATMI_DEVTYPE_GPU];
+    {
+      atmi_machine_t *machine = atmi_machine_get_info();
+      NumberOfDevices = machine->device_count_by_type[ATMI_DEVTYPE_GPU];
+    }
 
     if (NumberOfDevices == 0) {
       DP("There are no devices supporting HSA.\n");
@@ -259,8 +259,6 @@ public:
     } else {
       DP("There are %d devices supporting HSA.\n", NumberOfDevices);
     }
-
-    Machine = machine;
 
     // Init the device info
     FuncGblEntries.resize(NumberOfDevices);
@@ -965,9 +963,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
 
 void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *) {
   void *ptr = NULL;
-  assert(device_id <
-             (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
-         "Device ID too large");
+  assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
   atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
   atmi_status_t err = atmi_malloc(&ptr, size, place);
   DP("Tgt alloc data %ld bytes, (tgt:%016llx).\n", size,
@@ -979,9 +975,7 @@ void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *) {
 int32_t __tgt_rtl_data_submit(int device_id, void *tgt_ptr, void *hst_ptr,
                               int64_t size) {
   atmi_status_t err;
-  assert(device_id <
-             (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
-         "Device ID too large");
+  assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
   // Return success if we are not doing host to target.
   if (!hst_ptr)
     return OFFLOAD_SUCCESS;
@@ -1001,9 +995,7 @@ int32_t __tgt_rtl_data_submit(int device_id, void *tgt_ptr, void *hst_ptr,
 
 int32_t __tgt_rtl_data_retrieve(int device_id, void *hst_ptr, void *tgt_ptr,
                                 int64_t size) {
-  assert(device_id <
-             (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
-         "Device ID too large");
+  assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
   // Return success if we are not copying back to host from target.
   if (!hst_ptr)
     return OFFLOAD_SUCCESS;
@@ -1025,9 +1017,7 @@ int32_t __tgt_rtl_data_retrieve(int device_id, void *hst_ptr, void *tgt_ptr,
 }
 
 int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr) {
-  assert(device_id <
-             (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
-         "Device ID too large");
+  assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
   atmi_status_t err;
   DP("Tgt free data (tgt:%016llx).\n", (long long unsigned)(Elf64_Addr)tgt_ptr);
   err = atmi_free(tgt_ptr);
@@ -1230,10 +1220,7 @@ static void *AllocateNestedParallelCallMemory(int MaxParLevel, int NumGroups,
 
   if (print_kernel_trace > 1)
     fprintf(stderr, "NestedMemSize %ld \n", NestedMemSize);
-  assert(device_id <
-        (int)DeviceInfo.Machine->device_count_by_type[ATMI_DEVTYPE_GPU] &&
-         "Device ID too large");
-
+  assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
   atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
   void *TgtPtr = NULL;
   atmi_status_t err = atmi_malloc(&TgtPtr, NestedMemSize, place);
