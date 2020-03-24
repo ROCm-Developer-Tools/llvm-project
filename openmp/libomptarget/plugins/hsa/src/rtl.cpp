@@ -128,6 +128,32 @@ static atmi_mem_place_t get_gpu_mem_place(int device_id) {
   return ATMI_MEM_PLACE_GPU_MEM(0, device_id, 0);
 }
 
+static std::vector<hsa_agent_t> find_gpu_agents() {
+  std::vector<hsa_agent_t> res;
+
+  hsa_status_t err = hsa_iterate_agents(
+      [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        std::vector<hsa_agent_t> *res =
+            static_cast<std::vector<hsa_agent_t> *>(data);
+
+        hsa_device_type_t device_type;
+        // get_info fails iff HSA runtime not yet initialized
+        hsa_status_t err =
+            hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+        assert(err == HSA_STATUS_SUCCESS);
+
+        if (device_type == HSA_DEVICE_TYPE_GPU) {
+          res->push_back(agent);
+        }
+        return HSA_STATUS_SUCCESS;
+      },
+      &res);
+
+  // iterate_agents fails iff HSA runtime not yet initialized
+  assert(err == HSA_STATUS_SUCCESS);
+  return res;
+}
+
 /// Class containing all the device information
 class RTLDeviceInfoTy {
   std::vector<std::list<FuncOrGblEntryTy>> FuncGblEntries;
@@ -268,7 +294,6 @@ public:
 
     // Init the device info
     FuncGblEntries.resize(NumberOfDevices);
-    HSAAgents.resize(NumberOfDevices);
     ThreadsPerGroup.resize(NumberOfDevices);
     ComputeUnits.resize(NumberOfDevices);
     GroupsPerDevice.resize(NumberOfDevices);
@@ -280,13 +305,15 @@ public:
       ThreadsPerGroup[i] = RTLDeviceInfoTy::Default_WG_Size;
       GroupsPerDevice[i] = RTLDeviceInfoTy::DefaultNumTeams;
       ComputeUnits[i] = 1;
-
       DP("Device %d: Initial groupsPerDevice %d & threadsPerGroup %d\n", i,
          GroupsPerDevice[i], ThreadsPerGroup[i]);
+    }
 
-      // ATMI API to get HSA agent
-      err = atmi_interop_hsa_get_agent(get_gpu_place(i), &(HSAAgents[i]));
-      check("Get HSA agents", err);
+    HSAAgents = find_gpu_agents();
+    if (HSAAgents.size() != (size_t)NumberOfDevices) {
+      DP("Found unexpected number of agents: %zu != %d\n", HSAAgents.size(),
+         NumberOfDevices);
+      return;
     }
 
     // Get environment variables regarding teams
