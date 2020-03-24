@@ -124,9 +124,6 @@ std::list<KernelTy> KernelsList;
 /// Class containing all the device information
 class RTLDeviceInfoTy {
   std::vector<std::list<FuncOrGblEntryTy>> FuncGblEntries;
-  int NumberOfiGPUs;
-  int NumberOfdGPUs;
-  int NumberOfCPUs;
 
 public:
   int NumberOfDevices;
@@ -254,10 +251,7 @@ public:
     atmi_hostcall_init();
 
     atmi_machine_t *machine = atmi_machine_get_info();
-    NumberOfiGPUs = machine->device_count_by_type[ATMI_DEVTYPE_iGPU];
-    NumberOfdGPUs = machine->device_count_by_type[ATMI_DEVTYPE_dGPU];
     NumberOfDevices = machine->device_count_by_type[ATMI_DEVTYPE_GPU];
-    NumberOfCPUs = machine->device_count_by_type[ATMI_DEVTYPE_CPU];
 
     if (NumberOfDevices == 0) {
       DP("There are no devices supporting HSA.\n");
