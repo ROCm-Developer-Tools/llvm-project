@@ -135,7 +135,6 @@ public:
   atmi_machine_t *Machine;
   std::vector<atmi_place_t> GPUPlaces;
   std::vector<atmi_mem_place_t> GPUMEMPlaces;
-  std::vector<atmi_mem_place_t> CPUMEMPlaces;
   std::vector<hsa_agent_t> HSAAgents;
 
   // Device properties
@@ -273,7 +272,6 @@ public:
     FuncGblEntries.resize(NumberOfDevices);
     GPUPlaces.resize(NumberOfDevices);
     GPUMEMPlaces.resize(NumberOfDevices);
-    CPUMEMPlaces.resize(NumberOfCPUs);
     HSAAgents.resize(NumberOfDevices);
     ThreadsPerGroup.resize(NumberOfDevices);
     ComputeUnits.resize(NumberOfDevices);
@@ -282,9 +280,6 @@ public:
     NumTeams.resize(NumberOfDevices);
     NumThreads.resize(NumberOfDevices);
 
-    for (int i = 0; i < NumberOfCPUs; i++) {
-      CPUMEMPlaces[i] = (atmi_mem_place_t)ATMI_MEM_PLACE_CPU_MEM(0, i, 0);
-    }
     for (int i = 0; i < NumberOfDevices; i++) {
       ThreadsPerGroup[i] = RTLDeviceInfoTy::Default_WG_Size;
       GroupsPerDevice[i] = RTLDeviceInfoTy::DefaultNumTeams;
