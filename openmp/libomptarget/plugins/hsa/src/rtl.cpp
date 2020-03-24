@@ -120,6 +120,14 @@ struct KernelTy {
 /// FIXME: we may need this to be per device and per library.
 std::list<KernelTy> KernelsList;
 
+// ATMI API to get gpu and gpu memory place
+static atmi_place_t get_gpu_place(int device_id) {
+  return ATMI_PLACE_GPU(0, device_id);
+}
+static atmi_mem_place_t get_gpu_mem_place(int device_id) {
+  return ATMI_MEM_PLACE_GPU_MEM(0, device_id, 0);
+}
+
 /// Class containing all the device information
 class RTLDeviceInfoTy {
   std::vector<std::list<FuncOrGblEntryTy>> FuncGblEntries;
@@ -128,8 +136,6 @@ public:
   int NumberOfDevices;
 
   // GPU devices
-  std::vector<atmi_place_t> GPUPlaces;
-  std::vector<atmi_mem_place_t> GPUMEMPlaces;
   std::vector<hsa_agent_t> HSAAgents;
 
   // Device properties
@@ -262,8 +268,6 @@ public:
 
     // Init the device info
     FuncGblEntries.resize(NumberOfDevices);
-    GPUPlaces.resize(NumberOfDevices);
-    GPUMEMPlaces.resize(NumberOfDevices);
     HSAAgents.resize(NumberOfDevices);
     ThreadsPerGroup.resize(NumberOfDevices);
     ComputeUnits.resize(NumberOfDevices);
@@ -280,12 +284,8 @@ public:
       DP("Device %d: Initial groupsPerDevice %d & threadsPerGroup %d\n", i,
          GroupsPerDevice[i], ThreadsPerGroup[i]);
 
-      // ATMI API to get gpu and gpu memory place
-      GPUPlaces[i] = (atmi_place_t)ATMI_PLACE_GPU(0, i);
-      GPUMEMPlaces[i] = (atmi_mem_place_t)ATMI_MEM_PLACE_GPU_MEM(0, i, 0);
-
       // ATMI API to get HSA agent
-      err = atmi_interop_hsa_get_agent(GPUPlaces[i], &(HSAAgents[i]));
+      err = atmi_interop_hsa_get_agent(get_gpu_place(i), &(HSAAgents[i]));
       check("Get HSA agents", err);
     }
 
@@ -662,8 +662,9 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
 
       void *varptr;
       uint32_t varsize;
-      atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
-      err = atmi_interop_hsa_get_symbol_info(place, e->name, &varptr, &varsize);
+
+      err = atmi_interop_hsa_get_symbol_info(get_gpu_mem_place(device_id),
+                                             e->name, &varptr, &varsize);
 
       if (err != ATMI_STATUS_SUCCESS) {
         DP("Loading global '%s' (Failed)\n", e->name);
@@ -700,7 +701,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
 
     DP("to find the kernel name: %s size: %lu\n", e->name, strlen(e->name));
 
-    atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
+    atmi_mem_place_t place = get_gpu_mem_place(device_id);
     atmi_kernel_t kernel;
     uint32_t kernel_segment_size;
     err = atmi_interop_hsa_get_kernel_info(
@@ -928,7 +929,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     void *device_env_Ptr;
     uint32_t varsize;
 
-    atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
+    atmi_mem_place_t place = get_gpu_mem_place(device_id);
     err = atmi_interop_hsa_get_symbol_info(place, device_env_Name,
                                            &device_env_Ptr, &varsize);
 
@@ -964,8 +965,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
 void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *) {
   void *ptr = NULL;
   assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
-  atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
-  atmi_status_t err = atmi_malloc(&ptr, size, place);
+  atmi_status_t err = atmi_malloc(&ptr, size, get_gpu_mem_place(device_id));
   DP("Tgt alloc data %ld bytes, (tgt:%016llx).\n", size,
      (long long unsigned)(Elf64_Addr)ptr);
   ptr = (err == ATMI_STATUS_SUCCESS) ? ptr : NULL;
@@ -1035,9 +1035,8 @@ void retrieveDeviceEnv(int32_t device_id) {
   void *device_env_Ptr;
   uint32_t varsize;
 
-  atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
-  err = atmi_interop_hsa_get_symbol_info(place, device_env_Name,
-                                         &device_env_Ptr, &varsize);
+  err = atmi_interop_hsa_get_symbol_info(
+      get_gpu_mem_place(device_id), device_env_Name, &device_env_Ptr, &varsize);
 
   if (err == ATMI_STATUS_SUCCESS) {
     if ((size_t)varsize != sizeof(host_device_env)) {
@@ -1221,9 +1220,8 @@ static void *AllocateNestedParallelCallMemory(int MaxParLevel, int NumGroups,
   if (print_kernel_trace > 1)
     fprintf(stderr, "NestedMemSize %ld \n", NestedMemSize);
   assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
-  atmi_mem_place_t place = DeviceInfo.GPUMEMPlaces[device_id];
   void *TgtPtr = NULL;
-  atmi_status_t err = atmi_malloc(&TgtPtr, NestedMemSize, place);
+  atmi_status_t err = atmi_malloc(&TgtPtr, NestedMemSize, get_gpu_mem_place(device_id));
   err = atmi_memcpy(CallStackAddr, &TgtPtr, sizeof(void*));
   if (print_kernel_trace > 2)
     fprintf(stderr, "CallSck %lx TgtPtr %lx *TgtPtr %lx \n",
@@ -1298,7 +1296,7 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id, void *tgt_entry_ptr,
   lparm->groupDim[0] = threadsPerGroup;
   lparm->synchronous = ATMI_TRUE;
   lparm->groupable = ATMI_FALSE;
-  lparm->place = DeviceInfo.GPUPlaces[device_id];
+  lparm->place = get_gpu_place(device_id);
   atmi_task_launch(lparm, kernel, &args[0]);
 
   DP("Kernel completed\n");
