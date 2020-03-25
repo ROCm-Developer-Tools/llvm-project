@@ -355,6 +355,8 @@ static char GPUName[256] = "--unknown gpu--";
 extern "C" {
 #endif
 
+static const uint16_t amdgcnMachineID = 224;
+
 int32_t __tgt_rtl_is_valid_binary(__tgt_device_image *image) {
 
   // Is the library version incompatible with the header file?
@@ -401,17 +403,7 @@ int32_t __tgt_rtl_is_valid_binary(__tgt_device_image *image) {
 
   elf_end(e);
 
-  switch (MachineID) {
-  // old brig file in HSA 1.0P
-  case 0:
-  // brig file in HSAIL path
-  case 44890:
-  case 44891:
-    break;
-  // amdgcn
-  case 224:
-    break;
-  default:
+  if (MachineID != amdgcnMachineID) {
     DP("Unsupported machine ID found: %d\n", MachineID);
     return 0;
   }
@@ -564,8 +556,6 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
   size_t img_size = (char *)image->ImageEnd - (char *)image->ImageStart;
 
   DeviceInfo.clearOffloadEntriesTable(device_id);
-  // TODO: is BRIG even required to be supported? Can we assume AMDGCN only?
-  int useBrig = 0;
 
   // We do not need to set the ELF version because the caller of this function
   // had to do that to decide the right runtime to use
@@ -598,31 +588,19 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
       }
     }
 
-    switch (MachineID) {
-    // old brig file in HSA 1.0P
-    case 0:
-    // brig file in HSAIL path
-    case 44890:
-    case 44891: {
-      useBrig = 1;
-    }; break;
-    case 224:
-      // do nothing, amdgcn
-      break;
-    default:
+    elf_end(elfP);
+
+    if (MachineID != amdgcnMachineID) {
       DP("Unsupported machine ID found: %d\n", MachineID);
-      elf_end(elfP);
       return 0;
     }
 
     DP("Machine ID found: %d\n", MachineID);
-    // Close elf
-    elf_end(elfP);
   }
 
   atmi_status_t err;
   {
-    atmi_platform_type_t platform = (useBrig ? BRIG : AMDGCN);
+    atmi_platform_type_t platform = AMDGCN;
     void *new_img = malloc(img_size);
     memcpy(new_img, image->ImageStart, img_size);
     err = atmi_module_register_from_memory_to_place(
