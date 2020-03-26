@@ -88,6 +88,7 @@ target_link_libraries(
   -L${LLVM_LIBDIR} -lLLVMAMDGPUDesc -lLLVMAMDGPUUtils -lLLVMMC -lLLVMCore -lLLVMSupport -Wl,-rpath,${LLVM_LIBDIR}
   -lelf
   "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exports"
+  "-Wl,-z,defs"
   )
 
 # Report to the parent scope that we are building a plugin for hsa
