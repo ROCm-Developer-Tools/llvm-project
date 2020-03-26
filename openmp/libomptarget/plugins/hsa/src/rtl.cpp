@@ -79,6 +79,15 @@ static int DebugLevel = 0;
   {}
 #endif
 
+static void success_or_abort(hsa_status_t s) {
+  // Several functions can only fail if the HSA runtime is uninitialised or
+  // invalid arguments are passed
+  if (s != HSA_STATUS_SUCCESS) {
+    fprintf(stderr, "HSA function failed unexpectedly\n");
+    exit(1);
+  }
+}
+
 #include "../../common/elf_common.c"
 
 static bool elf_machine_id_is_amdgcn(__tgt_device_image *image) {
@@ -151,7 +160,7 @@ static std::vector<hsa_agent_t> find_gpu_agents() {
         // get_info fails iff HSA runtime not yet initialized
         hsa_status_t err =
             hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
-        assert(err == HSA_STATUS_SUCCESS);
+        success_or_abort(err);
 
         if (device_type == HSA_DEVICE_TYPE_GPU) {
           res->push_back(agent);
@@ -161,13 +170,14 @@ static std::vector<hsa_agent_t> find_gpu_agents() {
       &res);
 
   // iterate_agents fails iff HSA runtime not yet initialized
-  assert(err == HSA_STATUS_SUCCESS);
+  success_or_abort(err);
   return res;
 }
 
 /// Class containing all the device information
 class RTLDeviceInfoTy {
   std::vector<std::list<FuncOrGblEntryTy>> FuncGblEntries;
+  std::vector<hsa_executable_t> loaded_executables;
 
 public:
   int NumberOfDevices;
@@ -348,10 +358,24 @@ public:
     RequiresFlags = OMP_REQ_UNDEFINED;
   }
 
+  void preserve_executable(hsa_executable_t e) {
+    loaded_executables.push_back(e);
+  }
+
   ~RTLDeviceInfoTy() {
     DP("Finalizing the HSA-ATMI DeviceInfo.\n");
     // Terminate hostcall before finalizing ATMI
     atmi_hostcall_terminate();
+
+    for (size_t i = 0; i < loaded_executables.size(); i++) {
+      hsa_status_t err = hsa_executable_destroy(loaded_executables[i]);
+      if (err == HSA_STATUS_ERROR_INVALID_EXECUTABLE) {
+        DP("Invalid executable\n");
+      } else {
+        assert(err == HSA_STATUS_SUCCESS);
+      }
+    }
+
     atmi_finalize();
   }
 };
@@ -506,6 +530,100 @@ int32_t __tgt_rtl_init_device(int device_id) {
   return OFFLOAD_SUCCESS;
 }
 
+// Implemented in atmi runtime/core/system.cpp, populates some global state
+namespace core {
+hsa_status_t get_code_object_custom_metadata(atmi_platform_type_t platform,
+                                             void *binary, size_t binSize,
+                                             int gpu);
+
+// misleading name - populates tables with symbol info
+hsa_status_t create_kernarg_memory(hsa_executable_t executable,
+                                   hsa_executable_symbol_t symbol, void *data);
+
+} // namespace core
+
+// This is derived from atmi system.cpp, Runtime::RegisterModuleFromMemory
+// Modified to work on one module at a time, thus doesn't need to check for
+// duplicate symbols. Error handling made consistent with rest of this file
+// The malloc/memcpy/free idiom is preserved. 
+hsa_status_t Runtime_RegisterModuleFromMemory(hsa_agent_t agent,
+                                               void *module_bytes,
+                                               size_t module_size,
+                                               int device_id,
+                                               hsa_executable_t * out) {
+  hsa_status_t err;
+
+  DP("Trying to load module to GPU-%d\n", device_id);
+
+  hsa_executable_t executable = {0};
+   
+  // TODO: ATMI unconditionally uses HSA_PROFILE_FULL with the comment:
+  // FIXME: Assume that every profile is FULL until we understand how to build
+  // GCN with base profile
+  hsa_profile_t agent_profile = HSA_PROFILE_FULL;
+
+  // Create the empty executable.
+  err = hsa_executable_create(agent_profile, HSA_EXECUTABLE_STATE_UNFROZEN, "",
+                              &executable);
+  if (err != HSA_STATUS_SUCCESS) {
+    DP("Failure creating executable\n");
+    return err;
+  }
+
+  {
+    // Some metadata info is not available through ROCr API, so use custom
+    // code object metadata parsing to collect such metadata info
+    void *tmp_module = malloc(module_size);
+    memcpy(tmp_module, module_bytes, module_size);
+    err = core::get_code_object_custom_metadata(AMDGCN, tmp_module, module_size,
+                                                device_id);
+    free(tmp_module);
+  }
+
+  if (err != HSA_STATUS_SUCCESS) {
+    DP("Failure getting custom code object metadata\n");
+    return err;
+  }
+
+  // Deserialize code object.
+  hsa_code_object_t code_object = {0};
+  err = hsa_code_object_deserialize(module_bytes, module_size, NULL,
+                                    &code_object);
+  if (err != HSA_STATUS_SUCCESS) {
+    DP("Code object deserialization failure\n");
+    return err;
+  }
+
+  assert(0 != code_object.handle); // assert from atmi
+
+  // Load the code object.
+  err = hsa_executable_load_code_object(executable, agent, code_object, NULL);
+
+  if (err != HSA_STATUS_SUCCESS) {
+    DP("Load code object failure\n");
+    return err;
+  }
+
+  DP("Modules loaded successfully\n");
+
+  // Freeze the executable; it can now be queried for symbols.
+  err = hsa_executable_freeze(executable, "");
+  if (err != HSA_STATUS_SUCCESS) {
+    DP("Failed to freeze executable\n");
+    return err;
+  }
+
+  err = hsa_executable_iterate_symbols(executable, core::create_kernarg_memory,
+                                       &device_id);
+  if (err != HSA_STATUS_SUCCESS) {
+    DP("Iterating over symbols, create_kernarg_memory failed\n");
+    return err;
+  }
+
+  *out = executable;
+  return HSA_STATUS_SUCCESS;
+}
+  
 __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
                                           __tgt_device_image *image) {
   size_t img_size = (char *)image->ImageEnd - (char *)image->ImageStart;
@@ -519,24 +637,27 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
     return NULL;
   }
 
-  atmi_status_t err;
   {
-    atmi_platform_type_t platform = AMDGCN;
     void *new_img = malloc(img_size);
     memcpy(new_img, image->ImageStart, img_size);
-    err = atmi_module_register_from_memory_to_place(
-        (void **)&new_img, &img_size, &platform, 1, get_gpu_place(device_id));
 
-    free(new_img);
-    check("Module registering", err);
-    if (err != ATMI_STATUS_SUCCESS) {
-      fprintf(stderr,
-              "Possible gpu arch mismatch: %s, please check"
-              " compiler: -march=<gpu> flag\n",
-              GPUName);
-      return NULL;
+    {
+      hsa_executable_t ex;
+      hsa_status_t err = Runtime_RegisterModuleFromMemory(
+          DeviceInfo.HSAAgents[device_id], new_img, img_size, device_id, &ex);
+      free(new_img);
+      if (err == HSA_STATUS_SUCCESS) {
+        DeviceInfo.preserve_executable(ex);
+      } else {
+        // A debug message already emitted by call
+        // ATMI suggests a gpu arch mismatch is a likely reason
+        fprintf(stderr,
+                "Possible gpu arch mismatch: %s, please check"
+                " compiler: -march=<gpu> flag\n",
+                GPUName);
+        return NULL;
+      }
     }
-    new_img = NULL;
   }
 
   DP("ATMI module successfully loaded!\n");
@@ -553,6 +674,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
   __tgt_offload_entry *HostBegin = image->EntriesBegin;
   __tgt_offload_entry *HostEnd = image->EntriesEnd;
 
+  atmi_status_t err = ATMI_STATUS_SUCCESS;
   for (__tgt_offload_entry *e = HostBegin; e != HostEnd; ++e) {
 
     if (!e->addr) {
