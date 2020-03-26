@@ -79,6 +79,17 @@ static int DebugLevel = 0;
   {}
 #endif
 
+#include "../../common/elf_common.c"
+
+static bool elf_machine_id_is_amdgcn(__tgt_device_image *image) {
+  const uint16_t amdgcnMachineID = 224;
+  int32_t r = elf_check_machine(image, amdgcnMachineID);
+  if (!r) {
+    DP("Supported machine ID not found\n");
+  }
+  return r;
+}
+
 /// Keep entries table per device
 struct FuncOrGblEntryTy {
   __tgt_target_table Table;
@@ -355,60 +366,8 @@ static char GPUName[256] = "--unknown gpu--";
 extern "C" {
 #endif
 
-static const uint16_t amdgcnMachineID = 224;
-
 int32_t __tgt_rtl_is_valid_binary(__tgt_device_image *image) {
-
-  // Is the library version incompatible with the header file?
-  if (elf_version(EV_CURRENT) == EV_NONE) {
-    DP("Incompatible ELF library!\n");
-    return 0;
-  }
-
-  char *img_begin = (char *)image->ImageStart;
-  char *img_end = (char *)image->ImageEnd;
-  size_t img_size = img_end - img_begin;
-
-  // Obtain elf handler
-  Elf *e = elf_memory(img_begin, img_size);
-  if (!e) {
-    DP("Unable to get ELF handle: %s!\n", elf_errmsg(-1));
-    return 0;
-  }
-
-  // Check if ELF is the right kind.
-  if (elf_kind(e) != ELF_K_ELF) {
-    DP("Unexpected ELF type!\n");
-    return 0;
-  }
-  Elf64_Ehdr *eh64 = elf64_getehdr(e);
-  Elf32_Ehdr *eh32 = elf32_getehdr(e);
-
-  if (!eh64 && !eh32) {
-    DP("Unable to get machine ID from ELF file!\n");
-    elf_end(e);
-    return 0;
-  }
-
-  uint16_t MachineID;
-  if (eh64 && !eh32)
-    MachineID = eh64->e_machine;
-  else if (eh32 && !eh64)
-    MachineID = eh32->e_machine;
-  else {
-    DP("Ambiguous ELF header!\n");
-    elf_end(e);
-    return 0;
-  }
-
-  elf_end(e);
-
-  if (MachineID != amdgcnMachineID) {
-    DP("Unsupported machine ID found: %d\n", MachineID);
-    return 0;
-  }
-
-  return 1;
+  return elf_machine_id_is_amdgcn(image);
 }
 
 int __tgt_rtl_number_of_devices() { return DeviceInfo.NumberOfDevices; }
@@ -560,42 +519,8 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
   // We do not need to set the ELF version because the caller of this function
   // had to do that to decide the right runtime to use
 
-  // Obtain elf handler and do an extra check
-  {
-    Elf *elfP = elf_memory((char *)image->ImageStart, img_size);
-    if (!elfP) {
-      DP("Unable to get ELF handle: %s!\n", elf_errmsg(-1));
-      return 0;
-    }
-
-    if (elf_kind(elfP) != ELF_K_ELF) {
-      DP("Invalid Elf kind!\n");
-      elf_end(elfP);
-      return 0;
-    }
-
-    uint16_t MachineID;
-    {
-      Elf64_Ehdr *eh64 = elf64_getehdr(elfP);
-      Elf32_Ehdr *eh32 = elf32_getehdr(elfP);
-      if (eh64 && !eh32)
-        MachineID = eh64->e_machine;
-      else if (eh32 && !eh64)
-        MachineID = eh32->e_machine;
-      else {
-        printf("Ambiguous ELF header!\n");
-        return 0;
-      }
-    }
-
-    elf_end(elfP);
-
-    if (MachineID != amdgcnMachineID) {
-      DP("Unsupported machine ID found: %d\n", MachineID);
-      return 0;
-    }
-
-    DP("Machine ID found: %d\n", MachineID);
+  if (!elf_machine_id_is_amdgcn(image)) {
+    return NULL;
   }
 
   atmi_status_t err;
