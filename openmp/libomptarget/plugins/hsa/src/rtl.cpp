@@ -362,10 +362,6 @@ static RTLDeviceInfoTy DeviceInfo;
 
 static char GPUName[256] = "--unknown gpu--";
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 int32_t __tgt_rtl_is_valid_binary(__tgt_device_image *image) {
   return elf_machine_id_is_amdgcn(image);
 }
@@ -1234,7 +1230,3 @@ int32_t __tgt_rtl_run_target_region(int32_t device_id, void *tgt_entry_ptr,
                                           tgt_offsets, arg_num, team_num,
                                           thread_limit, 0);
 }
-
-#ifdef __cplusplus
-}
-#endif
