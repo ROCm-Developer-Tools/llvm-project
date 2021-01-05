@@ -152,6 +152,8 @@ TEST(DWARFDebugFrame, InvalidCFIOpcodesTest) {
       dwarf::DW_CFA_def_cfa_offset,
       dwarf::DW_CFA_def_cfa_expression,
       dwarf::DW_CFA_expression,
+      dwarf::DW_CFA_LLVM_def_aspace_cfa,
+      dwarf::DW_CFA_LLVM_def_aspace_cfa_sf,
       dwarf::DW_CFA_offset_extended_sf,
       dwarf::DW_CFA_def_cfa_sf,
       dwarf::DW_CFA_def_cfa_offset_sf,
