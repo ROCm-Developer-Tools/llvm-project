@@ -495,6 +495,9 @@ public: // FIXME
   /// base pointer.
   Register SGPRForBPSaveRestoreCopy;
   Optional<int> BasePointerSaveIndex;
+  
+  int ReturnAddressSaveIndex;
+  int EXECSaveIndex;
 
   Register VGPRReservedForSGPRSpill;
   bool isCalleeSavedReg(const MCPhysReg *CSRegs, MCPhysReg Reg);
@@ -541,7 +544,7 @@ public:
   bool allocateSGPRSpillToVGPR(MachineFunction &MF, int FI);
   bool reserveVGPRforSGPRSpills(MachineFunction &MF);
   bool allocateVGPRSpillToAGPR(MachineFunction &MF, int FI, bool isAGPRtoVGPR);
-  void removeDeadFrameIndices(MachineFrameInfo &MFI);
+  void removeDeadFrameIndices(MachineFunction &MF);
 
   bool hasCalculatedTID() const { return TIDReg != 0; };
   Register getTIDReg() const { return TIDReg; };
