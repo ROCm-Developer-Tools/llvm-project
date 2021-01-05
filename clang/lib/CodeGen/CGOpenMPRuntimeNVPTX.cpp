@@ -33,6 +33,13 @@ CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
 }
 
 llvm::Value *CGOpenMPRuntimeNVPTX::getGPUWarpSize(CodeGenFunction &CGF) {
+  if (CGF.getTarget().getTriple().isAMDGCN()) {
+    CGBuilderTy &Bld = CGF.Builder;
+    // return constant compile-time target-specific warp size
+    unsigned TargetWarpSize = CGF.getTarget().getGridValue(GVIDX::GV_Warp_Size);
+    return Bld.getInt32(TargetWarpSize);
+  }
+
   return CGF.EmitRuntimeCall(
       llvm::Intrinsic::getDeclaration(
           &CGF.CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_warpsize),
