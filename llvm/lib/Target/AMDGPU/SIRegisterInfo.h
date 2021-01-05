@@ -58,6 +58,8 @@ public:
     return SpillSGPRToVGPR;
   }
 
+  bool isCFISavedRegsSpillEnabled() const;
+
   /// Return the end register initially reserved for the scratch buffer in case
   /// spilling is needed.
   MCRegister reservedPrivateSegmentBufferReg(const MachineFunction &MF) const;
@@ -115,9 +117,8 @@ public:
                                bool IsLoad) const;
 
   /// If \p OnlyToVGPR is true, this will only succeed if this
-  bool spillSGPR(MachineBasicBlock::iterator MI,
-                 int FI, RegScavenger *RS,
-                 bool OnlyToVGPR = false) const;
+  bool spillSGPR(MachineBasicBlock::iterator MI, int FI, RegScavenger *RS,
+                 bool OnlyToVGPR = false, bool NeedsCFI = false) const;
 
   bool restoreSGPR(MachineBasicBlock::iterator MI,
                    int FI, RegScavenger *RS,
@@ -341,7 +342,8 @@ private:
                            MCRegister ScratchOffsetReg,
                            int64_t InstrOffset,
                            MachineMemOperand *MMO,
-                           RegScavenger *RS) const;
+                           RegScavenger *RS,
+                           bool NeedsCFI = false) const;
 };
 
 } // End namespace llvm
