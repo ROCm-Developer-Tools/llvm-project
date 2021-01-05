@@ -242,6 +242,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUPreLegalizerCombinerPass(*PR);
   initializeAMDGPUPromoteAllocaPass(*PR);
   initializeAMDGPUPromoteAllocaToVectorPass(*PR);
+  initializeAMDGPUPromotePointerKernArgsToGlobalPass(*PR);
   initializeAMDGPUCodeGenPreparePass(*PR);
   initializeAMDGPULateCodeGenPreparePass(*PR);
   initializeAMDGPUPropagateAttributesEarlyPass(*PR);
@@ -269,6 +270,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUSimplifyLibCallsPass(*PR);
   initializeAMDGPUInlinerPass(*PR);
   initializeAMDGPUPrintfRuntimeBindingPass(*PR);
+  initializeAMDGPULowerKernelCallsPass(*PR);
   initializeGCNRegBankReassignPass(*PR);
   initializeGCNNSAReassignPass(*PR);
   initializeSIAddIMGInitPass(*PR);
@@ -474,6 +476,9 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
   Builder.addExtension(
     PassManagerBuilder::EP_CGSCCOptimizerLate,
     [EnableOpt](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
+      // Premote generic pointer kernel arguments to global ones.
+      PM.add(llvm::createAMDGPUPromotePointerKernArgsToGlobalPass());
+
       // Add infer address spaces pass to the opt pipeline after inlining
       // but before SROA to increase SROA opportunities.
       PM.add(createInferAddressSpacesPass());
@@ -804,6 +809,8 @@ void AMDGPUPassConfig::addIRPasses() {
   // bitcast calls.
   addPass(createAMDGPUFixFunctionBitcastsPass());
 
+  // this pass should be performed on linked module
+  addPass(createAMDGPULowerKernelCallsPass());
   // A call to propagate attributes pass in the backend in case opt was not run.
   addPass(createAMDGPUPropagateAttributesEarlyPass(&TM));
 
