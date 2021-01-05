@@ -12,6 +12,7 @@
 #include "ToolChains/Clang.h"
 #include "ToolChains/InterfaceStubs.h"
 #include "ToolChains/Flang.h"
+#include "ToolChains/AMDFlang.h"
 #include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/Sanitizers.h"
 #include "clang/Config/config.h"
@@ -267,9 +268,9 @@ Tool *ToolChain::getClang() const {
 }
 
 Tool *ToolChain::getFlang() const {
-  if (!Flang)
-    Flang.reset(new tools::Flang(*this));
-  return Flang.get();
+  if (!AMDFlang)
+    AMDFlang.reset(new tools::AMDFlang(*this));
+  return AMDFlang.get();
 }
 
 Tool *ToolChain::buildAssembler() const {
@@ -361,6 +362,9 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
   case Action::OffloadBundlingJobClass:
   case Action::OffloadUnbundlingJobClass:
     return getOffloadBundler();
+
+  case Action::FortranFrontendJobClass:
+    return getFlang();
 
   case Action::OffloadWrapperJobClass:
     return getOffloadWrapper();
@@ -857,6 +861,14 @@ void ToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   // Each toolchain should provide the appropriate include flags.
 }
 
+void ToolChain::addActionsFromClangTargetOptions(
+    const ArgList &DriverArgs,
+    ArgStringList &CC1Args,
+    const JobAction &JA,
+    Compilation &C,
+    const InputInfoList &Inputs) const
+{}
+
 void ToolChain::addClangTargetOptions(
     const ArgList &DriverArgs, ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadKind) const {}
@@ -1020,6 +1032,47 @@ void ToolChain::AddCXXStdlibLibArgs(const ArgList &Args,
     CmdArgs.push_back("-lstdc++");
     break;
   }
+}
+
+void ToolChain::AddFortranStdlibLibArgs(const ArgList &Args,
+                                        ArgStringList &CmdArgs) const {
+  bool staticFlangLibs = false;
+  bool useOpenMP = false;
+
+  if (Args.hasArg(options::OPT_staticFlangLibs)) {
+    for (auto *A : Args.filtered(options::OPT_staticFlangLibs)) {
+      A->claim();
+      staticFlangLibs = true;
+    }
+  }
+
+  Arg *A = Args.getLastArg(options::OPT_mp, options::OPT_nomp,
+                           options::OPT_fopenmp, options::OPT_fno_openmp);
+  if (A && (A->getOption().matches(options::OPT_mp) ||
+            A->getOption().matches(options::OPT_fopenmp))) {
+    useOpenMP = true;
+  }
+
+  if (staticFlangLibs) {
+    CmdArgs.push_back("-Bstatic");
+  }
+  CmdArgs.push_back("-lpgmath");
+  CmdArgs.push_back("-lflang");
+  CmdArgs.push_back("-lflangrti");
+  if (useOpenMP) {
+    CmdArgs.push_back("-lomp");
+  } else {
+    CmdArgs.push_back("-lompstub");
+  }
+  if (staticFlangLibs) {
+    CmdArgs.push_back("-Bdynamic");
+  }
+
+  CmdArgs.push_back("-lm");
+  CmdArgs.push_back("-lrt");
+
+  // Allways link Fortran executables with Pthreads
+  CmdArgs.push_back("-lpthread");
 }
 
 void ToolChain::AddFilePathLibArgs(const ArgList &Args,
