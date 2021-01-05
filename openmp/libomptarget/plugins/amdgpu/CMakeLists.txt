@@ -69,9 +69,11 @@ add_library(omptarget.rtl.amdgpu SHARED
 # When we build for debug, OPENMP_LIBDIR_SUFFIX get set to -debug
 install(TARGETS omptarget.rtl.amdgpu LIBRARY DESTINATION "lib${OPENMP_LIBDIR_SUFFIX}")
 
-set_property(TARGET omptarget.rtl.amdgpu PROPERTY INSTALL_RPATH "$ORIGIN")
+set_property(TARGET omptarget.rtl.amdgpu PROPERTY INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib")
 target_link_libraries(
   omptarget.rtl.amdgpu
+  PUBLIC
+  -Wl,--whole-archive hostrpc_services -Wl,--no-whole-archive
   PRIVATE
   hsa-runtime64::hsa-runtime64
   pthread dl elf
