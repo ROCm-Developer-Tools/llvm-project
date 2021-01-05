@@ -21,7 +21,9 @@
 #include "clang/Basic/Cuda.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/IntrinsicsNVPTX.h"
+#include "llvm/IR/Metadata.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -586,6 +588,13 @@ static llvm::Value *getMasterThreadID(CodeGenFunction &CGF) {
                        Bld.CreateNot(Mask), "master_tid");
 }
 
+static void DotToUnderbar(llvm::Function *Fn) {
+  std::string name = Fn->getName().str();
+  replace(name.begin(), name.end(), '.', '_');
+  Fn->setName(name);
+  return;
+}
+
 CGOpenMPRuntimeGPU::WorkerFunctionState::WorkerFunctionState(
     CodeGenModule &CGM, SourceLocation Loc)
     : WorkerFn(nullptr), CGFI(CGM.getTypes().arrangeNullaryFunction()),
@@ -1059,6 +1068,80 @@ static bool supportsLightweightRuntime(ASTContext &Ctx,
       "Unknown programming model for OpenMP directive on NVPTX target.");
 }
 
+// Create a unique global variable to indicate the flat-work-group-size
+// for this region. Values are [256..1024].
+static void setPropertyWorkGroupSize(CodeGenModule &CGM, StringRef Name,
+                                     int WGSize) {
+  auto *GVMode = new llvm::GlobalVariable(
+      CGM.getModule(), CGM.Int16Ty,
+      /*isConstant=*/true, llvm::GlobalValue::WeakAnyLinkage,
+      llvm::ConstantInt::get(CGM.Int16Ty, WGSize), Twine(Name, "_wg_size"));
+
+  CGM.addCompilerUsedGlobal(GVMode);
+}
+
+void CGOpenMPRuntimeGPU::GenerateMetaData(CodeGenModule &CGM,
+                                            const OMPExecutableDirective &D,
+                                            llvm::Function *&OutlinedFn,
+                                            bool IsGeneric) {
+  if (!CGM.getTriple().isAMDGCN())
+    return;
+  int FlatAttr = 0;
+  bool flatAttrEmitted = false;
+  int DefaultWorkGroupSz =
+      CGM.getTarget().getGridValue(GVIDX::GV_Default_WG_Size);
+  // If constant ThreadLimit(), set reqd_work_group_size metadata
+  if (isOpenMPTeamsDirective(D.getDirectiveKind()) ||
+      isOpenMPParallelDirective(D.getDirectiveKind())) {
+    const auto *ThreadLimitClause = D.getSingleClause<OMPThreadLimitClause>();
+    const auto *NumThreadsClause = D.getSingleClause<OMPNumThreadsClause>();
+    int MaxWorkGroupSz =
+        CGM.getTarget().getGridValue(GVIDX::GV_Max_WG_Size);
+    int compileTimeThreadLimit = 0;
+    // Only one of thread_limit or num_threads is used, cant do it for both
+    if (ThreadLimitClause && !NumThreadsClause) {
+      Expr *ThreadLimitExpr = ThreadLimitClause->getThreadLimit();
+      clang::Expr::EvalResult Result;
+      if (ThreadLimitExpr->EvaluateAsInt(Result, CGM.getContext()))
+        compileTimeThreadLimit = Result.Val.getInt().getExtValue();
+    } else if (!ThreadLimitClause && NumThreadsClause) {
+      Expr *NumThreadsExpr = NumThreadsClause->getNumThreads();
+      clang::Expr::EvalResult Result;
+      if (NumThreadsExpr->EvaluateAsInt(Result, CGM.getContext()))
+        compileTimeThreadLimit = Result.Val.getInt().getExtValue();
+    }
+    // printf("========= WARNING CONSTANT Compile-Time TL: %d\n",
+    //       compileTimeThreadLimit);
+    // Add kernel metadata if ThreadLimit Clause is compile time constant > 0
+    if (compileTimeThreadLimit > 0) {
+      // Add the WarpSize to gneric, to reflect what runtime dispatch does.
+      if (IsGeneric)
+        compileTimeThreadLimit +=
+            CGM.getTarget().getGridValue(GVIDX::GV_Warp_Size);
+      if (compileTimeThreadLimit > MaxWorkGroupSz)
+        compileTimeThreadLimit = MaxWorkGroupSz;
+      std::string AttrVal = llvm::utostr(compileTimeThreadLimit);
+      FlatAttr = compileTimeThreadLimit;
+      OutlinedFn->addFnAttr("amdgpu-flat-work-group-size",
+                            AttrVal + "," + AttrVal);
+      setPropertyWorkGroupSize(CGM, OutlinedFn->getName(),
+                               compileTimeThreadLimit);
+    } // end   > 0
+  } // end of amdgcn teams or parallel directive
+
+  // emit amdgpu-flat-work-group-size if not emitted already.
+  if (!flatAttrEmitted) {
+    std::string FlatAttrVal = llvm::utostr(DefaultWorkGroupSz);
+    OutlinedFn->addFnAttr("amdgpu-flat-work-group-size",
+                            FlatAttrVal + "," + FlatAttrVal);
+  }
+  // Emit a kernel descriptor for runtime.
+  StringRef KernDescName = OutlinedFn->getName();
+  CGOpenMPRuntime::emitStructureKernelDesc(CGM, KernDescName, FlatAttr,
+                                           IsGeneric,
+                                           1 /* Uses HostServices */);
+}
+
 void CGOpenMPRuntimeGPU::emitNonSPMDKernel(const OMPExecutableDirective &D,
                                              StringRef ParentName,
                                              llvm::Function *&OutlinedFn,
@@ -1117,6 +1200,8 @@ void CGOpenMPRuntimeGPU::emitNonSPMDKernel(const OMPExecutableDirective &D,
 
   // Create the worker function
   emitWorkerFunction(WST);
+
+  GenerateMetaData(CGM, D, OutlinedFn, /*Generic*/ true);
 }
 
 // Setup NVPTX threads for master-worker OpenMP scheme.
@@ -1242,6 +1327,8 @@ void CGOpenMPRuntimeGPU::emitSPMDKernel(const OMPExecutableDirective &D,
   emitTargetOutlinedFunctionHelper(D, ParentName, OutlinedFn, OutlinedFnID,
                                    IsOffloadEntry, CodeGen);
   IsInTTDRegion = false;
+
+  GenerateMetaData(CGM, D, OutlinedFn, /*SPMD*/ false);
 }
 
 void CGOpenMPRuntimeGPU::emitSPMDEntryHeader(
@@ -1385,7 +1472,13 @@ void CGOpenMPRuntimeGPU::emitWorkerLoop(CodeGenFunction &CGF,
   // Process work items: outlined parallel functions.
   for (llvm::Function *W : Work) {
     // Try to match this outlined function.
-    llvm::Value *ID = Bld.CreatePointerBitCastOrAddrSpaceCast(W, CGM.Int8PtrTy);
+    llvm::Value *ID =
+        (CGM.getTriple().isAMDGCN())
+            ? Bld.CreateIntToPtr(
+                  llvm::ConstantInt::get(CGM.SizeTy,
+                                         llvm::hash_value(W->getName())),
+                  CGM.Int8PtrTy)
+            : Bld.CreatePointerBitCastOrAddrSpaceCast(W, CGM.Int8PtrTy);
 
     llvm::Value *WorkFnMatch =
         Bld.CreateICmpEQ(Bld.CreateLoad(WorkFn), ID, "work_match");
@@ -1397,32 +1490,78 @@ void CGOpenMPRuntimeGPU::emitWorkerLoop(CodeGenFunction &CGF,
     // Execute this outlined function.
     CGF.EmitBlock(ExecuteFNBB);
 
-    // Insert call to work function via shared wrapper. The shared
-    // wrapper takes two arguments:
-    //   - the parallelism level;
-    //   - the thread ID;
-    emitCall(CGF, WST.Loc, W,
-             {Bld.getInt16(/*ParallelLevel=*/0), getThreadID(CGF, WST.Loc)});
+    if (CGM.getTriple().isAMDGCN()) {
+      // For amdgcn, insert call to select_outline_wrapper function
+      // select_outline_wrapper is generated by clang-build-select
+      // as first step in the HIP TC device link phase for OpenMP.
+      // This avoids the function pointer for the work function wrapper
+      // and allows better post-llvm-link optimization.
+      // The generated select_outline_wrapper is a big switch statement
+      // with one case for each wrapper based on constant hash value.
+      // select_outline_wrapper takes three arguments:
+      //   - the parallelism level;
+      //   - the thread ID;
+      //   - hash pointer to identify the wrapper function;
+      llvm::Value *hashcode = Bld.CreatePtrToInt(ID, CGM.Int64Ty, "hashcode");
+      llvm::FunctionType *FnTy = llvm::FunctionType::get(
+          CGM.VoidTy, {CGM.Int16Ty, CGM.Int32Ty, hashcode->getType()},
+          /*isVarArg*/ false);
+      llvm::FunctionCallee SelectWrapper =
+          CGM.CreateRuntimeFunction(FnTy, "select_outline_wrapper");
+      llvm::Function *SelectWrapperFn =
+          cast<llvm::Function>(SelectWrapper.getCallee());
+      SelectWrapperFn->removeFnAttr(llvm::Attribute::OptimizeNone);
+      SelectWrapperFn->addFnAttr(llvm::Attribute::AlwaysInline);
+      CGF.EmitCallOrInvoke(SelectWrapper,
+                           {Bld.getInt16(/*ParallelLevel=*/0),
+                            getThreadID(CGF, WST.Loc), hashcode});
+    } else {
+      // Insert call to work function via shared wrapper. The shared
+      // wrapper takes two arguments:
+      //   - the parallelism level;
+      //   - the thread ID;
+      emitCall(CGF, WST.Loc, W,
+               {Bld.getInt16(/*ParallelLevel=*/0), getThreadID(CGF, WST.Loc)});
+    }
 
     // Go to end of parallel region.
     CGF.EmitBranch(TerminateBB);
 
     CGF.EmitBlock(CheckNextBB);
   }
-  // Default case: call to outlined function through pointer if the target
-  // region makes a declare target call that may contain an orphaned parallel
-  // directive.
-  auto *ParallelFnTy =
-      llvm::FunctionType::get(CGM.VoidTy, {CGM.Int16Ty, CGM.Int32Ty},
-                              /*isVarArg=*/false);
-  llvm::Value *WorkFnCast =
-      Bld.CreateBitCast(WorkID, ParallelFnTy->getPointerTo());
-  // Insert call to work function via shared wrapper. The shared
-  // wrapper takes two arguments:
-  //   - the parallelism level;
-  //   - the thread ID;
-  emitCall(CGF, WST.Loc, {ParallelFnTy, WorkFnCast},
-           {Bld.getInt16(/*ParallelLevel=*/0), getThreadID(CGF, WST.Loc)});
+
+  if (CGM.getTriple().getArch() != llvm::Triple::amdgcn) {
+
+    // Default case: call to outlined function through pointer if the target
+    // region makes a declare target call that may contain an orphaned parallel
+    // directive.
+    auto *ParallelFnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {CGM.Int16Ty, CGM.Int32Ty},
+                                /*isVarArg=*/false);
+    llvm::Value *WorkFnCast =
+        Bld.CreateBitCast(WorkID, ParallelFnTy->getPointerTo());
+    // Insert call to work function via shared wrapper. The shared
+    // wrapper takes two arguments:
+    //   - the parallelism level;
+    //   - the thread ID;
+    emitCall(CGF, WST.Loc, {ParallelFnTy, WorkFnCast},
+             {Bld.getInt16(/*ParallelLevel=*/0), getThreadID(CGF, WST.Loc)});
+
+  } else {
+
+    llvm::Value *hashcode = Bld.CreatePtrToInt(WorkID, CGM.Int64Ty, "hashcode");
+    llvm::FunctionType *FnTy = llvm::FunctionType::get(
+        CGM.VoidTy, {CGM.Int16Ty, CGM.Int32Ty, hashcode->getType()},
+        /*isVarArg*/ false);
+    llvm::FunctionCallee SelectWrapper =
+        CGM.CreateRuntimeFunction(FnTy, "select_outline_wrapper");
+    llvm::Function *SelectWrapperFn =
+        cast<llvm::Function>(SelectWrapper.getCallee());
+    SelectWrapperFn->removeFnAttr(llvm::Attribute::OptimizeNone);
+    SelectWrapperFn->addFnAttr(llvm::Attribute::AlwaysInline);
+    CGF.EmitCallOrInvoke(SelectWrapper, {Bld.getInt16(/*ParallelLevel=*/0),
+                                         getThreadID(CGF, WST.Loc), hashcode});
+  }
   // Go to end of parallel region.
   CGF.EmitBranch(TerminateBB);
 
@@ -1556,18 +1695,22 @@ llvm::Function *CGOpenMPRuntimeGPU::emitParallelOutlinedFunction(
   class NVPTXPrePostActionTy : public PrePostActionTy {
     bool &IsInParallelRegion;
     bool PrevIsInParallelRegion;
+    int &ParallelLevel;
 
   public:
-    NVPTXPrePostActionTy(bool &IsInParallelRegion)
-        : IsInParallelRegion(IsInParallelRegion) {}
+    NVPTXPrePostActionTy(bool &IsInParallelRegion, int &ParallelLevel)
+        : IsInParallelRegion(IsInParallelRegion), ParallelLevel(ParallelLevel)
+    {}
     void Enter(CodeGenFunction &CGF) override {
       PrevIsInParallelRegion = IsInParallelRegion;
       IsInParallelRegion = true;
+      ParallelLevel++;
     }
     void Exit(CodeGenFunction &CGF) override {
       IsInParallelRegion = PrevIsInParallelRegion;
+      ParallelLevel--;
     }
-  } Action(IsInParallelRegion);
+  } Action(IsInParallelRegion, ParallelLevel);
   CodeGen.setAction(Action);
   bool PrevIsInTTDRegion = IsInTTDRegion;
   IsInTTDRegion = false;
@@ -1956,6 +2099,9 @@ void CGOpenMPRuntimeGPU::emitGenericVarsProlog(CodeGenFunction &CGF,
       }
       if (EscapedParam) {
         const auto *VD = cast<VarDecl>(Rec.first);
+        if (VarAddr.getAddress(CGF).getElementType() != ParValue->getType())
+          ParValue = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+              ParValue, VarAddr.getAddress(CGF).getElementType());
         CGF.EmitStoreOfScalar(ParValue, VarAddr);
         I->getSecond().MappedParams->setVarAddr(CGF, VD,
                                                 VarAddr.getAddress(CGF));
@@ -2140,19 +2286,35 @@ void CGOpenMPRuntimeGPU::emitNonSPMDParallelCall(
     RCG(CGF);
   };
 
-  auto &&L0ParallelGen = [this, CapturedVars, Fn](CodeGenFunction &CGF,
-                                                  PrePostActionTy &Action) {
+  bool IsAmdgcn = (CGM.getTriple().isAMDGCN()) ? true : false;
+
+  auto &&L0ParallelGen = [this, CapturedVars, Fn, IsAmdgcn](
+                             CodeGenFunction &CGF, PrePostActionTy &Action) {
     CGBuilderTy &Bld = CGF.Builder;
     llvm::Function *WFn = WrapperFunctionsMap[Fn];
     assert(WFn && "Wrapper function does not exist!");
-    llvm::Value *ID = Bld.CreateBitOrPointerCast(WFn, CGM.Int8PtrTy);
 
-    // Prepare for parallel region. Indicate the outlined function.
-    llvm::Value *Args[] = {ID};
-    CGF.EmitRuntimeCall(
-        OMPBuilder.getOrCreateRuntimeFunction(
-            CGM.getModule(), OMPRTL___kmpc_kernel_prepare_parallel),
-        Args);
+    if (IsAmdgcn) {
+      auto &CGM = CGF.CGM;
+      // For amdgcn, replace fctptr with hash code of function name
+      auto HashCode = llvm::hash_value(WFn->getName());
+      auto Size = llvm::ConstantInt::get(CGM.SizeTy, HashCode);
+      llvm::Value *ID = Bld.CreateIntToPtr(Size, CGM.Int8PtrTy);
+      llvm::Value *Args[] = {ID};
+      // Prepare for parallel region. Indicate the outlined function.
+      CGF.EmitRuntimeCall(
+          OMPBuilder.getOrCreateRuntimeFunction(
+              CGM.getModule(), OMPRTL___kmpc_kernel_prepare_parallel),
+          Args);
+    } else {
+      llvm::Value *ID = Bld.CreateBitOrPointerCast(WFn, CGM.Int8PtrTy);
+      // Prepare for parallel region. Indicate the outlined function.
+      llvm::Value *Args[] = {ID};
+      CGF.EmitRuntimeCall(
+          OMPBuilder.getOrCreateRuntimeFunction(
+              CGM.getModule(), OMPRTL___kmpc_kernel_prepare_parallel),
+          Args);
+    }
 
     // Create a private scope that will globalize the arguments
     // passed from the outside of the target region.
@@ -2215,6 +2377,12 @@ void CGOpenMPRuntimeGPU::emitNonSPMDParallelCall(
   auto &&LNParallelGen = [this, Loc, &SeqGen, &L0ParallelGen](
                              CodeGenFunction &CGF, PrePostActionTy &Action) {
     if (IsInParallelRegion) {
+      if (CGM.getTriple().isAMDGCN()) {
+        unsigned DiagID = CGM.getDiags().getCustomDiagID(
+          DiagnosticsEngine::Remark,
+          "Nested parallel pragma, this will be serialized on device");
+        CGM.getDiags().Report(DiagID);
+      }
       SeqGen(CGF, Action);
     } else if (IsInTargetMasterThreadRegion) {
       L0ParallelGen(CGF, Action);
@@ -2324,6 +2492,12 @@ void CGOpenMPRuntimeGPU::emitSPMDParallelCall(
     // If we are not in the target region, it is definitely L2 parallelism or
     // more, because for SPMD mode we always has L1 parallel level, sowe don't
     // need to check for orphaned directives.
+    if (CGM.getTriple().isAMDGCN()) {
+      unsigned DiagID = CGM.getDiags().getCustomDiagID(
+        DiagnosticsEngine::Remark,
+        "Nested parallel pragma, this will be serialized on device");
+      CGM.getDiags().Report(DiagID);
+    }
     RegionCodeGenTy RCG(SeqGen);
     RCG(CGF);
   }
@@ -4218,7 +4392,28 @@ llvm::Function *CGOpenMPRuntimeGPU::createParallelDataSharingWrapper(
       CGM.getTypes().GetFunctionType(CGFI), llvm::GlobalValue::InternalLinkage,
       Twine(OutlinedParallelFn->getName(), "_wrapper"), &CGM.getModule());
   CGM.SetInternalFunctionAttributes(GlobalDecl(), Fn, CGFI);
-  Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
+  if (CGM.getTriple().isAMDGCN()) {
+    Fn->setName(CGM.getModule().getName() + Fn->getName());
+    DotToUnderbar(Fn);
+    Fn->setLinkage(llvm::GlobalValue::ExternalLinkage);
+    Fn->removeFnAttr(llvm::Attribute::NoInline);
+    Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+    Fn->setDSOLocal(false);
+    // Create global constant of the hash value for select_outline_wrapper
+    // We only need these for functions generated in other modules
+    (void)new llvm::GlobalVariable(
+        CGM.getModule(),
+        /* Type */ CGM.SizeTy,
+        /* isConstant */ true,
+        /* Linkage Types */ llvm::GlobalValue::ExternalLinkage,
+        llvm::ConstantInt::get(CGM.SizeTy, llvm::hash_value(Fn->getName())),
+        Twine("_HASHW_") + Fn->getName().str(),
+        /* insertBefore */ nullptr,
+        /* ThreadLocalMode =*/llvm::GlobalVariable::NotThreadLocal,
+        CGM.getContext().getTargetAddressSpace(LangAS::cuda_constant));
+  } else
+    Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
+
   Fn->setDoesNotRecurse();
 
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
@@ -4577,8 +4772,16 @@ bool CGOpenMPRuntimeGPU::hasAllocateAttributeForGlobalVar(const VarDecl *VD,
 
 // Get current CudaArch and ignore any unknown values
 static CudaArch getCudaArch(CodeGenModule &CGM) {
-  if (!CGM.getTarget().hasFeature("ptx"))
+  if (!CGM.getTarget().hasFeature("ptx") &&
+      (CGM.getTriple().getArch() != llvm::Triple::amdgcn))
     return CudaArch::UNKNOWN;
+  if (CGM.getTriple().isAMDGCN())
+    return StringToCudaArch(CGM.getTarget().getTargetOpts().CPU);
+  // FIXME: Can we always just return StringToCudaArch(...CPU) here?
+  llvm::StringMap<bool> Features;
+  CGM.getTarget().initFeatureMap(Features, CGM.getDiags(),
+                                 CGM.getTarget().getTargetOpts().CPU,
+                                 CGM.getTarget().getTargetOpts().Features);
   for (const auto &Feature : CGM.getTarget().getTargetOpts().FeatureMap) {
     if (Feature.getValue()) {
       CudaArch Arch = StringToCudaArch(Feature.getKey());
@@ -4693,19 +4896,23 @@ static std::pair<unsigned, unsigned> getSMsBlocksPerSM(CodeGenModule &CGM) {
   case CudaArch::GFX602:
   case CudaArch::GFX700:
   case CudaArch::GFX701:
+    return {44, 64}; // Hawaii
   case CudaArch::GFX702:
   case CudaArch::GFX703:
   case CudaArch::GFX704:
   case CudaArch::GFX705:
   case CudaArch::GFX801:
   case CudaArch::GFX802:
+    return {28, 64}; // Tonga
   case CudaArch::GFX803:
+    return {64, 64}; // FIXME: Verify these settings or get autmatically
   case CudaArch::GFX805:
   case CudaArch::GFX810:
   case CudaArch::GFX900:
   case CudaArch::GFX902:
   case CudaArch::GFX904:
   case CudaArch::GFX906:
+    return {64, 64};
   case CudaArch::GFX908:
   case CudaArch::GFX909:
   case CudaArch::GFX90c:
@@ -4716,6 +4923,8 @@ static std::pair<unsigned, unsigned> getSMsBlocksPerSM(CodeGenModule &CGM) {
   case CudaArch::GFX1031:
   case CudaArch::GFX1032:
   case CudaArch::GFX1033:
+    // New GFX* need to be verified for the correct # SM's
+    return {120, 64};
   case CudaArch::UNUSED:
   case CudaArch::UNKNOWN:
     break;
