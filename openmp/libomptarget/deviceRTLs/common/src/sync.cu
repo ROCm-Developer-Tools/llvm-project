@@ -9,6 +9,7 @@
 // Include all synchronization.
 //
 //===----------------------------------------------------------------------===//
+#pragma omp declare target
 
 #include "common/omptarget.h"
 #include "target_impl.h"
@@ -115,7 +116,7 @@ EXTERN void __kmpc_end_single(kmp_Ident *loc, int32_t global_tid) {
 
 EXTERN void __kmpc_flush(kmp_Ident *loc) {
   PRINT0(LD_IO, "call kmpc_flush\n");
-  __kmpc_impl_threadfence();
+  __kmpc_impl_threadfence_system();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -135,3 +136,4 @@ EXTERN void __kmpc_syncwarp(__kmpc_impl_lanemask_t Mask) {
   PRINT0(LD_IO, "call __kmpc_syncwarp\n");
   __kmpc_impl_syncwarp(Mask);
 }
+#pragma omp end declare target
