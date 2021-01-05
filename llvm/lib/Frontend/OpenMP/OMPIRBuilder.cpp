@@ -63,6 +63,7 @@ FunctionCallee
 OpenMPIRBuilder::getOrCreateRuntimeFunction(Module &M, RuntimeFunction FnID) {
   FunctionType *FnTy = nullptr;
   Function *Fn = nullptr;
+  Type *LanemaskTy = getLanemaskType();
 
   // Try to find the declation in the module first.
   switch (FnID) {
@@ -1519,6 +1520,8 @@ Value *OpenMPIRBuilder::getOMPCriticalRegionLock(StringRef CriticalName) {
 void OpenMPIRBuilder::initializeTypes(Module &M) {
   LLVMContext &Ctx = M.getContext();
   StructType *T;
+  LanemaskTy = getLanemaskType();
+
 #define OMP_TYPE(VarName, InitValue) VarName = InitValue;
 #define OMP_ARRAY_TYPE(VarName, ElemTy, ArraySize)                             \
   VarName##Ty = ArrayType::get(ElemTy, ArraySize);                             \
