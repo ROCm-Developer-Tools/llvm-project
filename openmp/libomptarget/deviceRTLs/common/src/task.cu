@@ -26,6 +26,7 @@
 //    - end
 //
 //===----------------------------------------------------------------------===//
+#pragma omp declare target
 
 #include "common/omptarget.h"
 
@@ -100,7 +101,10 @@ EXTERN int32_t __kmpc_omp_task_with_deps(kmp_Ident *loc, uint32_t global_tid,
   newTaskDescr->CopyForExplicitTask(parentTaskDescr);
   // set new task descriptor as top
   omptarget_nvptx_threadPrivateContext->SetTopLevelTaskDescr(tid, newTaskDescr);
-
+#ifdef OMPD_SUPPORT
+  ompd_init_explicit_task((void*)(newKmpTaskDescr->sub));
+  ompd_bp_task_begin();
+#endif
   // 3. call sub
   PRINT(LD_TASK, "call task sub 0x%llx(task descr 0x%llx)\n",
         (unsigned long long)newKmpTaskDescr->sub,
@@ -108,6 +112,10 @@ EXTERN int32_t __kmpc_omp_task_with_deps(kmp_Ident *loc, uint32_t global_tid,
   newKmpTaskDescr->sub(0, newKmpTaskDescr);
   PRINT(LD_TASK, "return from call task sub 0x%llx()\n",
         (unsigned long long)newKmpTaskDescr->sub);
+
+#ifdef OMPD_SUPPORT
+  ompd_bp_task_end();
+#endif
 
   // 4. pop context
   omptarget_nvptx_threadPrivateContext->SetTopLevelTaskDescr(tid,
@@ -214,3 +222,4 @@ EXTERN void __kmpc_taskloop(kmp_Ident *loc, uint32_t global_tid,
 
   __kmpc_omp_task_with_deps(loc, global_tid, newKmpTaskDescr, 0, 0, 0, 0);
 }
+#pragma omp end declare target
