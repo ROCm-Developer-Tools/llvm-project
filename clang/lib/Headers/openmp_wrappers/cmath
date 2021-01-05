@@ -81,7 +81,7 @@ __DEVICE__ float tgamma(float __x) { return ::tgammaf(__x); }
 #ifdef __AMDGCN__
 #pragma omp begin declare variant match(                                       \
     device = {arch(amdgcn)}, implementation = {extension(match_any, allow_templates)})
-#define __HIP__
+#define __HIP__ 1
 #define __OPENMP_AMDGCN__
 #include <__clang_hip_cmath.h>
 #undef __HIP__

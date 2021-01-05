@@ -60,7 +60,7 @@
 #endif
 
 #ifndef __HIP__
-#define __HIP__
+#define __HIP__ 1
 #endif
 
 #include <__clang_hip_math.h>
