@@ -355,6 +355,8 @@ DwarfDebug::DwarfDebug(AsmPrinter *A)
   UseLocSection = !TT.isNVPTX();
 
   HasAppleExtensionAttributes = tuneForLLDB();
+  HasHeterogeneousExtensionAttributes =
+      Asm->MAI->supportsHeterogeneousDebuggingExtensions();
 
   // Handle split DWARF.
   HasSplitDwarf = !Asm->TM.Options.MCOptions.SplitDwarfFile.empty();
@@ -1028,6 +1030,10 @@ void DwarfDebug::finishUnitAttributes(const DICompileUnit *DIUnit,
     if (unsigned RVer = DIUnit->getRuntimeVersion())
       NewCU.addUInt(Die, dwarf::DW_AT_APPLE_major_runtime_vers,
                     dwarf::DW_FORM_data1, RVer);
+  }
+
+  if (useHeterogeneousExtensionAttributes()) {
+    NewCU.addString(Die, dwarf::DW_AT_LLVM_augmentation, "[llvm:v0.0]");
   }
 
   if (DIUnit->getDWOId()) {
@@ -2705,6 +2711,9 @@ void DwarfDebug::emitDebugLocImpl(MCSection *Sec) {
 
 // Emit locations into the .debug_loc/.debug_loclists section.
 void DwarfDebug::emitDebugLoc() {
+  if (DisableDwarfLocations)
+    return;
+
   emitDebugLocImpl(
       getDwarfVersion() >= 5
           ? Asm->getObjFileLowering().getDwarfLoclistsSection()
@@ -2713,6 +2722,9 @@ void DwarfDebug::emitDebugLoc() {
 
 // Emit locations into the .debug_loc.dwo/.debug_loclists.dwo section.
 void DwarfDebug::emitDebugLocDWO() {
+  if (DisableDwarfLocations)
+    return;
+
   if (getDwarfVersion() >= 5) {
     emitDebugLocImpl(
         Asm->getObjFileLowering().getDwarfLoclistsDWOSection());
