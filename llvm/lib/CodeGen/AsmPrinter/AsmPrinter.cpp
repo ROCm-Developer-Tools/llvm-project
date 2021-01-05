@@ -15,6 +15,7 @@
 #include "DwarfDebug.h"
 #include "DwarfException.h"
 #include "PseudoProbePrinter.h"
+#include "UnwindStreamer.h"
 #include "WasmException.h"
 #include "WinCFGuard.h"
 #include "WinException.h"
@@ -142,6 +143,8 @@ const char DWARFGroupName[] = "dwarf";
 const char DWARFGroupDescription[] = "DWARF Emission";
 const char DbgTimerName[] = "emit";
 const char DbgTimerDescription[] = "Debug Info Emission";
+const char UnwindTimerName[] = "write_unwind";
+const char UnwindTimerDescription[] = "DWARF Unwind Writer";
 const char EHTimerName[] = "write_exception";
 const char EHTimerDescription[] = "DWARF Exception Writer";
 const char CFGuardName[] = "Control Flow Guard";
@@ -345,61 +348,71 @@ bool AsmPrinter::doInitialization(Module &M) {
                           PPTimerDescription, PPGroupName, PPGroupDescription);
   }
 
-  switch (MAI->getExceptionHandlingType()) {
-  case ExceptionHandling::SjLj:
-  case ExceptionHandling::DwarfCFI:
-  case ExceptionHandling::ARM:
+  if (MAI->getExceptionHandlingType() == ExceptionHandling::None &&
+      (TM.Options.ForceDwarfFrameSection ||
+       (MMI->hasDebugInfo() && MAI->doesSupportDebugUnwindInformation()))) {
     isCFIMoveForDebugging = true;
-    if (MAI->getExceptionHandlingType() != ExceptionHandling::DwarfCFI)
+    Handlers.emplace_back(std::make_unique<UnwindStreamer>(this),
+                          UnwindTimerName, UnwindTimerDescription,
+                          DWARFGroupName, DWARFGroupDescription);
+  } else {
+    switch (MAI->getExceptionHandlingType()) {
+    case ExceptionHandling::SjLj:
+    case ExceptionHandling::DwarfCFI:
+    case ExceptionHandling::ARM:
+      isCFIMoveForDebugging = true;
+      if (MAI->getExceptionHandlingType() != ExceptionHandling::DwarfCFI)
+        break;
+      for (auto &F : M.getFunctionList()) {
+        // If the module contains any function with unwind data,
+        // .eh_frame has to be emitted.
+        // Ignore functions that won't get emitted.
+        if (!F.isDeclarationForLinker() && F.needsUnwindTableEntry()) {
+          isCFIMoveForDebugging = false;
+          break;
+        }
+      }
       break;
-    for (auto &F: M.getFunctionList()) {
-      // If the module contains any function with unwind data,
-      // .eh_frame has to be emitted.
-      // Ignore functions that won't get emitted.
-      if (!F.isDeclarationForLinker() && F.needsUnwindTableEntry()) {
-        isCFIMoveForDebugging = false;
+    default:
+      isCFIMoveForDebugging = false;
+      break;
+    }
+
+    EHStreamer *ES = nullptr;
+    switch (MAI->getExceptionHandlingType()) {
+    case ExceptionHandling::None:
+      break;
+    case ExceptionHandling::SjLj:
+    case ExceptionHandling::DwarfCFI:
+      ES = new DwarfCFIException(this);
+      break;
+    case ExceptionHandling::ARM:
+      ES = new ARMException(this);
+      break;
+    case ExceptionHandling::WinEH:
+      switch (MAI->getWinEHEncodingType()) {
+      default:
+        llvm_unreachable("unsupported unwinding information encoding");
+      case WinEH::EncodingType::Invalid:
+        break;
+      case WinEH::EncodingType::X86:
+      case WinEH::EncodingType::Itanium:
+        ES = new WinException(this);
         break;
       }
-    }
-    break;
-  default:
-    isCFIMoveForDebugging = false;
-    break;
-  }
-
-  EHStreamer *ES = nullptr;
-  switch (MAI->getExceptionHandlingType()) {
-  case ExceptionHandling::None:
-    break;
-  case ExceptionHandling::SjLj:
-  case ExceptionHandling::DwarfCFI:
-    ES = new DwarfCFIException(this);
-    break;
-  case ExceptionHandling::ARM:
-    ES = new ARMException(this);
-    break;
-  case ExceptionHandling::WinEH:
-    switch (MAI->getWinEHEncodingType()) {
-    default: llvm_unreachable("unsupported unwinding information encoding");
-    case WinEH::EncodingType::Invalid:
       break;
-    case WinEH::EncodingType::X86:
-    case WinEH::EncodingType::Itanium:
-      ES = new WinException(this);
-      break;
+      case ExceptionHandling::Wasm:
+        ES = new WasmException(this);
+        break;
+      case ExceptionHandling::AIX:
+        ES = new AIXException(this);
+        break;
     }
-    break;
-  case ExceptionHandling::Wasm:
-    ES = new WasmException(this);
-    break;
-  case ExceptionHandling::AIX:
-    ES = new AIXException(this);
-    break;
+    if (ES)
+      Handlers.emplace_back(std::unique_ptr<EHStreamer>(ES), EHTimerName,
+                            EHTimerDescription, DWARFGroupName,
+                            DWARFGroupDescription);
   }
-  if (ES)
-    Handlers.emplace_back(std::unique_ptr<EHStreamer>(ES), EHTimerName,
-                          EHTimerDescription, DWARFGroupName,
-                          DWARFGroupDescription);
 
   // Emit tables for any value of cfguard flag (i.e. cfguard=1 or cfguard=2).
   if (mdconst::extract_or_null<ConstantInt>(M.getModuleFlag("cfguard")))
@@ -1022,7 +1035,8 @@ bool AsmPrinter::needsSEHMoves() {
 
 void AsmPrinter::emitCFIInstruction(const MachineInstr &MI) {
   ExceptionHandling ExceptionHandlingType = MAI->getExceptionHandlingType();
-  if (ExceptionHandlingType != ExceptionHandling::DwarfCFI &&
+  if (!MAI->doesSupportDebugUnwindInformation() &&
+      ExceptionHandlingType != ExceptionHandling::DwarfCFI &&
       ExceptionHandlingType != ExceptionHandling::ARM)
     return;
 
