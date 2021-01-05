@@ -9,6 +9,7 @@
 // This file contains the implementation of reduction with KMPC interface.
 //
 //===----------------------------------------------------------------------===//
+#pragma omp declare target
 
 #include "common/omptarget.h"
 #include "common/target_atomic.h"
@@ -94,6 +95,9 @@ static int32_t nvptx_parallel_reduce_nowait(
    * 3. Warp 0 reduces to a single value.
    * 4. The reduced value is available in the thread that returns 1.
    */
+#ifdef OMPD_SUPPORT
+    ompd_set_device_thread_state(omp_state_work_reduction);
+#endif /*OMPD_SUPPORT*/
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
   uint32_t WarpsNeeded = (NumThreads + WARPSIZE - 1) / WARPSIZE;
@@ -123,6 +127,11 @@ static int32_t nvptx_parallel_reduce_nowait(
       gpu_irregular_warp_reduce(reduce_data, shflFct, WarpsNeeded,
                                 BlockThreadId);
   }
+
+#ifdef OMPD_SUPPORT
+  ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
+
   return BlockThreadId == 0;
 #else
   __kmpc_impl_lanemask_t Liveness = __kmpc_impl_activemask();
@@ -152,10 +161,20 @@ static int32_t nvptx_parallel_reduce_nowait(
       gpu_irregular_warp_reduce(reduce_data, shflFct, WarpsNeeded,
                                 BlockThreadId);
 
+#ifdef OMPD_SUPPORT
+    ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
     return BlockThreadId == 0;
   } else if (isRuntimeUninitialized /* Never an L2 parallel region without the OMP runtime */) {
+#ifdef OMPD_SUPPORT
+    ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
     return BlockThreadId == 0;
   }
+
+#ifdef OMPD_SUPPORT
+    ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
 
   // Get the OMP thread Id. This is different from BlockThreadId in the case of
   // an L2 parallel region.
@@ -171,6 +190,16 @@ int32_t __kmpc_nvptx_parallel_reduce_nowait_v2(
   return nvptx_parallel_reduce_nowait(
       global_tid, num_vars, reduce_size, reduce_data, shflFct, cpyFct,
       checkSPMDMode(loc), checkRuntimeUninitialized(loc));
+}
+
+// This apparently unused function is currently called by flang
+EXTERN
+int32_t __kmpc_nvptx_parallel_reduce_nowait_simple_spmd(
+    int32_t global_tid, int32_t num_vars, size_t reduce_size, void *reduce_data,
+    kmp_ShuffleReductFctPtr shflFct, kmp_InterWarpCopyFctPtr cpyFct) {
+  return nvptx_parallel_reduce_nowait(
+      global_tid, num_vars, reduce_size, reduce_data, shflFct, cpyFct,
+      /*isSPMDExecutionMode=*/true, /*isRuntimeUninitialized=*/true);
 }
 
 INLINE static bool isMaster(kmp_Ident *loc, uint32_t ThreadId) {
@@ -196,6 +225,10 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
   if (checkGenericMode(loc) && GetThreadIdInBlock() != GetMasterThreadID())
     return 0;
 
+#ifdef OMPD_SUPPORT
+    ompd_set_device_thread_state(omp_state_work_reduction);
+#endif /*OMPD_SUPPORT*/
+
   uint32_t ThreadId = GetLogicalThreadIdInBlock(checkSPMDMode(loc));
 
   // In non-generic mode all workers participate in the teams reduction.
@@ -206,8 +239,8 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
                          : /*Master thread only*/ 1;
   uint32_t TeamId = GetBlockIdInKernel();
   uint32_t NumTeams = GetNumberOfBlocksInKernel();
-  static SHARED unsigned Bound;
-  static SHARED unsigned ChunkTeamCount;
+  static unsigned SHARED(Bound);
+  static unsigned SHARED(ChunkTeamCount);
 
   // Block progress for teams greater than the current upper
   // limit. We always only allow a number of teams less or equal
@@ -226,12 +259,12 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
       lgcpyFct(global_buffer, ModBockId, reduce_data);
     else
       lgredFct(global_buffer, ModBockId, reduce_data);
-    __kmpc_impl_threadfence_system();
 
     // Increment team counter.
     // This counter is incremented by all teams in the current
     // BUFFER_SIZE chunk.
     ChunkTeamCount = __kmpc_atomic_inc((uint32_t *)&Cnt, num_of_records - 1u);
+    __kmpc_impl_threadfence_system();
   }
   // Synchronize
   if (checkSPMDMode(loc))
@@ -265,11 +298,19 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
     //
     // Last team processing.
     //
-    if (ThreadId >= NumRecs)
+    if (ThreadId >= NumRecs) {
+#ifdef OMPD_SUPPORT
+      ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
       return 0;
+    }
     NumThreads = roundToWarpsize(__kmpc_impl_min(NumThreads, NumRecs));
-    if (ThreadId >= NumThreads)
+    if (ThreadId >= NumThreads) {
+#ifdef OMPD_SUPPORT
+      ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
       return 0;
+    }
 
     // Load from buffer and reduce.
     glcpyFct(global_buffer, ThreadId, reduce_data);
@@ -296,6 +337,10 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
       }
     }
 
+#ifdef OMPD_SUPPORT
+    ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
+
     if (IsMaster) {
       Cnt = 0;
       IterCnt = 0;
@@ -309,6 +354,10 @@ EXTERN int32_t __kmpc_nvptx_teams_reduce_nowait_v2(
     __kmpc_atomic_add((uint32_t *)&IterCnt, uint32_t(num_of_records));
   }
 
+#ifdef OMPD_SUPPORT
+  ompd_reset_device_thread_state();
+#endif /*OMPD_SUPPORT*/
   return 0;
 }
 
+#pragma omp end declare target
