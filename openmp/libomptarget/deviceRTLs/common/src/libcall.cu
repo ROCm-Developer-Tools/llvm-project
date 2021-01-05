@@ -10,7 +10,9 @@
 // invoked by the user in an OpenMP region
 //
 //===----------------------------------------------------------------------===//
+#pragma omp declare target
 
+#include "common/device_environment.h"
 #include "common/omptarget.h"
 #include "common/target_atomic.h"
 #include "target_impl.h"
@@ -299,10 +301,27 @@ EXTERN int omp_get_default_device(void) {
   return 0;
 }
 
+#ifdef __AMDGCN__
+EXTERN int omp_get_num_devices(void) {
+  PRINT(LD_IO, "call omp_get_num_devices() returns device_size %d\n",
+        omptarget_device_environment.num_devices);
+  return omptarget_device_environment.num_devices;
+}
+EXTERN int omp_get_device_num(void) {
+  PRINT(LD_IO, "call omp_get_device_num() returns device_num %d\n",
+        omptarget_device_environment.device_num);
+  return omptarget_device_environment.device_num;
+}
+#else
 EXTERN int omp_get_num_devices(void) {
   PRINT0(LD_IO, "call omp_get_num_devices() is undef on device, returns 0\n");
   return 0;
 }
+EXTERN int omp_get_device_num(void) {
+  PRINT0(LD_IO, "call omp_get_device_num() is undef on device, returns 0\n");
+  return 0;
+}
+#endif
 
 EXTERN int omp_get_num_teams(void) {
   int rc = GetNumberOfOmpTeams();
@@ -316,7 +335,11 @@ EXTERN int omp_get_team_num() {
   return rc;
 }
 
-EXTERN int omp_is_initial_device(void) {
+// For some reason this function, and only this function, triggers
+// error: definition of builtin function 'omp_is_initial_device'
+// Working around here until the compiler quirk is understood
+DEVICE int omp_is_initial_device_OVERLOAD(void) asm("omp_is_initial_device");
+DEVICE int omp_is_initial_device_OVERLOAD(void) {
   PRINT0(LD_IO, "call omp_is_initial_device() returns 0\n");
   return 0; // 0 by def on device
 }
@@ -362,3 +385,4 @@ EXTERN int omp_test_lock(omp_lock_t *lock) {
   PRINT(LD_IO, "call omp_test_lock() return %d\n", rc);
   return rc;
 }
+#pragma omp end declare target
