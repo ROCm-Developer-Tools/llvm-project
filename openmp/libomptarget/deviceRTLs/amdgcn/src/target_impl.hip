@@ -9,6 +9,7 @@
 // Definitions of target specific functions
 //
 //===----------------------------------------------------------------------===//
+#pragma omp declare target
 
 #include "target_impl.h"
 
@@ -37,11 +38,12 @@ DEVICE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_gt() {
 DEVICE double __kmpc_impl_get_wtick() { return ((double)1E-9); }
 
 DEVICE double __kmpc_impl_get_wtime() {
-  // The intrinsics for measuring time have undocumented frequency
-  // This will probably need to be found by measurement on a number of
-  // architectures. Until then, return 0, which is very inaccurate as a
-  // timer but resolves the undefined symbol at link time.
-  return 0;
+#if __gfx700__ || __gfx701__ || __gfx702__
+  uint64_t t = __builtin_amdgcn_s_memtime();
+#else
+  uint64_t t = __builtin_amdgcn_s_memrealtime();
+#endif
+  return ((double)1.0 / 745000000.0) * t;
 }
 
 // Warp vote function
@@ -65,7 +67,13 @@ DEVICE int32_t __kmpc_impl_shfl_down_sync(__kmpc_impl_lanemask_t, int32_t var,
   return __builtin_amdgcn_ds_bpermute(index << 2, var);
 }
 
-static DEVICE SHARED uint32_t L1_Barrier;
+
+// static doesn't work for openmp + shared, the variable is discarded by llc
+// and lld then fails to link. Unclear why the variable hasn't been associated
+// with the kernel. Dropping the static qualifier for now.
+
+// static
+DEVICE  uint32_t SHARED(L1_Barrier);
 
 DEVICE void __kmpc_impl_target_init() {
   // Don't have global ctors, and shared memory is not zero init
@@ -148,6 +156,14 @@ EXTERN uint32_t __kmpc_amdgcn_gpu_num_threads() {
   return GetNumberOfThreadsInBlock();
 }
 
-// Stub implementations
-DEVICE void *__kmpc_impl_malloc(size_t) { return nullptr; }
-DEVICE void __kmpc_impl_free(void *) {}
+// global_allocate is hostrpc service to return pointer to device memory
+// In the future, we will implement a heap allocation and minimize
+// host service calls. 
+EXTERN char * global_allocate(uint32_t bufsz);
+EXTERN int global_free(void*);
+
+// Memory
+DEVICE void *__kmpc_impl_malloc(size_t t) { return global_allocate(t); }
+DEVICE void __kmpc_impl_free(void * ptr) {global_free(ptr);}
+#pragma omp end declare target
+
