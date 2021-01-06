@@ -690,12 +690,17 @@ static Constant *stripAndComputeConstantOffsets(const DataLayout &DL, Value *&V,
   assert(V->getType()->isPtrOrPtrVectorTy());
 
   Type *IntIdxTy = DL.getIndexType(V->getType())->getScalarType();
+  Type *IntIdxTyOrig = IntIdxTy;
   APInt Offset = APInt::getNullValue(IntIdxTy->getIntegerBitWidth());
 
   V = V->stripAndAccumulateConstantOffsets(DL, Offset, AllowNonInbounds);
   // As that strip may trace through `addrspacecast`, need to sext or trunc
   // the offset calculated.
   IntIdxTy = DL.getIndexType(V->getType())->getScalarType();
+  // Extend bitwidth to greater of scalartype or accumulated offsets
+  if (IntIdxTyOrig->getIntegerBitWidth() > IntIdxTy->getIntegerBitWidth())
+    IntIdxTy = IntIdxTyOrig;
+
   Offset = Offset.sextOrTrunc(IntIdxTy->getIntegerBitWidth());
 
   Constant *OffsetIntPtr = ConstantInt::get(IntIdxTy, Offset);
@@ -2551,10 +2556,34 @@ computePointerICmp(const DataLayout &DL, const TargetLibraryInfo *TLI,
     // stripAndComputeConstantOffsets left off and accumulate the offsets.
     Constant *LHSNoBound = stripAndComputeConstantOffsets(DL, LHS, true);
     Constant *RHSNoBound = stripAndComputeConstantOffsets(DL, RHS, true);
-    if (LHS == RHS)
+    if (LHS == RHS) {
+      // If constant offsets do not have same bitwith, extend and change type
+      if (RHSOffset->getType()->getIntegerBitWidth() >
+          LHSOffset->getType()->getIntegerBitWidth()) {
+        LHSOffset =
+            ConstantInt::get(RHSOffset->getType(),
+                             LHSOffset->getUniqueInteger().sextOrTrunc(
+                                 RHSOffset->getType()->getIntegerBitWidth()));
+        LHSNoBound =
+            ConstantInt::get(RHSNoBound->getType(),
+                             LHSNoBound->getUniqueInteger().sextOrTrunc(
+                                 RHSNoBound->getType()->getIntegerBitWidth()));
+      }
+      if (RHSOffset->getType()->getIntegerBitWidth() <
+          LHSOffset->getType()->getIntegerBitWidth()) {
+        RHSOffset =
+            ConstantInt::get(LHSOffset->getType(),
+                             RHSOffset->getUniqueInteger().sextOrTrunc(
+                                 LHSOffset->getType()->getIntegerBitWidth()));
+        RHSNoBound =
+            ConstantInt::get(LHSNoBound->getType(),
+                             RHSNoBound->getUniqueInteger().sextOrTrunc(
+                                 LHSNoBound->getType()->getIntegerBitWidth()));
+      }
       return ConstantExpr::getICmp(Pred,
                                    ConstantExpr::getAdd(LHSOffset, LHSNoBound),
                                    ConstantExpr::getAdd(RHSOffset, RHSNoBound));
+    }
 
     // If one side of the equality comparison must come from a noalias call
     // (meaning a system memory allocation function), and the other side must
