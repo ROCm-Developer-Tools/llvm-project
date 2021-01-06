@@ -482,6 +482,14 @@ static llvm::Function *emitOutlinedFunctionPrologue(
         if (LLVM_AS == LangAS::Default)
           LLVM_AS = LangAS::cuda_device;
         ArgType = Ctx.getAddrSpaceQualType(ArgType, LLVM_AS);
+        if ((ArgType.getTypePtr()->isLValueReferenceType()) &&
+            ArgType.getTypePtr()
+                ->getAs<ReferenceType>()
+                ->getPointeeType()
+                .getTypePtr()
+                ->isPointerType() &&
+            CapVar->hasAttrs() && CapVar->hasAttr<AlignedAttr>())
+          ArgType = ArgType.getNonLValueExprType(Ctx);
       }
     }
 
@@ -594,8 +602,10 @@ static llvm::Function *emitOutlinedFunctionPrologue(
         ArgAddr = CGF.EmitLoadOfReference(ArgLVal);
       } else if (!VarTy->isVariablyModifiedType() || !VarTy->isPointerType()) {
         assert(ArgLVal.getType()->isPointerType());
-        ArgAddr = CGF.EmitLoadOfPointer(
-            ArgAddr, ArgLVal.getType()->castAs<PointerType>());
+        if (!FD->getType()->isLValueReferenceType()) {
+          ArgAddr = CGF.EmitLoadOfPointer(
+              ArgAddr, ArgLVal.getType()->castAs<PointerType>());
+        }
       }
       if (!FO.RegisterCastedArgsOnly) {
         LocalAddrs.insert(
