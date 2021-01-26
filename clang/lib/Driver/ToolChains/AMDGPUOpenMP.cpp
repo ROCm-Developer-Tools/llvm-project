@@ -309,12 +309,9 @@ const char *AMDGCN::OpenMPLinker::constructLlcCommand(
       Args.MakeArgString(Twine("-filetype=") + (OutputIsAsm ? "asm" : "obj")));
 
   // Add the object code version. Example: -mcode-object-version=3
-  unsigned ObjCodeVer =
-    reinterpret_cast<const AMDGPUToolChain &>(getToolChain())
-	  .GetCodeObjectVersion();
-  LlcArgs.push_back(
-    Args.MakeArgString(Twine("--amdhsa-code-object-version=") +
-	               Twine(ObjCodeVer)));
+  LlcArgs.push_back(Args.MakeArgString(
+      Twine("--amdhsa-code-object-version=") +
+      Twine(getOrCheckAMDGPUCodeObjectVersion(C.getDriver(), Args))));
 
   // Get the environment variable ROCM_LLC_ARGS and add to llc.
   Optional<std::string> OptEnv = llvm::sys::Process::GetEnv("ROCM_LLC_ARGS");
