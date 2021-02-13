@@ -220,8 +220,8 @@ define void @func_non_entry_block_static_alloca_align4(i32 addrspace(1)* %out, i
 ; MUBUF:       ; %bb.0: ; %entry
 ; MUBUF-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
 ; MUBUF-NEXT:    s_mov_b32 s7, s33
-; MUBUF-NEXT:    v_cmp_eq_u32_e32 vcc, 0, v2
 ; MUBUF-NEXT:    s_mov_b32 s33, s32
+; MUBUF-NEXT:    v_cmp_eq_u32_e32 vcc, 0, v2
 ; MUBUF-NEXT:    s_add_u32 s32, s32, 0x400
 ; MUBUF-NEXT:    s_and_saveexec_b64 s[4:5], vcc
 ; MUBUF-NEXT:    s_cbranch_execz BB2_3
@@ -256,8 +256,8 @@ define void @func_non_entry_block_static_alloca_align4(i32 addrspace(1)* %out, i
 ; FLATSCR:       ; %bb.0: ; %entry
 ; FLATSCR-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
 ; FLATSCR-NEXT:    s_mov_b32 s5, s33
-; FLATSCR-NEXT:    v_cmp_eq_u32_e32 vcc, 0, v2
 ; FLATSCR-NEXT:    s_mov_b32 s33, s32
+; FLATSCR-NEXT:    v_cmp_eq_u32_e32 vcc, 0, v2
 ; FLATSCR-NEXT:    s_add_u32 s32, s32, 16
 ; FLATSCR-NEXT:    s_and_saveexec_b64 s[0:1], vcc
 ; FLATSCR-NEXT:    s_cbranch_execz BB2_3

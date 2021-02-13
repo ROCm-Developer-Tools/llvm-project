@@ -77,11 +77,11 @@ define internal fastcc void @csr_vgpr_spill_fp_tailcall_callee() #0 {
 ; CHECK-NEXT:    buffer_store_dword v1, off, s[0:3], s32 offset:4 ; 4-byte Folded Spill
 ; CHECK-NEXT:    s_mov_b64 exec, s[4:5]
 ; CHECK-NEXT:    buffer_store_dword v40, off, s[0:3], s32 ; 4-byte Folded Spill
+; CHECK-NEXT:    v_writelane_b32 v1, s33, 0
 ; CHECK-NEXT:    ;;#ASMSTART
 ; CHECK-NEXT:    ; clobber csr v40
 ; CHECK-NEXT:    ;;#ASMEND
 ; CHECK-NEXT:    buffer_load_dword v40, off, s[0:3], s32 ; 4-byte Folded Reload
-; CHECK-NEXT:    v_writelane_b32 v1, s33, 0
 ; CHECK-NEXT:    s_getpc_b64 s[4:5]
 ; CHECK-NEXT:    s_add_u32 s4, s4, callee_has_fp@rel32@lo+4
 ; CHECK-NEXT:    s_addc_u32 s5, s5, callee_has_fp@rel32@hi+12

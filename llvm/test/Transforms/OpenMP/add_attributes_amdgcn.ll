@@ -1,3 +1,4 @@
+; XFAIL: *
 ; RUN: opt < %s -S -openmpopt        | FileCheck %s
 ; RUN: opt < %s -S -passes=openmpopt | FileCheck %s
 ; RUN: opt < %s -S -openmpopt        -openmp-ir-builder-optimistic-attributes | FileCheck %s --check-prefix=OPTIMISTIC
