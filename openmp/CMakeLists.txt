@@ -43,6 +43,11 @@ else()
   list(APPEND LIBOMPTARGET_LLVM_INCLUDE_DIRS ${LLVM_MAIN_INCLUDE_DIR} ${LLVM_BINARY_DIR}/include)
 endif()
 
+if((CMAKE_BUILD_TYPE MATCHES Debug) AND (${LIBOMPTARGET_NVPTX_DEBUG}))
+  set(OPENMP_LIBDIR_SUFFIX "-debug")
+  set(OPENMP_INSTALL_LIBDIR "lib${OPENMP_LIBDIR_SUFFIX}")
+endif()
+
 # Check and set up common compiler flags.
 include(config-ix)
 include(HandleOpenMPOptions)
@@ -86,6 +91,9 @@ option(OPENMP_ENABLE_LIBOMP_PROFILING "Enable time profiling for libomp." OFF)
 # Build host runtime library, after LIBOMPTARGET variables are set since they are needed
 # to enable time profiling support in the OpenMP runtime.
 add_subdirectory(runtime)
+
+# Build OMPD
+add_subdirectory(libompd)
 
 if (OPENMP_ENABLE_LIBOMPTARGET)
   # Check that the library can actually be built.
