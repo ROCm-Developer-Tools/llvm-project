@@ -15,6 +15,7 @@
 #include "clang/Basic/Sanitizers.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Multilib.h"
+#include "clang/Driver/Tool.h"
 #include "clang/Driver/Types.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -53,10 +54,10 @@ class ObjCRuntime;
 
 namespace driver {
 
+class Compilation;
 class Driver;
 class InputInfo;
 class SanitizerArgs;
-class Tool;
 class XRayArgs;
 
 /// Helper structure used to pass information extracted from clang executable
@@ -136,8 +137,10 @@ private:
   /// The list of toolchain specific path prefixes to search for programs.
   path_list ProgramPaths;
 
+  mutable std::unique_ptr<Tool> FlangFrontend;
   mutable std::unique_ptr<Tool> Clang;
   mutable std::unique_ptr<Tool> Flang;
+  mutable std::unique_ptr<Tool> AMDFlang;
   mutable std::unique_ptr<Tool> Assemble;
   mutable std::unique_ptr<Tool> Link;
   mutable std::unique_ptr<Tool> StaticLibTool;
@@ -147,6 +150,7 @@ private:
 
   Tool *getClang() const;
   Tool *getFlang() const;
+  //   Tool *getFlangFrontend() const;
   Tool *getAssemble() const;
   Tool *getLink() const;
   Tool *getStaticLibTool() const;
@@ -578,6 +582,22 @@ public:
   AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                             llvm::opt::ArgStringList &CC1Args) const;
 
+  /// \brief Add the flang arguments for system include paths.
+  ///
+  /// This routine is responsible for adding the -stdinc argument to
+  /// include headers and module files from standard system header directories.
+  virtual void
+  AddFlangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                            llvm::opt::ArgStringList &Flang1Args) const {}
+
+  /// Add options that need to be passed to cc1 for this target that could add
+  /// commands to the compilation to transform an input.
+  virtual void
+  addActionsFromClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                                   llvm::opt::ArgStringList &CC1Args,
+                                   const JobAction &JA, Compilation &C,
+                                   const InputInfoList &Inputs) const;
+
   /// Add options that need to be passed to cc1 for this target.
   virtual void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                                      llvm::opt::ArgStringList &CC1Args,
@@ -663,6 +683,12 @@ public:
   virtual VersionTuple computeMSVCVersion(const Driver *D,
                                           const llvm::opt::ArgList &Args) const;
 
+  /// AddFortranStdlibLibArgs - Add the system specific linker arguments to use
+  /// for the given Fortran runtime library type.
+  virtual void AddFortranStdlibLibArgs(const llvm::opt::ArgList &Args,
+                                       llvm::opt::ArgStringList &CmdArgs) const;
+
+  /// Return sanitizers which are available in this toolchain.
   /// Return sanitizers which are available in this toolchain.
   virtual SanitizerMask getSupportedSanitizers() const;
 
