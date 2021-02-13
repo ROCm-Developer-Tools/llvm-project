@@ -53,12 +53,21 @@ set (LIBOMPTARGET_TESTED_PLUGINS "")
 string( TOLOWER "${CMAKE_BUILD_TYPE}" LIBOMPTARGET_CMAKE_BUILD_TYPE)
 if(LIBOMPTARGET_CMAKE_BUILD_TYPE MATCHES debug)
   option(LIBOMPTARGET_ENABLE_DEBUG "Allow debug output with the environment variable LIBOMPTARGET_DEBUG=1" ON)
+  add_definitions(-DDEBUG)
 else()
   option(LIBOMPTARGET_ENABLE_DEBUG "Allow debug output with the environment variable LIBOMPTARGET_DEBUG=1" OFF)
 endif()
 if(LIBOMPTARGET_ENABLE_DEBUG)
   add_definitions(-DOMPTARGET_DEBUG)
 endif()
+
+# OMPD support for libomptarget (currently only with cuda)
+set(LIBOMPTARGET_OMPD_SUPPORT FALSE CACHE BOOL "OMPD-support?")
+if (LIBOMPTARGET_OMPD_SUPPORT)
+  add_definitions(-DOMPD_SUPPORT=1)
+endif()
+
+include_directories(include)
 
 set(LIBOMPTARGET_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${LIBOMPTARGET_INCLUDE_DIR})
@@ -77,6 +86,9 @@ set(LIBOMPTARGET_OPENMP_HOST_RTL_FOLDER "${LIBOMP_LIBRARY_DIR}" CACHE STRING
 # Build offloading plugins and device RTLs if they are available.
 add_subdirectory(plugins)
 add_subdirectory(deviceRTLs)
+if (OPENMP_ENABLE_LIBOMPTARGET_HSA)
+  add_subdirectory(hostrpc)
+endif()
 
 # Add tests.
 add_subdirectory(test)
