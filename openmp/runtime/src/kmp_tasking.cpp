@@ -1271,7 +1271,7 @@ kmp_task_t *__kmp_task_alloc(ident_t *loc_ref, kmp_int32 gtid,
       }
     }
 
-    if ((flags->proxy == TASK_PROXY || flags->detachable == TASK_DETACHABLE) &&
+    if (flags->proxy == TASK_PROXY &&
         task_team->tt.tt_found_proxy_tasks == FALSE)
       TCW_4(task_team->tt.tt_found_proxy_tasks, TRUE);
     if (flags->hidden_helper &&
@@ -1634,6 +1634,11 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
 #endif
 
   }
+
+#if OMPD_SUPPORT
+  if ( ompd_state & OMPD_ENABLE_BP )
+    ompd_bp_task_end ();
+#endif
 
   // Proxy tasks are not handled by the runtime
   if (taskdata->td_flags.proxy != TASK_PROXY) {
