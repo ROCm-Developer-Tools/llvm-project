@@ -256,6 +256,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUUseNativeCallsPass(*PR);
   initializeAMDGPUSimplifyLibCallsPass(*PR);
   initializeAMDGPUPrintfRuntimeBindingPass(*PR);
+  initializeAMDGPULowerKernelCallsPass(*PR);
   initializeGCNRegBankReassignPass(*PR);
   initializeGCNNSAReassignPass(*PR);
   initializeSIAddIMGInitPass(*PR);
@@ -853,6 +854,8 @@ void AMDGPUPassConfig::addIRPasses() {
   // bitcast calls.
   addPass(createAMDGPUFixFunctionBitcastsPass());
 
+  // this pass should be performed on linked module
+  addPass(createAMDGPULowerKernelCallsPass());
   // A call to propagate attributes pass in the backend in case opt was not run.
   addPass(createAMDGPUPropagateAttributesEarlyPass(&TM));
 
