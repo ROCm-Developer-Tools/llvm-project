@@ -43,6 +43,9 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(const Triple &TT,
   //===--- Dwarf Emission Directives -----------------------------------===//
   SupportsDebugInformation = true;
   DwarfRegNumForCFI = true;
+  SupportsHeterogeneousDebuggingExtensions = true;
+  if (TT.getArch() == Triple::amdgcn)
+    SupportsDebugUnwindInformation = true;
 
   UseIntegratedAssembler = false;
 }
