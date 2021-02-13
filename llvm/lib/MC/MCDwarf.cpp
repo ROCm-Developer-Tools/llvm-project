@@ -1437,6 +1437,17 @@ void FrameEmitterImpl::emitCFIInstruction(const MCCFIInstruction &Instr) {
 
     return;
   }
+  case MCCFIInstruction::OpLLVMDefAspaceCfa: {
+    unsigned Reg = Instr.getRegister();
+    unsigned AddressSpace = Instr.getAddressSpace();
+    Streamer.emitIntValue(dwarf::DW_CFA_LLVM_def_aspace_cfa, 1);
+    Streamer.emitULEB128IntValue(Reg);
+    CFAOffset = -Instr.getOffset();
+    Streamer.emitULEB128IntValue(CFAOffset);
+    Streamer.emitULEB128IntValue(AddressSpace);
+
+    return;
+  }
   case MCCFIInstruction::OpOffset:
   case MCCFIInstruction::OpRelOffset: {
     const bool IsRelative =
@@ -1605,6 +1616,7 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
   MCContext &context = Streamer.getContext();
   const MCRegisterInfo *MRI = context.getRegisterInfo();
   const MCObjectFileInfo *MOFI = context.getObjectFileInfo();
+  const MCAsmInfo *MAI = context.getAsmInfo();
 
   MCSymbol *sectionStart = context.createTempSymbol();
   Streamer.emitLabel(sectionStart);
@@ -1634,8 +1646,8 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
   uint8_t CIEVersion = getCIEVersion(IsEH, context.getDwarfVersion());
   Streamer.emitInt8(CIEVersion);
 
+  SmallString<8> Augmentation;
   if (IsEH) {
-    SmallString<8> Augmentation;
     Augmentation += "z";
     if (Frame.Personality)
       Augmentation += "P";
@@ -1646,8 +1658,10 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
       Augmentation += "S";
     if (Frame.IsBKeyFrame)
       Augmentation += "B";
-    Streamer.emitBytes(Augmentation);
   }
+  if (MAI->supportsHeterogeneousDebuggingExtensions())
+    Augmentation += "[llvm:v0.0]";
+  Streamer.emitBytes(Augmentation);
   Streamer.emitInt8(0);
 
   if (CIEVersion >= 4) {
@@ -1711,7 +1725,6 @@ const MCSymbol &FrameEmitterImpl::EmitCIE(const MCDwarfFrameInfo &Frame) {
 
   // Initial Instructions
 
-  const MCAsmInfo *MAI = context.getAsmInfo();
   if (!Frame.IsSimple) {
     const std::vector<MCCFIInstruction> &Instructions =
         MAI->getInitialFrameState();
