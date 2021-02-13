@@ -395,6 +395,9 @@ class CXXRecordDecl : public RecordDecl {
     /// mangling in the Itanium C++ ABI.
     unsigned ManglingNumber : 31;
 
+    /// The device side name mangling number.
+    unsigned DeviceManglingNumber = 0;
+
     /// The declaration that provides context for this lambda, if the
     /// actual DeclContext does not suffice. This is used for lambdas that
     /// occur within default arguments of function parameters within the class
