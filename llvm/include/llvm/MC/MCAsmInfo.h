@@ -374,6 +374,11 @@ protected:
   /// false.
   bool SupportsDebugInformation = false;
 
+  /// True if target supports emitting .debug_frame unwind information when
+  /// ExceptionsType = ExceptionHandling::None and debug info is requested.
+  /// Defaults to false.
+  bool SupportsDebugUnwindInformation = false;
+
   /// Exception handling format for the target.  Defaults to None.
   ExceptionHandling ExceptionsType = ExceptionHandling::None;
 
@@ -399,6 +404,11 @@ protected:
   /// True if the target supports flags in ".loc" directive, false if only
   /// location is allowed.
   bool SupportsExtendedDwarfLocDirective = true;
+
+  /// True if the target supports the extensions defined at
+  /// https://llvm.org/docs/AMDGPUDwarfProposalForHeterogeneousDebugging.html.
+  /// Defaults to false.
+  bool SupportsHeterogeneousDebuggingExtensions = false;
 
   //===--- Prologue State ----------------------------------------------===//
 
@@ -642,6 +652,14 @@ public:
 
   bool doesSupportDebugInformation() const { return SupportsDebugInformation; }
 
+  bool doesSupportDebugUnwindInformation() const {
+    return SupportsDebugUnwindInformation;
+  }
+
+  bool doesSupportExceptionHandling() const {
+    return ExceptionsType != ExceptionHandling::None;
+  }
+
   ExceptionHandling getExceptionHandlingType() const { return ExceptionsType; }
   WinEH::EncodingType getWinEHEncodingType() const { return WinEHEncodingType; }
 
@@ -671,6 +689,9 @@ public:
   bool useParensForSymbolVariant() const { return UseParensForSymbolVariant; }
   bool supportsExtendedDwarfLocDirective() const {
     return SupportsExtendedDwarfLocDirective;
+  }
+  bool supportsHeterogeneousDebuggingExtensions() const {
+    return SupportsHeterogeneousDebuggingExtensions;
   }
 
   void addInitialFrameState(const MCCFIInstruction &Inst);
