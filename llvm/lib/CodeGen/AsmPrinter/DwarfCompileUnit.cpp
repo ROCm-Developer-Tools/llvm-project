@@ -255,6 +255,17 @@ void DwarfCompileUnit::addLocationAttribute(
       DwarfExpr->addFragmentOffset(Expr);
     }
 
+    // FIXME: This is a workaround to avoid generating symbols for non-global
+    // address spaces, e.g. LDS. Generate a 'DW_OP_constu' with a dummy
+    // constant value (0) for now.
+    unsigned AMDGPUGlobalAddrSpace = 1;
+    if ((Asm->TM.getTargetTriple().getArch() == Triple::amdgcn) &&
+        (Global->getAddressSpace() != AMDGPUGlobalAddrSpace)) {
+      addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_constu);
+      addUInt(*Loc, dwarf::DW_FORM_udata, 0);
+      continue;
+    }
+
     if (Global) {
       const MCSymbol *Sym = Asm->getSymbol(Global);
       if (Global->isThreadLocal()) {
@@ -1350,6 +1361,9 @@ void DwarfCompileUnit::addVariableAddress(const DbgVariable &DV, DIE &Die,
 /// Add an address attribute to a die based on the location provided.
 void DwarfCompileUnit::addAddress(DIE &Die, dwarf::Attribute Attribute,
                                   const MachineLocation &Location) {
+  if (DisableDwarfLocations)
+    return;
+
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
   if (Location.isIndirect())
@@ -1376,6 +1390,9 @@ void DwarfCompileUnit::addAddress(DIE &Die, dwarf::Attribute Attribute,
 void DwarfCompileUnit::addComplexAddress(const DbgVariable &DV, DIE &Die,
                                          dwarf::Attribute Attribute,
                                          const MachineLocation &Location) {
+  if (DisableDwarfLocations)
+    return;
+
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
   const DIExpression *DIExpr = DV.getSingleExpression();
@@ -1403,6 +1420,9 @@ void DwarfCompileUnit::addComplexAddress(const DbgVariable &DV, DIE &Die,
 /// Add a Dwarf loclistptr attribute data and value.
 void DwarfCompileUnit::addLocationList(DIE &Die, dwarf::Attribute Attribute,
                                        unsigned Index) {
+  if (DisableDwarfLocations)
+    return;
+
   dwarf::Form Form = (DD->getDwarfVersion() >= 5)
                          ? dwarf::DW_FORM_loclistx
                          : DD->getDwarfSectionOffsetForm();
