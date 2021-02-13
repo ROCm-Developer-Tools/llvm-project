@@ -26,6 +26,7 @@ VERS1.0 {
     __tgt_mapper_num_components;
     __tgt_push_mapper_component;
     omp_get_num_devices;
+    omp_get_device_num;
     omp_get_initial_device;
     omp_target_alloc;
     omp_target_free;
@@ -35,6 +36,22 @@ VERS1.0 {
     omp_target_associate_ptr;
     omp_target_disassociate_ptr;
     __kmpc_push_target_tripcount;
+    printf_allocate;
+    printf_execute;
+    global_allocate;
+    global_free;
+    hostrpc_varfn_uint;
+    hostrpc_varfn_double;
+    hostrpc_varfn_uint_allocate;
+    hostrpc_varfn_uint_execute;
+    hostrpc_varfn_double_allocate;
+    hostrpc_varfn_double_execute;
+    hostrpc_fptr0;
+    hostrpc_varfn_uint64_allocate;
+    hostrpc_varfn_double_allocate;
+    hostrpc_varfn_uint64_execute;
+    hostrpc_varfn_uint64;
+    hostrpc_invoke;
   local:
     *;
 };
