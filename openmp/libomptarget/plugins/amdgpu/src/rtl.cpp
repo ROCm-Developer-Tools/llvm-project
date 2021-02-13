@@ -39,6 +39,8 @@
 #include "get_elf_mach_gfx_name.h"
 #include "omptargetplugin.h"
 
+#include "trace.h"
+
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
 
 #ifndef TARGET_NAME
@@ -547,13 +549,7 @@ public:
 
 pthread_mutex_t SignalPoolT::mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// TODO: May need to drop the trailing to fields until deviceRTL is updated
-struct omptarget_device_environmentTy {
-  int32_t debug_level; // gets value of envvar LIBOMPTARGET_DEVICE_RTL_DEBUG
-                       // only useful for Debug build of deviceRTLs
-  int32_t num_devices; // gets number of active offload devices
-  int32_t device_num;  // gets a value 0 to num_devices-1
-};
+#include "../../../src/device_env_struct.h"
 
 static RTLDeviceInfoTy DeviceInfo;
 
@@ -1942,4 +1938,33 @@ int32_t __tgt_rtl_synchronize(int32_t device_id,
     finiAsyncInfoPtr(async_info_ptr);
   }
   return OFFLOAD_SUCCESS;
+}
+
+// This method is only used by hostrpc demo
+atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
+                                    bool host2Device) {
+  hsa_signal_t sig;
+  hsa_status_t err = hsa_signal_create(0, 0, NULL, &sig);
+  if (err != HSA_STATUS_SUCCESS) {
+    return ATMI_STATUS_ERROR;
+  }
+
+  const int deviceId = 0;
+  hsa_agent_t agent = DeviceInfo.HSAAgents[deviceId];
+  atmi_status_t r;
+  if (host2Device)
+    r = atmi_memcpy_h2d(sig, dest, src, size, agent);
+  else
+    r = atmi_memcpy_d2h(sig, dest, src, size, agent);
+
+  hsa_status_t rc = hsa_signal_destroy(sig);
+
+  if (r != ATMI_STATUS_SUCCESS) {
+    return r;
+  }
+  if (rc != HSA_STATUS_SUCCESS) {
+    return ATMI_STATUS_ERROR;
+  }
+
+  return ATMI_STATUS_SUCCESS;
 }
