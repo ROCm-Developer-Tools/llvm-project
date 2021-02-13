@@ -140,6 +140,9 @@ class Command {
   /// See Command::setEnvironment
   std::vector<const char *> Environment;
 
+  /// Dependent actions
+  llvm::SmallVector<const Action *, 4> DependentActions;
+
   /// Information on executable run provided by OS.
   mutable Optional<llvm::sys::ProcessStatistics> ProcStat;
 
@@ -206,6 +209,10 @@ public:
   const char *getExecutable() const { return Executable; }
 
   const llvm::opt::ArgStringList &getArguments() const { return Arguments; }
+
+  const llvm::SmallVector<const Action *, 4> &getDependentActions() const {
+    return DependentActions;
+  }
 
   const llvm::opt::ArgStringList &getInputFilenames() const {
     return InputFilenames;
