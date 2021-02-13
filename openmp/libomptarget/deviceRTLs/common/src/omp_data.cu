@@ -19,25 +19,57 @@
 // global device environment
 ////////////////////////////////////////////////////////////////////////////////
 
+#ifdef __AMDGCN__
+// Keeping the variable out of bss allows it to be initialized before
+// loading the device image
+__attribute__((section(".data")))
+#endif
 DEVICE omptarget_device_environmentTy omptarget_device_environment;
 
 ////////////////////////////////////////////////////////////////////////////////
 // global data holding OpenMP state information
 ////////////////////////////////////////////////////////////////////////////////
 
+#ifndef __AMDGCN__
+
+DEVICE
+omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext, OMP_STATE_COUNT>
+    omptarget_nvptx_device_State[MAX_SM];
+
+#else
+#if 0
 // OpenMP will try to call its ctor if we don't add the attribute explicitly
 [[clang::loader_uninitialized]] DEVICE
     omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext, OMP_STATE_COUNT>
         omptarget_nvptx_device_State[MAX_SM];
+#endif
+__attribute__((used))
+EXTERN uint64_t const constexpr omptarget_nvptx_device_State_size =
+    sizeof(omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext,
+                                 OMP_STATE_COUNT>[MAX_SM]);
 
-DEVICE omptarget_nvptx_SimpleMemoryManager omptarget_nvptx_simpleMemoryManager;
+// Initialized to point to omptarget_nvptx_device_State_size bytes by plugin
+__attribute__((section(".data")))
+DEVICE
+omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext, OMP_STATE_COUNT>
+    *omptarget_nvptx_device_State;
+
+#endif
+
+DEVICE omptarget_nvptx_SimpleMemoryManager
+    omptarget_nvptx_simpleMemoryManager;
 DEVICE uint32_t SHARED(usedMemIdx);
 DEVICE uint32_t SHARED(usedSlotIdx);
 
+#ifdef _OPENMP
 // SHARED doesn't work with array so we add the attribute explicitly.
 [[clang::loader_uninitialized]] DEVICE uint8_t
     parallelLevel[MAX_THREADS_PER_TEAM / WARPSIZE];
 #pragma omp allocate(parallelLevel) allocator(omp_pteam_mem_alloc)
+#else
+DEVICE uint8_t SHARED(parallelLevel)[MAX_THREADS_PER_TEAM / WARPSIZE];
+#endif
+
 DEVICE uint16_t SHARED(threadLimit);
 DEVICE uint16_t SHARED(threadsInTeam);
 DEVICE uint16_t SHARED(nThreads);
