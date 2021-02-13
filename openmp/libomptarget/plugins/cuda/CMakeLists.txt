@@ -15,6 +15,12 @@ if (NOT(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(ppc64le)|(aarch64)$" AND CMAKE
 elseif (NOT LIBOMPTARGET_DEP_LIBELF_FOUND)
   libomptarget_say("Not building CUDA offloading plugin: libelf dependency not found.")
   return()
+elseif(NOT LIBOMPTARGET_DEP_CUDA_FOUND)
+  libomptarget_say("Not building CUDA offloading plugin: CUDA not found in system.")
+  return()
+elseif(NOT LIBOMPTARGET_DEP_CUDA_DRIVER_FOUND)
+  libomptarget_say("Not building CUDA offloading plugin: CUDA Driver API not found in system.")
+  return()
 endif()
 
 libomptarget_say("Building CUDA offloading plugin.")
@@ -22,6 +28,7 @@ libomptarget_say("Building CUDA offloading plugin.")
 # Define the suffix for the runtime messaging dumps.
 add_definitions(-DTARGET_NAME=CUDA)
 
+include_directories(${LIBOMPTARGET_DEP_CUDA_INCLUDE_DIRS})
 include_directories(${LIBOMPTARGET_DEP_LIBELF_INCLUDE_DIRS})
 
 set(LIBOMPTARGET_DLOPEN_LIBCUDA OFF)
@@ -50,7 +57,7 @@ install(TARGETS omptarget.rtl.cuda LIBRARY DESTINATION "${OPENMP_INSTALL_LIBDIR}
 target_link_libraries(omptarget.rtl.cuda
   elf_common
   MemoryManager
-  ${LIBOMPTARGET_DEP_LIBRARIES}
+  ${LIBOMPTARGET_DEP_CUDA_DRIVER_LIBRARIES}
   ${LIBOMPTARGET_DEP_LIBELF_LIBRARIES}
   ${OPENMP_PTHREAD_LIB}
   "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exports"
