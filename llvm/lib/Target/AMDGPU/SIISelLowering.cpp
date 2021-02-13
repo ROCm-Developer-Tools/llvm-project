@@ -19,6 +19,7 @@
 #include "SIRegisterInfo.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/LegacyDivergenceAnalysis.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GlobalISel/GISelKnownBits.h"
@@ -5112,12 +5113,35 @@ SDValue SITargetLowering::lowerXMULO(SDValue Op, SelectionDAG &DAG) const {
 }
 
 SDValue SITargetLowering::lowerTRAP(SDValue Op, SelectionDAG &DAG) const {
+  if (!Subtarget->isTrapHandlerEnabled() ||
+      Subtarget->getTrapHandlerAbi() != GCNSubtarget::TrapHandlerAbi::AMDHSA)
+    return lowerTRAP_ENDPGM(Op, DAG);
+
+  if (const auto &&HsaAbiVer = AMDGPU::getHsaAbiVersion(Subtarget)) {
+    switch (HsaAbiVer.getValue()) {
+    case ELF::ELFABIVERSION_AMDGPU_HSA_V2:
+    case ELF::ELFABIVERSION_AMDGPU_HSA_V3:
+      return lowerTRAP_AMDHSA_QUEUE_PTR(Op, DAG);
+    case ELF::ELFABIVERSION_AMDGPU_HSA_V4:
+      return Subtarget->supportsGetDoorbellID() ?
+          lowerTRAP_AMDHSA(Op, DAG) : lowerTRAP_AMDHSA_QUEUE_PTR(Op, DAG);
+    }
+  }
+
+  llvm_unreachable("Unknown trap handler");
+}
+
+SDValue SITargetLowering::lowerTRAP_ENDPGM(
+    SDValue Op, SelectionDAG &DAG) const {
   SDLoc SL(Op);
   SDValue Chain = Op.getOperand(0);
+  return DAG.getNode(AMDGPUISD::ENDPGM, SL, MVT::Other, Chain);
+}
 
-  if (Subtarget->getTrapHandlerAbi() != GCNSubtarget::TrapHandlerAbiHsa ||
-      !Subtarget->isTrapHandlerEnabled())
-    return DAG.getNode(AMDGPUISD::ENDPGM, SL, MVT::Other, Chain);
+SDValue SITargetLowering::lowerTRAP_AMDHSA_QUEUE_PTR(
+    SDValue Op, SelectionDAG &DAG) const {
+  SDLoc SL(Op);
+  SDValue Chain = Op.getOperand(0);
 
   MachineFunction &MF = DAG.getMachineFunction();
   SIMachineFunctionInfo *Info = MF.getInfo<SIMachineFunctionInfo>();
@@ -5128,11 +5152,26 @@ SDValue SITargetLowering::lowerTRAP(SDValue Op, SelectionDAG &DAG) const {
   SDValue SGPR01 = DAG.getRegister(AMDGPU::SGPR0_SGPR1, MVT::i64);
   SDValue ToReg = DAG.getCopyToReg(Chain, SL, SGPR01,
                                    QueuePtr, SDValue());
+
+  uint64_t TrapID = static_cast<uint64_t>(GCNSubtarget::TrapID::LLVMAMDHSATrap);
   SDValue Ops[] = {
     ToReg,
-    DAG.getTargetConstant(GCNSubtarget::TrapIDLLVMTrap, SL, MVT::i16),
+    DAG.getTargetConstant(TrapID, SL, MVT::i16),
     SGPR01,
     ToReg.getValue(1)
+  };
+  return DAG.getNode(AMDGPUISD::TRAP, SL, MVT::Other, Ops);
+}
+
+SDValue SITargetLowering::lowerTRAP_AMDHSA(
+    SDValue Op, SelectionDAG &DAG) const {
+  SDLoc SL(Op);
+  SDValue Chain = Op.getOperand(0);
+
+  uint64_t TrapID = static_cast<uint64_t>(GCNSubtarget::TrapID::LLVMAMDHSATrap);
+  SDValue Ops[] = {
+    Chain,
+    DAG.getTargetConstant(TrapID, SL, MVT::i16)
   };
   return DAG.getNode(AMDGPUISD::TRAP, SL, MVT::Other, Ops);
 }
@@ -5142,8 +5181,8 @@ SDValue SITargetLowering::lowerDEBUGTRAP(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
   MachineFunction &MF = DAG.getMachineFunction();
 
-  if (Subtarget->getTrapHandlerAbi() != GCNSubtarget::TrapHandlerAbiHsa ||
-      !Subtarget->isTrapHandlerEnabled()) {
+  if (!Subtarget->isTrapHandlerEnabled() ||
+      Subtarget->getTrapHandlerAbi() != GCNSubtarget::TrapHandlerAbi::AMDHSA) {
     DiagnosticInfoUnsupported NoTrap(MF.getFunction(),
                                      "debugtrap handler not supported",
                                      Op.getDebugLoc(),
@@ -5153,9 +5192,10 @@ SDValue SITargetLowering::lowerDEBUGTRAP(SDValue Op, SelectionDAG &DAG) const {
     return Chain;
   }
 
+  uint64_t TrapID = static_cast<uint64_t>(GCNSubtarget::TrapID::LLVMAMDHSADebugTrap);
   SDValue Ops[] = {
     Chain,
-    DAG.getTargetConstant(GCNSubtarget::TrapIDLLVMDebugTrap, SL, MVT::i16)
+    DAG.getTargetConstant(TrapID, SL, MVT::i16)
   };
   return DAG.getNode(AMDGPUISD::TRAP, SL, MVT::Other, Ops);
 }
