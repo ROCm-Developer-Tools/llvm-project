@@ -18,8 +18,13 @@
 #pragma push_macro("__DEVICE__")
 #if defined(__OPENMP_NVPTX__) || (defined(_OPENMP) && defined(__AMDGCN__))
 #pragma omp declare target
-#define __DEVICE__ __attribute__((noinline, nothrow, cold, weak))
+#ifdef __BUILD_MATH_BUILTINS_LIB__
+#define __DEVICE__ extern __attribute__((always_inline, nothrow, cold, weak))
 #else
+#define __DEVICE__ __attribute__((always_inline, nothrow, cold, weak))
+#endif
+#else
+//  For HIP and CUDA
 #define __DEVICE__ __device__ inline
 #endif
 
@@ -292,12 +297,12 @@ __2f32 __ocml_cexp_f32(__2f32 _arg_2f32);
 // _Complex double for both arg and return types (or _Complex float)
 // The compiler does not allow typecast _Complex double to __2f64.
 // So we use union.
-_Complex double cexp(_Complex double _a){
+__DEVICE__ _Complex double cexp(_Complex double _a){
   union __union_d _ua = {.cd = _a};
   union __union_d _ur = {.d2 = __ocml_cexp_f64(_ua.d2)};
   return _ur.cd;
 }
-_Complex float cexpf(_Complex float _a){
+__DEVICE__ _Complex float cexpf(_Complex float _a){
   union __union_f _ua = {.cf = _a};
   union __union_f _ur = {.f2 = __ocml_cexp_f32(_ua.f2)};
   return _ur.cf;
