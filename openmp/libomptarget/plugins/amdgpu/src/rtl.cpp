@@ -48,6 +48,15 @@
 #endif
 #define DEBUG_PREFIX "Target " GETNAME(TARGET_NAME) " RTL"
 
+// Total number of VGPRs per CU
+#define OMP_AMD_TOTAL_VGPR_PER_CU (64*1024)
+
+// Default number of teams per CU to allow scheduling flexibility
+#define OMP_AMD_DEFAULT_TEAMS_PER_CU 4
+
+// Minimum number of simultaneous groups to be executed per CU
+#define OMP_AMD_MIN_SIMUL_GROUPS 2
+
 // hostrpc interface, FIXME: consider moving to its own include these are
 // statically linked into amdgpu/plugin if present from hostrpc_services.a,
 // linked as --whole-archive to override the weak symbols that are used to
@@ -785,7 +794,7 @@ int32_t __tgt_rtl_init_device(int device_id) {
        DeviceInfo.EnvNumTeams);
   } else {
     char *TeamsPerCUEnvStr = getenv("OMP_TARGET_TEAMS_PER_PROC");
-    int TeamsPerCU = 1; // default number of teams per CU is 1
+    int TeamsPerCU = OMP_AMD_DEFAULT_TEAMS_PER_CU;
     if (TeamsPerCUEnvStr) {
       TeamsPerCU = std::stoi(TeamsPerCUEnvStr);
     }
@@ -808,7 +817,7 @@ int32_t __tgt_rtl_init_device(int device_id) {
      RTLDeviceInfoTy::Default_WG_Size);
   if (DeviceInfo.NumThreads[device_id] >
       DeviceInfo.ThreadsPerGroup[device_id]) {
-    DeviceInfo.NumTeams[device_id] = DeviceInfo.ThreadsPerGroup[device_id];
+    DeviceInfo.NumThreads[device_id] = DeviceInfo.ThreadsPerGroup[device_id];
     DP("Default number of threads exceeds device limit, capping at %d\n",
        DeviceInfo.ThreadsPerGroup[device_id]);
   }
@@ -1748,13 +1757,42 @@ int32_t __tgt_rtl_run_target_team_region_locked(
 
   KernelTy *KernelInfo = (KernelTy *)tgt_entry_ptr;
 
+  std::string kernel_name = std::string(KernelInfo->Name);
+  uint32_t sgpr_count, vgpr_count;
+
+  {
+    assert(KernelInfoTable[device_id].find(kernel_name) !=
+	   KernelInfoTable[device_id].end());
+    auto it = KernelInfoTable[device_id][kernel_name];
+    sgpr_count = it.sgpr_count;
+    vgpr_count = it.vgpr_count;
+  }
+
   /*
    * Set limit based on ThreadsPerGroup and GroupsPerDevice
    */
   int num_groups = 0;
 
-  int threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
-
+  // Compute the maximum number of VGPRs allowed for a workgroup
+  int max_vgprs_per_group = OMP_AMD_TOTAL_VGPR_PER_CU/OMP_AMD_MIN_SIMUL_GROUPS;
+  
+  // Compute the max number of threads per group based on the kernel VGPR usage
+  int threadsPerGroup = max_vgprs_per_group / vgpr_count;
+  
+  if (threadsPerGroup > RTLDeviceInfoTy::Default_WG_Size) {
+    // Cap it beyond the default
+    threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
+  }
+  else if (threadsPerGroup < RTLDeviceInfoTy::Warp_Size) {
+    // Lower bound is a wavefront size
+    threadsPerGroup = RTLDeviceInfoTy::Warp_Size;
+  }
+  else {
+    // Round it down to a multiple of wavefront size
+    threadsPerGroup =
+      (threadsPerGroup/RTLDeviceInfoTy::Warp_Size)*RTLDeviceInfoTy::Warp_Size;
+  }
+  
   getLaunchVals(threadsPerGroup, num_groups, KernelInfo->ConstWGSize,
                 KernelInfo->ExecutionMode, DeviceInfo.EnvTeamLimit,
                 DeviceInfo.EnvNumTeams,
@@ -1767,10 +1805,10 @@ int32_t __tgt_rtl_run_target_team_region_locked(
     // enum modes are SPMD, GENERIC, NONE 0,1,2
     fprintf(stderr,
             "DEVID:%2d SGN:%1d ConstWGSize:%-4d args:%2d teamsXthrds:(%4dX%4d) "
-            "reqd:(%4dX%4d) n:%s\n",
+            "reqd:(%4dX%4d) sgpr_count:%u vgpr_count:%u tripcount:%lu n:%s\n",
             device_id, KernelInfo->ExecutionMode, KernelInfo->ConstWGSize,
             arg_num, num_groups, threadsPerGroup, num_teams, thread_limit,
-            KernelInfo->Name);
+            sgpr_count, vgpr_count, loop_tripcount, KernelInfo->Name);
 
   // Run on the device.
   {
@@ -1798,7 +1836,6 @@ int32_t __tgt_rtl_run_target_team_region_locked(
     packet->reserved2 = 0;           // atmi writes id_ here
     packet->completion_signal = {0}; // may want a pool of signals
 
-    std::string kernel_name = std::string(KernelInfo->Name);
     {
       assert(KernelInfoTable[device_id].find(kernel_name) !=
              KernelInfoTable[device_id].end());

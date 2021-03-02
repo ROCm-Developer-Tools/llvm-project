@@ -834,7 +834,21 @@ static hsa_status_t get_code_object_custom_metadata(void *binary,
     msgpack_errors += map_lookup_string(element, ".symbol", &symbolName);
     msgpackErrorCheck(strings lookup in kernel metadata, msgpack_errors);
 
-    atl_kernel_info_t info = {0, 0, 0, 0, 0, {}, {}, {}};
+    atl_kernel_info_t info = {0, 0, 0, 0, 0, 0, 0, {}, {}, {}};
+
+    uint64_t sgpr_count, vgpr_count;
+    msgpack_errors += map_lookup_uint64_t(element, ".sgpr_count",
+					  &sgpr_count);
+    msgpackErrorCheck(sgpr count metadata lookup in kernel metadata,
+		      msgpack_errors);
+    info.sgpr_count = sgpr_count;
+    
+    msgpack_errors += map_lookup_uint64_t(element, ".vgpr_count",
+					  &vgpr_count);
+    msgpackErrorCheck(vgpr count metadata lookup in kernel metadata,
+		      msgpack_errors);
+    info.vgpr_count = vgpr_count;
+    
     size_t kernel_explicit_args_size = 0;
     uint64_t kernel_segment_size;
     msgpack_errors += map_lookup_uint64_t(element, ".kernarg_segment_size",
