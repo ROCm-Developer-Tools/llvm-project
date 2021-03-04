@@ -48,12 +48,9 @@
 #endif
 #define DEBUG_PREFIX "Target " GETNAME(TARGET_NAME) " RTL"
 
-// Total number of VGPRs per CU
-#define OMP_AMD_TOTAL_VGPR_PER_CU (64*1024)
-
+// Heuristic parameters used for kernel launch parameters
 // Default number of teams per CU to allow scheduling flexibility
 #define OMP_AMD_DEFAULT_TEAMS_PER_CU 4
-
 // Minimum number of simultaneous groups to be executed per CU
 #define OMP_AMD_MIN_SIMUL_GROUPS 2
 
@@ -360,7 +357,9 @@ public:
       llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Max_WG_Size];
   static const int Default_WG_Size =
       llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Default_WG_Size];
-
+  static const int Total_VGPR_Count =
+      llvm::omp::AMDGPUGpuGridValues[llvm::omp::GVIDX::GV_Total_Vector_Registers];
+	    
   using MemcpyFunc = atmi_status_t (*)(hsa_signal_t, void *, const void *,
                                        size_t size, hsa_agent_t);
   atmi_status_t freesignalpool_memcpy(void *dest, const void *src, size_t size,
@@ -1758,7 +1757,7 @@ int32_t __tgt_rtl_run_target_team_region_locked(
   KernelTy *KernelInfo = (KernelTy *)tgt_entry_ptr;
 
   std::string kernel_name = std::string(KernelInfo->Name);
-  uint32_t sgpr_count, vgpr_count;
+  uint32_t sgpr_count, vgpr_count, sgpr_spill_count, vgpr_spill_count;
 
   {
     assert(KernelInfoTable[device_id].find(kernel_name) !=
@@ -1766,6 +1765,8 @@ int32_t __tgt_rtl_run_target_team_region_locked(
     auto it = KernelInfoTable[device_id][kernel_name];
     sgpr_count = it.sgpr_count;
     vgpr_count = it.vgpr_count;
+    sgpr_spill_count = it.sgpr_spill_count;
+    vgpr_spill_count = it.vgpr_spill_count;
   }
 
   /*
@@ -1774,7 +1775,8 @@ int32_t __tgt_rtl_run_target_team_region_locked(
   int num_groups = 0;
 
   // Compute the maximum number of VGPRs allowed for a workgroup
-  int max_vgprs_per_group = OMP_AMD_TOTAL_VGPR_PER_CU/OMP_AMD_MIN_SIMUL_GROUPS;
+  int max_vgprs_per_group =
+    RTLDeviceInfoTy::Total_VGPR_Count / OMP_AMD_MIN_SIMUL_GROUPS;
   
   // Compute the max number of threads per group based on the kernel VGPR usage
   int threadsPerGroup = max_vgprs_per_group / vgpr_count;
@@ -1790,7 +1792,7 @@ int32_t __tgt_rtl_run_target_team_region_locked(
   else {
     // Round it down to a multiple of wavefront size
     threadsPerGroup =
-      (threadsPerGroup/RTLDeviceInfoTy::Warp_Size)*RTLDeviceInfoTy::Warp_Size;
+      (threadsPerGroup / RTLDeviceInfoTy::Warp_Size) * RTLDeviceInfoTy::Warp_Size;
   }
   
   getLaunchVals(threadsPerGroup, num_groups, KernelInfo->ConstWGSize,
@@ -1805,10 +1807,12 @@ int32_t __tgt_rtl_run_target_team_region_locked(
     // enum modes are SPMD, GENERIC, NONE 0,1,2
     fprintf(stderr,
             "DEVID:%2d SGN:%1d ConstWGSize:%-4d args:%2d teamsXthrds:(%4dX%4d) "
-            "reqd:(%4dX%4d) sgpr_count:%u vgpr_count:%u tripcount:%lu n:%s\n",
+            "reqd:(%4dX%4d) sgpr_count:%u vgpr_count:%u sgpr_spill_count:%u "
+	    "vgpr_spill_count:%u tripcount:%lu n:%s\n",
             device_id, KernelInfo->ExecutionMode, KernelInfo->ConstWGSize,
             arg_num, num_groups, threadsPerGroup, num_teams, thread_limit,
-            sgpr_count, vgpr_count, loop_tripcount, KernelInfo->Name);
+            sgpr_count, vgpr_count, sgpr_spill_count, vgpr_spill_count,
+	    loop_tripcount, KernelInfo->Name);
 
   // Run on the device.
   {
