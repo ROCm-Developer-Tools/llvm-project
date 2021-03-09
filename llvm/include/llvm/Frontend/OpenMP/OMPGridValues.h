@@ -86,7 +86,9 @@ enum GVIDX {
   GV_Max_Warp_Number,
   /// The slot size that should be reserved for a working warp.
   /// (~0u >> (GV_Warp_Size - GV_Warp_Size_Log2))
-  GV_Warp_Size_Log2_MaskL
+  GV_Warp_Size_Log2_MaskL,
+  /// Total number of vector registers per CU or SM
+  GV_Total_Vector_Registers
 };
 
 /// For AMDGPU GPUs
@@ -104,7 +106,8 @@ static constexpr unsigned AMDGPUGpuGridValues[] = {
     1024,      // GV_Max_WG_Size,
     256,       // GV_Defaut_WG_Size
     1024 / 64, // GV_Max_WG_Size / GV_WarpSize
-    63         // GV_Warp_Size_Log2_MaskL
+    63,        // GV_Warp_Size_Log2_MaskL
+    64 * 1024  // GV_Total_Vector_Registers
 };
 
 /// For Nvidia GPUs
@@ -122,7 +125,8 @@ static constexpr unsigned NVPTXGpuGridValues[] = {
     1024,              // GV_Max_WG_Size
     128,               // GV_Defaut_WG_Size
     1024 / 32,         // GV_Max_WG_Size / GV_WarpSize
-    31                 // GV_Warp_Size_Log2_MaskL
+    31,                // GV_Warp_Size_Log2_MaskL
+    64 * 1024          // GV_Total_Vector_Registers
 };
 
 } // namespace omp
