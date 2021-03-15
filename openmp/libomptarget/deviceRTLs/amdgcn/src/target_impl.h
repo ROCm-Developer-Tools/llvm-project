@@ -19,9 +19,12 @@
 #include "interface.h"
 #include "amdgcn_interface.h"
 
-#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
+
+// subset of inttypes.h
+#define PRId64 "ld"
+#define PRIu64 "lu"
 
 #ifdef _OPENMP
 #define DEVICE
