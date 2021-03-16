@@ -146,8 +146,6 @@ public:
     return &ompd_thread_info;
   }
 #endif
-  INLINE void SaveLoopData();
-  INLINE void RestoreLoopData() const;
 
 private:
   // bits for flags: (6 used, 2 free)
@@ -160,14 +158,6 @@ private:
   static const uint8_t TaskDescr_InPar = 0x10;
   static const uint8_t TaskDescr_IsParConstr = 0x20;
   static const uint8_t TaskDescr_InParL2P = 0x40;
-
-  struct SavedLoopDescr_items {
-    int64_t loopUpperBound;
-    int64_t nextLowerBound;
-    int64_t chunk;
-    int64_t stride;
-    kmp_sched_t schedule;
-  } loopData;
 
   struct TaskDescr_items {
     uint8_t flags; // 6 bit used (see flag above)
@@ -243,6 +233,7 @@ private:
 // thread private data (struct of arrays for better coalescing)
 // tid refers here to the global thread id
 // do not support multiple concurrent kernel a this time
+
 class omptarget_nvptx_ThreadPrivateContext {
 #if OMPD_SUPPORT
   friend void __device__ ompd_init( void );
@@ -261,13 +252,6 @@ public:
   INLINE uint16_t &NumThreadsForNextParallel(int tid) {
     return nextRegion.tnum[tid];
   }
-  // schedule (for dispatch)
-  INLINE kmp_sched_t &ScheduleType(int tid) { return schedule[tid]; }
-  INLINE int64_t &Chunk(int tid) { return chunk[tid]; }
-  INLINE int64_t &LoopUpperBound(int tid) { return loopUpperBound[tid]; }
-  INLINE int64_t &NextLowerBound(int tid) { return nextLowerBound[tid]; }
-  INLINE int64_t &Stride(int tid) { return stride[tid]; }
-
   INLINE omptarget_nvptx_TeamDescr &TeamContext() { return teamContext; }
 
   INLINE void InitThreadPrivateContext(int tid);
@@ -286,12 +270,6 @@ private:
     uint16_t tnum[MAX_THREADS_PER_TEAM];
   } nextRegion;
   // schedule (for dispatch)
-  kmp_sched_t schedule[MAX_THREADS_PER_TEAM]; // remember schedule type for #for
-  int64_t chunk[MAX_THREADS_PER_TEAM];
-  int64_t loopUpperBound[MAX_THREADS_PER_TEAM];
-  // state for dispatch with dyn/guided OR static (never use both at a time)
-  int64_t nextLowerBound[MAX_THREADS_PER_TEAM];
-  int64_t stride[MAX_THREADS_PER_TEAM];
   uint64_t cnt;
 #ifdef OMPD_SUPPORT
   // The implicit parallel region around the master task in generic mode

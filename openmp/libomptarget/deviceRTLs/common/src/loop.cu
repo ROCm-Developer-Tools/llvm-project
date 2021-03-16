@@ -19,6 +19,15 @@
   #include "common/ompd-specific.h"
 #endif /*OMPD_SUPPORT*/
 
+struct DynamicScheduleTracker {
+  int64_t Chunk;
+  int64_t LoopUpperBound;
+  int64_t NextLowerBound;
+  int64_t Stride;
+  kmp_sched_t ScheduleType;
+  DynamicScheduleTracker *NextDST;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 // template class that encapsulate all the helper functions
@@ -208,7 +217,7 @@ public:
 
   INLINE static void dispatch_init(kmp_Ident *loc, int32_t threadId,
                                    kmp_sched_t schedule, T lb, T ub, ST st,
-                                   ST chunk) {
+                                   ST chunk, DynamicScheduleTracker *DST) {
     if (checkRuntimeUninitialized(loc)) {
       // In SPMD mode no need to check parallelism level - dynamic scheduling
       // may appear only in L2 parallel regions with lightweight runtime.
@@ -284,32 +293,29 @@ public:
     if (schedule == kmp_sched_static_chunk) {
       ASSERT0(LT_FUSSY, chunk > 0, "bad chunk value");
       // save sched state
-      omptarget_nvptx_threadPrivateContext->ScheduleType(tid) = schedule;
+      DST->ScheduleType = schedule;
       // save ub
-      omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid) = ub;
+      DST->LoopUpperBound = ub;
       // compute static chunk
       ST stride;
       int lastiter = 0;
       ForStaticChunk(lastiter, lb, ub, stride, chunk, threadId, tnum);
       // save computed params
-      omptarget_nvptx_threadPrivateContext->Chunk(tid) = chunk;
-      omptarget_nvptx_threadPrivateContext->NextLowerBound(tid) = lb;
-      omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
+      DST->Chunk = chunk;
+      DST->NextLowerBound = lb;
+      DST->Stride = stride;
       PRINT(LD_LOOP,
             "dispatch init (static chunk) : num threads = %d, ub =  %" PRId64
             ", next lower bound = %llu, stride = %llu\n",
-            (int)tnum,
-            omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
-            (unsigned long long)
-                omptarget_nvptx_threadPrivateContext->NextLowerBound(tid),
-            (unsigned long long)omptarget_nvptx_threadPrivateContext->Stride(
-                tid));
+            (int)tnum, DST->LoopUpperBound,
+            (unsigned long long)DST->NextLowerBound,
+            (unsigned long long)DST->Stride);
     } else if (schedule == kmp_sched_static_balanced_chunk) {
       ASSERT0(LT_FUSSY, chunk > 0, "bad chunk value");
       // save sched state
-      omptarget_nvptx_threadPrivateContext->ScheduleType(tid) = schedule;
+      DST->ScheduleType = schedule;
       // save ub
-      omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid) = ub;
+      DST->LoopUpperBound = ub;
       // compute static chunk
       ST stride;
       int lastiter = 0;
@@ -324,49 +330,45 @@ public:
       if (ub > oldUb)
         ub = oldUb;
       // save computed params
-      omptarget_nvptx_threadPrivateContext->Chunk(tid) = chunk;
-      omptarget_nvptx_threadPrivateContext->NextLowerBound(tid) = lb;
-      omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
+      DST->Chunk = chunk;
+      DST->NextLowerBound = lb;
+      DST->Stride = stride;
       PRINT(LD_LOOP,
             "dispatch init (static chunk) : num threads = %d, ub =  %" PRId64
             ", next lower bound = %llu, stride = %llu\n",
-            (int)tnum,
-            omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
-            (unsigned long long)
-                omptarget_nvptx_threadPrivateContext->NextLowerBound(tid),
+            (int)tnum, DST->LoopUpperBound,
+            (unsigned long long)DST->NextLowerBound,
             (unsigned long long)omptarget_nvptx_threadPrivateContext->Stride(
                 tid));
     } else if (schedule == kmp_sched_static_nochunk) {
       ASSERT0(LT_FUSSY, chunk == 0, "bad chunk value");
       // save sched state
-      omptarget_nvptx_threadPrivateContext->ScheduleType(tid) = schedule;
+      DST->ScheduleType = schedule;
       // save ub
-      omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid) = ub;
+      DST->LoopUpperBound = ub;
       // compute static chunk
       ST stride;
       int lastiter = 0;
       ForStaticNoChunk(lastiter, lb, ub, stride, chunk, threadId, tnum);
       // save computed params
-      omptarget_nvptx_threadPrivateContext->Chunk(tid) = chunk;
-      omptarget_nvptx_threadPrivateContext->NextLowerBound(tid) = lb;
-      omptarget_nvptx_threadPrivateContext->Stride(tid) = stride;
+      DST->Chunk = chunk;
+      DST->NextLowerBound = lb;
+      DST->Stride = stride;
       PRINT(LD_LOOP,
             "dispatch init (static nochunk) : num threads = %d, ub = %" PRId64
             ", next lower bound = %llu, stride = %llu\n",
-            (int)tnum,
-            omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
-            (unsigned long long)
-                omptarget_nvptx_threadPrivateContext->NextLowerBound(tid),
+            (int)tnum, DST->LoopUpperBound,
+            (unsigned long long)DST->NextLowerBound,
             (unsigned long long)omptarget_nvptx_threadPrivateContext->Stride(
                 tid));
     } else if (schedule == kmp_sched_dynamic || schedule == kmp_sched_guided) {
       // save data
-      omptarget_nvptx_threadPrivateContext->ScheduleType(tid) = schedule;
+      DST->ScheduleType = schedule;
       if (chunk < 1)
         chunk = 1;
-      omptarget_nvptx_threadPrivateContext->Chunk(tid) = chunk;
-      omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid) = ub;
-      omptarget_nvptx_threadPrivateContext->NextLowerBound(tid) = lb;
+      DST->Chunk = chunk;
+      DST->LoopUpperBound = ub;
+      DST->NextLowerBound = lb;
       __kmpc_barrier(loc, threadId);
       if (tid == 0) {
         omptarget_nvptx_threadPrivateContext->Cnt() = 0;
@@ -376,11 +378,8 @@ public:
       PRINT(LD_LOOP,
             "dispatch init (dyn) : num threads = %d, lb = %llu, ub = %" PRId64
             ", chunk %" PRIu64 "\n",
-            (int)tnum,
-            (unsigned long long)
-                omptarget_nvptx_threadPrivateContext->NextLowerBound(tid),
-            omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid),
-            omptarget_nvptx_threadPrivateContext->Chunk(tid));
+            (int)tnum, (unsigned long long)DST->NextLowerBound,
+            DST->LoopUpperBound, DST->Chunk);
     }
 #ifdef OMPD_SUPPORT
     ompd_set_device_thread_state(omp_state_work_parallel);
@@ -448,7 +447,8 @@ public:
   }
 
   INLINE static int dispatch_next(kmp_Ident *loc, int32_t gtid, int32_t *plast,
-                                  T *plower, T *pupper, ST *pstride) {
+                                  T *plower, T *pupper, ST *pstride,
+                                  DynamicScheduleTracker *DST) {
     if (checkRuntimeUninitialized(loc)) {
       // In SPMD mode no need to check parallelism level - dynamic scheduling
       // may appear only in L2 parallel regions with lightweight runtime.
@@ -465,14 +465,13 @@ public:
     ASSERT0(LT_FUSSY, gtid < GetNumberOfOmpThreads(checkSPMDMode(loc)),
             "current thread is not needed here; error");
     // retrieve schedule
-    kmp_sched_t schedule =
-        omptarget_nvptx_threadPrivateContext->ScheduleType(tid);
+    kmp_sched_t schedule = DST->ScheduleType;
 
     // xxx reduce to one
     if (schedule == kmp_sched_static_chunk ||
         schedule == kmp_sched_static_nochunk) {
-      T myLb = omptarget_nvptx_threadPrivateContext->NextLowerBound(tid);
-      T ub = omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid);
+      T myLb = DST->NextLowerBound;
+      T ub = DST->LoopUpperBound;
       // finished?
       if (myLb > ub) {
         PRINT(LD_LOOP, "static loop finished with myLb %lld, ub %lld\n",
@@ -480,7 +479,7 @@ public:
         return DISPATCH_FINISHED;
       }
       // not finished, save current bounds
-      ST chunk = omptarget_nvptx_threadPrivateContext->Chunk(tid);
+      ST chunk = DST->Chunk;
       *plower = myLb;
       T myUb = myLb + chunk - 1; // Clang uses i <= ub
       if (myUb > ub)
@@ -489,8 +488,8 @@ public:
       *plast = (int32_t)(myUb == ub);
 
       // increment next lower bound by the stride
-      ST stride = omptarget_nvptx_threadPrivateContext->Stride(tid);
-      omptarget_nvptx_threadPrivateContext->NextLowerBound(tid) = myLb + stride;
+      ST stride = DST->Stride;
+      DST->NextLowerBound = myLb + stride;
       PRINT(LD_LOOP, "static loop continues with myLb %lld, myUb %lld\n",
             (long long)*plower, (long long)*pupper);
       return DISPATCH_NOTFINISHED;
@@ -499,10 +498,8 @@ public:
             schedule == kmp_sched_dynamic || schedule == kmp_sched_guided,
             "bad sched");
     T myLb, myUb;
-    int finished = DynamicNextChunk(
-        myLb, myUb, omptarget_nvptx_threadPrivateContext->Chunk(tid),
-        omptarget_nvptx_threadPrivateContext->NextLowerBound(tid),
-        omptarget_nvptx_threadPrivateContext->LoopUpperBound(tid));
+    int finished = DynamicNextChunk(myLb, myUb, DST->Chunk, DST->NextLowerBound,
+                                    DST->LoopUpperBound);
 
     if (finished == FINISHED)
       return DISPATCH_FINISHED;
@@ -538,89 +535,125 @@ public:
 // KMP interface implementation (dyn loops)
 ////////////////////////////////////////////////////////////////////////////////
 
+// TODO: This is a stopgap. We probably want to expand the dispatch API to take
+//       an DST pointer which can then be allocated properly without malloc.
+DynamicScheduleTracker *THREAD_LOCAL(ThreadDSTPtr);
+
+// Create a new DST, link the current one, and define the new as current.
+static DynamicScheduleTracker *pushDST() {
+  DynamicScheduleTracker *NewDST = static_cast<DynamicScheduleTracker *>(
+      SafeMalloc(sizeof(DynamicScheduleTracker), "new DST"));
+  *NewDST = DynamicScheduleTracker({0});
+  NewDST->NextDST = ThreadDSTPtr;
+  ThreadDSTPtr = NewDST;
+  return ThreadDSTPtr;
+}
+
+// Return the current DST.
+static DynamicScheduleTracker *peekDST() { return ThreadDSTPtr; }
+
+// Pop the current DST and restore the last one.
+static void popDST() {
+  DynamicScheduleTracker *OldDST = ThreadDSTPtr->NextDST;
+  SafeFree(ThreadDSTPtr, "remove DST");
+  ThreadDSTPtr = OldDST;
+}
+
 // init
 EXTERN void __kmpc_dispatch_init_4(kmp_Ident *loc, int32_t tid,
                                    int32_t schedule, int32_t lb, int32_t ub,
                                    int32_t st, int32_t chunk) {
   PRINT0(LD_IO, "call kmpc_dispatch_init_4\n");
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<int32_t, int32_t>::dispatch_init(
-      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk);
+      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
 
 EXTERN void __kmpc_dispatch_init_4u(kmp_Ident *loc, int32_t tid,
                                     int32_t schedule, uint32_t lb, uint32_t ub,
                                     int32_t st, int32_t chunk) {
   PRINT0(LD_IO, "call kmpc_dispatch_init_4u\n");
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<uint32_t, int32_t>::dispatch_init(
-      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk);
+      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
 
 EXTERN void __kmpc_dispatch_init_8(kmp_Ident *loc, int32_t tid,
                                    int32_t schedule, int64_t lb, int64_t ub,
                                    int64_t st, int64_t chunk) {
   PRINT0(LD_IO, "call kmpc_dispatch_init_8\n");
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<int64_t, int64_t>::dispatch_init(
-      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk);
+      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
 
 EXTERN void __kmpc_dispatch_init_8u(kmp_Ident *loc, int32_t tid,
                                     int32_t schedule, uint64_t lb, uint64_t ub,
                                     int64_t st, int64_t chunk) {
   PRINT0(LD_IO, "call kmpc_dispatch_init_8u\n");
+  DynamicScheduleTracker *DST = pushDST();
   omptarget_nvptx_LoopSupport<uint64_t, int64_t>::dispatch_init(
-      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk);
+      loc, tid, (kmp_sched_t)schedule, lb, ub, st, chunk, DST);
 }
 
 // next
 EXTERN int __kmpc_dispatch_next_4(kmp_Ident *loc, int32_t tid, int32_t *p_last,
                                   int32_t *p_lb, int32_t *p_ub, int32_t *p_st) {
   PRINT0(LD_IO, "call kmpc_dispatch_next_4\n");
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<int32_t, int32_t>::dispatch_next(
-      loc, tid, p_last, p_lb, p_ub, p_st);
+      loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
 
 EXTERN int __kmpc_dispatch_next_4u(kmp_Ident *loc, int32_t tid,
                                    int32_t *p_last, uint32_t *p_lb,
                                    uint32_t *p_ub, int32_t *p_st) {
   PRINT0(LD_IO, "call kmpc_dispatch_next_4u\n");
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<uint32_t, int32_t>::dispatch_next(
-      loc, tid, p_last, p_lb, p_ub, p_st);
+      loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
 
 EXTERN int __kmpc_dispatch_next_8(kmp_Ident *loc, int32_t tid, int32_t *p_last,
                                   int64_t *p_lb, int64_t *p_ub, int64_t *p_st) {
   PRINT0(LD_IO, "call kmpc_dispatch_next_8\n");
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<int64_t, int64_t>::dispatch_next(
-      loc, tid, p_last, p_lb, p_ub, p_st);
+      loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
 
 EXTERN int __kmpc_dispatch_next_8u(kmp_Ident *loc, int32_t tid,
                                    int32_t *p_last, uint64_t *p_lb,
                                    uint64_t *p_ub, int64_t *p_st) {
   PRINT0(LD_IO, "call kmpc_dispatch_next_8u\n");
+  DynamicScheduleTracker *DST = peekDST();
   return omptarget_nvptx_LoopSupport<uint64_t, int64_t>::dispatch_next(
-      loc, tid, p_last, p_lb, p_ub, p_st);
+      loc, tid, p_last, p_lb, p_ub, p_st, DST);
 }
 
 // fini
 EXTERN void __kmpc_dispatch_fini_4(kmp_Ident *loc, int32_t tid) {
   PRINT0(LD_IO, "call kmpc_dispatch_fini_4\n");
   omptarget_nvptx_LoopSupport<int32_t, int32_t>::dispatch_fini();
+  popDST();
 }
 
 EXTERN void __kmpc_dispatch_fini_4u(kmp_Ident *loc, int32_t tid) {
   PRINT0(LD_IO, "call kmpc_dispatch_fini_4u\n");
   omptarget_nvptx_LoopSupport<uint32_t, int32_t>::dispatch_fini();
+  popDST();
 }
 
 EXTERN void __kmpc_dispatch_fini_8(kmp_Ident *loc, int32_t tid) {
   PRINT0(LD_IO, "call kmpc_dispatch_fini_8\n");
   omptarget_nvptx_LoopSupport<int64_t, int64_t>::dispatch_fini();
+  popDST();
 }
 
 EXTERN void __kmpc_dispatch_fini_8u(kmp_Ident *loc, int32_t tid) {
   PRINT0(LD_IO, "call kmpc_dispatch_fini_8u\n");
   omptarget_nvptx_LoopSupport<uint64_t, int64_t>::dispatch_fini();
+  popDST();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

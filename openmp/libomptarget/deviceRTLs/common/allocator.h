@@ -39,6 +39,12 @@ typedef enum omp_allocator_handle_t {
 #define EXTERN_SHARED(NAME)                                                    \
   NAME;                                                                        \
   OMP_PRAGMA(allocate(NAME) allocator(omp_pteam_mem_alloc))
+
+// TODO: clang should use address space 5 for omp_thread_mem_alloc, but right
+//       now that's not the case.
+#define THREAD_LOCAL(NAME)                                                     \
+  NAME [[clang::loader_uninitialized, clang::address_space(5)]]
+
 #endif
 
 #endif // OMPTARGET_ALLOCATOR_H
