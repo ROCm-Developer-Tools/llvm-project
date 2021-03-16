@@ -1354,6 +1354,19 @@ __DEVICE__ int max(int __arg1, int __arg2) {
   return (__arg1 > __arg2) ? __arg1 : __arg2;
 }
 
+__DEVICE__ unsigned int min(unsigned int __arg1, unsigned int __arg2) {
+  return (__arg1 < __arg2) ? __arg1 : __arg2;
+}
+__DEVICE__ unsigned int max(unsigned int __arg1, unsigned int __arg2) {
+  return (__arg1 > __arg2) ? __arg1 : __arg2;
+}
+__DEVICE__ unsigned long min(unsigned long __arg1, unsigned long __arg2) {
+  return (__arg1 < __arg2) ? __arg1 : __arg2;
+}
+__DEVICE__ unsigned long max(unsigned long __arg1, unsigned long __arg2) {
+  return (__arg1 > __arg2) ? __arg1 : __arg2;
+}
+
 __DEVICE__
 float max(float __x, float __y) { return fmaxf(__x, __y); }
 
