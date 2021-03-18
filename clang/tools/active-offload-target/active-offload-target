@@ -3560,36 +3560,70 @@ function get_targetid_from_codename
       _targetid=`echo $_entry | awk '{print $2}'`
    else
       _targetid="$_codename"
-      AOT_RC=1 # This is an error
    fi
    echo $_targetid
 }
 
-function get_codename_from_os()
+function get_codename_and_arch_from_os()
 {
    local _found=0
-   codename="unknown"
+   _codename="unknown"
+   _aot_arch="nvidia"
    for sysfsname in `find -L /sys/bus/pci/devices -maxdepth 2 -name uevent | xargs grep -l -E $AOT_SUPPORTED_PCI_DRIVERS` ; do
       gpuid=`cat $sysfsname | grep 'PCI_ID=' | cut -d"=" -f2 | tr '[:upper:]' '[:lower:]'`
       if [ $_found == 0 ] ; then
 	 if [ "$PRINT_NUMERIC" == 1 ] ; then 
-            codename=$gpuid
+            _codename=$gpuid
             _found=1
+	    [[ ${gpuid%:*} == 1002 ]] && _aot_arch="amdgcn"
 	 else
-            codename=$(get_codename_from_pci_table $gpuid)
-            if [ "$codename" != "unknown" ] ; then
+            _codename=$(get_codename_from_pci_table $gpuid)
+            if [ "$_codename" != "unknown" ] ; then
                _found=1
+	       [[ ${gpuid%:*} == 1002 ]] && _aot_arch="amdgcn"
             fi
          fi
       fi
    done
-   echo $codename
+   echo "$_codename:$_aot_arch"
+}
+
+function version_compare {
+   IFS='.' read -ra ver1 <<< "$1"
+   IFS='.' read -ra ver2 <<< "$2"
+   [[ ${#ver1[@]} -gt ${#ver2[@]} ]] && till=${#ver1[@]} || till=${#ver2[@]}
+   for ((i=0; i<${till}; i++)) ; do
+      local num1; local num2;
+      [[ -z ${ver1[i]} ]] && num1=0 || num1=${ver1[i]}
+      [[ -z ${ver2[i]} ]] && num2=0 || num2=${ver2[i]}
+      if [[ $num1 -gt $num2 ]] ; then
+        echo ">"; return 0
+      elif [[ $num1 -lt $num2 ]] ; then
+        echo "<"; return 0
+      fi
+   done
+   echo "="; return 0
+}
+
+function get_amd_features()
+{
+   features=""
+   kfd_version=`modinfo -F version amdgpu`
+   if [[ ! -z $kfd_version ]] ; then
+      vc=$(version_compare $kfd_version 5.9.15)
+      if [[ $vc == "=" ]] || [[ "$vc" == ">" ]] ; then
+         features=":CodeObjVer4"
+      fi
+      # TODO add features for xnack and sramecc
+   fi
+   echo $features
 }
 
 #  ===========  Main code starts here ======================
 tmp_gputable_file=/tmp/gputable$$.txt
 tmp_targetid_file=/tmp/offloadarchtable$$.txt
 AOT_RC=0
+aot_arch="nvidia"
 
 #  process args
 while [ $# -gt 0 ] ; do
@@ -3601,6 +3635,7 @@ while [ $# -gt 0 ] ; do
       --version) 	version ;;
       -c) 	        PRINT_CODENAME=1;;
       -n) 	        PRINT_NUMERIC=1;;
+      -nofeatures) 	NOFEATURES=1;;
       --) 		shift ; break;;
       *) 		break;echo $1 ignored;
    esac
@@ -3609,11 +3644,17 @@ done
 
 build_pci_to_codename_table
 build_codename_to_targetid_table
-codename=$(get_codename_from_os)
+codename_arch=$(get_codename_and_arch_from_os)
+codename=${codename_arch%:*}
+aot_arch=${codename_arch#*:}
 if [ "$PRINT_CODENAME" == 1 ] ; then 
    targetid=$codename
 else
    targetid=$(get_targetid_from_codename $codename)
+fi
+if [[ "$aot_arch" == "amdgcn" ]] && [[ "$NOFEATURES" != 1 ]] ; then
+   features=$(get_amd_features $targetid)
+   targetid="$targetid$features"
 fi
 
 # cleanup tmp search tables
@@ -3624,5 +3665,4 @@ if [ $targetid == "unknown" ] ; then
    AOT_RC=1
 fi
 echo $targetid
-
 exit $AOT_RC
