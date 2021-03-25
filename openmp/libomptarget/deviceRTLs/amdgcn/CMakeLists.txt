@@ -163,6 +163,7 @@ macro(add_cuda_bc_library)
     -xc++
     -c
     -std=c++14
+    -ffreestanding
     -target amdgcn-amd-amdhsa
     -ffreestanding
     -emit-llvm
