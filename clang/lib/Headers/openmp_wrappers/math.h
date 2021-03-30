@@ -41,6 +41,7 @@
 // which should live in stdlib.h.
 #include <stdlib.h>
 
+#ifdef __NVPTX__
 #pragma omp begin declare variant match(                                       \
     device = {arch(nvptx, nvptx64)}, implementation = {extension(match_any)})
 
@@ -51,7 +52,9 @@
 #undef __CUDA__
 
 #pragma omp end declare variant
+#endif // __NVPTX__
 
+#ifdef __AMDGCN__
 #pragma omp begin declare variant match(                                       \
     device = {arch(amdgcn)}, implementation = {extension(match_any)})
 
@@ -65,5 +68,6 @@
 
 #include <__clang_hip_math.h>
 #pragma omp end declare variant
+#endif // __AMDGCN__
 
 #endif // __CLANG_OPENMP_MATH_H__

@@ -227,6 +227,16 @@ install(
   COMPONENT clang-resource-headers)
 
 install(
+  FILES bits/wordsize.h
+  DESTINATION ${header_install_dir}/bits
+  COMPONENT clang-resource-headers)
+
+install(
+  FILES gnu/stubs.h
+  DESTINATION ${header_install_dir}/gnu
+  COMPONENT clang-resource-headers)
+
+install(
   FILES ${cuda_wrapper_files}
   DESTINATION ${header_install_dir}/cuda_wrappers
   COMPONENT clang-resource-headers)
