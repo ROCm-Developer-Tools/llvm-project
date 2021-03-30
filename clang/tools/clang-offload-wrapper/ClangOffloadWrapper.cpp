@@ -59,6 +59,11 @@ static cl::opt<std::string>
            cl::desc("Target triple for the output module"),
            cl::value_desc("triple"), cl::cat(ClangOffloadWrapperCategory));
 
+static cl::list<std::string> OffloadArchs(
+    "targetid",
+    cl::desc("targetid contains offload-arch + target offload-arch features"),
+    cl::value_desc("targetid"), cl::cat(ClangOffloadWrapperCategory));
+
 namespace {
 
 class BinaryWrapper {
@@ -68,6 +73,7 @@ class BinaryWrapper {
   StructType *EntryTy = nullptr;
   StructType *ImageTy = nullptr;
   StructType *DescTy = nullptr;
+  StructType *ImageInfoTy = nullptr;
 
 private:
   IntegerType *getSizeTTy() {
@@ -131,6 +137,27 @@ private:
 
   PointerType *getBinDescPtrTy() {
     return PointerType::getUnqual(getBinDescTy());
+  }
+
+  // This matches the runtime struct definition of __tgt_image_info
+  // declared in openmp/libomptarget/include/omptarget.h /
+  // struct __tgt_image_info {
+  //   int32_t version;
+  //   int32_t image_number;
+  //   int32_t number_images;
+  //   char* targetid;
+  //   char* target_compile_opts;
+  // };
+  StructType *getImageInfoTy() {
+    if (!ImageInfoTy)
+      ImageInfoTy = StructType::create(
+          "__tgt_image_info", Type::getInt32Ty(C), Type::getInt32Ty(C),
+          Type::getInt32Ty(C), Type::getInt8PtrTy(C), Type::getInt8PtrTy(C));
+    return ImageInfoTy;
+  }
+
+  PointerType *getImageInfoPtrTy() {
+    return PointerType::getUnqual(getImageInfoTy());
   }
 
   /// Creates binary descriptor for the given device images. Binary descriptor
@@ -247,7 +274,9 @@ private:
                               ".omp_offloading.descriptor");
   }
 
-  void createRegisterFunction(GlobalVariable *BinDesc) {
+  void createRegisterFunction(GlobalVariable *BinDesc,
+                              ArrayRef<ArrayRef<char>> Targids) {
+
     auto *FuncTy = FunctionType::get(Type::getVoidTy(C), /*isVarArg*/ false);
     auto *Func = Function::Create(FuncTy, GlobalValue::InternalLinkage,
                                   ".omp_offloading.descriptor_reg", &M);
@@ -261,6 +290,39 @@ private:
 
     // Construct function body
     IRBuilder<> Builder(BasicBlock::Create(C, "entry", Func));
+
+    // Create calls to __tgt_register_image_info for each image
+    auto *NullPtr = llvm::ConstantPointerNull::get(Builder.getInt8PtrTy());
+    auto *Zero = ConstantInt::get(getSizeTTy(), 0u);
+    auto *RegInfoFuncTy =
+        FunctionType::get(Type::getVoidTy(C), getImageInfoPtrTy(), false);
+    FunctionCallee RegInfoFuncC =
+        M.getOrInsertFunction("__tgt_register_image_info", RegInfoFuncTy);
+    unsigned int img_count = 0;
+    for (ArrayRef<char> Targid : Targids) {
+      Constant *TargidV = ConstantDataArray::get(C, Targid);
+      auto *GV = new GlobalVariable(M, TargidV->getType(), /*isConstant*/ true,
+                                    GlobalValue::InternalLinkage, TargidV,
+                                    Twine("offload_arch_" + Twine(img_count)));
+      GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+      auto *TargidVPtr =
+          ConstantExpr::getGetElementPtr(GV->getValueType(), GV, Zero);
+      TargidVPtr = ConstantExpr::getBitCast(TargidVPtr, Type::getInt8PtrTy(C));
+      auto *InfoInit = ConstantStruct::get(
+          getImageInfoTy(), ConstantInt::get(Type::getInt32Ty(C), 1),
+          ConstantInt::get(Type::getInt32Ty(C), img_count),
+          ConstantInt::get(Type::getInt32Ty(C), (uint32_t)Targids.size()),
+          TargidVPtr,
+          NullPtr // TODO: capture target-compile-opts from clang driver
+      );
+      auto *ImageInfoGV = new GlobalVariable(
+          M, InfoInit->getType(),
+          /*isConstant*/ true, GlobalValue::InternalLinkage, InfoInit,
+          Twine(".offload_image_info_" + Twine(img_count++)));
+      ImageInfoGV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+      Builder.CreateCall(RegInfoFuncC, ImageInfoGV);
+    }
+
     Builder.CreateCall(RegFuncC, BinDesc);
     Builder.CreateRetVoid();
 
@@ -300,10 +362,11 @@ public:
     M.setTargetTriple(Target);
   }
 
-  const Module &wrapBinaries(ArrayRef<ArrayRef<char>> Binaries) {
+  const Module &wrapBinaries(ArrayRef<ArrayRef<char>> Binaries,
+                             ArrayRef<ArrayRef<char>> Targids) {
     GlobalVariable *Desc = createBinDesc(Binaries);
     assert(Desc && "no binary descriptor");
-    createRegisterFunction(Desc);
+    createRegisterFunction(Desc, Targids);
     createUnregisterFunction(Desc);
     return M;
   }
@@ -365,9 +428,16 @@ int main(int argc, const char **argv) {
     return 1;
   }
 
+  SmallVector<ArrayRef<char>, 4u> Targids;
+  Targids.reserve(OffloadArchs.size());
+  for (unsigned i = 0; i != OffloadArchs.size(); ++i) {
+    Targids.emplace_back(OffloadArchs[i].data(), OffloadArchs[i].size());
+  }
+
   // Create a wrapper for device binaries and write its bitcode to the file.
   WriteBitcodeToFile(BinaryWrapper(Target).wrapBinaries(
-                         makeArrayRef(Images.data(), Images.size())),
+                         makeArrayRef(Images.data(), Images.size()),
+                         makeArrayRef(Targids.data(), Targids.size())),
                      Out.os());
   if (Out.os().has_error()) {
     reportError(createFileError(Output, Out.os().error()));

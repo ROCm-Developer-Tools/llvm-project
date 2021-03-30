@@ -234,7 +234,7 @@ void RTLsTy::LoadRTLs() {
         dlsym(dynlib_handle, "__tgt_rtl_unregister_lib");
   }
   delete[] libomptarget_dir_name;
-  DP("RTLs loaded!\n");
+  DP("%ld RTLs loaded!\n", AllRTLs.size());
 
   return;
 }
@@ -340,18 +340,93 @@ void RTLsTy::RegisterRequires(int64_t flags) {
      flags, RequiresFlags);
 }
 
+#include <dlfcn.h>
+#include <linux/limits.h>
+#include <string.h>
+#include <sys/stat.h>
+////////////////////////////////////////////////////////////////////////////////
+/// Query active GPU targetid information by calling active-offload-target
+static void __tgt_get_active_offload_env(__tgt_active_offload_env *active_env,
+                                         char *env_buffer,
+                                         size_t env_buffer_size) {
+  void *handle = dlopen("libomptarget.so", RTLD_NOW);
+  if (!handle)
+    DP("dlopen() failed: %s\n", dlerror());
+  char *libomptarget_dir_name = new char[PATH_MAX];
+  if (dlinfo(handle, RTLD_DI_ORIGIN, libomptarget_dir_name) == -1)
+    DP("RTLD_DI_ORIGIN failed: %s\n", dlerror());
+  std::string cmd;
+  cmd.assign(libomptarget_dir_name).append("/../bin/active-offload-target");
+  struct stat stat_buffer;
+  if (stat(cmd.c_str(), &stat_buffer) == 0) {
+    FILE *stream = popen(cmd.c_str(), "r");
+    while (fgets(env_buffer, env_buffer_size, stream) != NULL)
+      ;
+    pclose(stream);
+    active_env->active_target = env_buffer;
+    size_t slen = strlen(active_env->active_target);
+    env_buffer[slen - 1] = '\0'; // terminate string before line feed
+    env_buffer += slen;          // To store next value in env_buffer
+  } else {
+    DP("Missing active-offload-target command at %s \n", cmd.c_str());
+  }
+  delete[] libomptarget_dir_name;
+}
+
+static bool _ImageIsCompatibleWithEnv(__tgt_image_info *img_info,
+                                      __tgt_active_offload_env *active_env) {
+  // get_image_info will return null if no image information was registered.
+  // If no image information, assume application built with old compiler and
+  // check each image.
+  if (!img_info)
+    return true;
+
+  //  Currently, this strcmp forces only codeobjV4 images to work
+  //             when active supports codeobjV4
+  //  FIXME: If active image has codobjV4 then any image is acceptable
+  //         MUST Still fail if image is codeobjV4 and active has
+  //         no value.
+  if (strcmp(img_info->targetid, active_env->active_target))
+    return false;
+
+  // FIXME: add feature comparisons here
+  return true;
+}
+
 void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
+
+  // Get the current active offload environment
+  __tgt_active_offload_env offload_env;
+  size_t env_buffer_size = 1024;
+  char *env_buffer = (char *)malloc(env_buffer_size);
+  __tgt_get_active_offload_env(&offload_env, env_buffer, env_buffer_size);
+
   PM->RTLsMtx.lock();
   // Register the images with the RTLs that understand them, if any.
   for (int32_t i = 0; i < desc->NumDeviceImages; ++i) {
     // Obtain the image.
     __tgt_device_image *img = &desc->DeviceImages[i];
 
+    // Get corresponding image information
+    __tgt_image_info *img_info = __tgt_get_image_info(i);
+
     RTLInfoTy *FoundRTL = NULL;
 
     // Scan the RTLs that have associated images until we find one that supports
     // the current image.
     for (auto &R : AllRTLs) {
+
+      if (!_ImageIsCompatibleWithEnv(img_info, &offload_env)) {
+        DP("Image w/targetid %s NOT compatible to active %s,\n		skip "
+           "check of RTL %s ...\n",
+           img_info->targetid, offload_env.active_target, R.RTLName.c_str());
+        continue;
+      } else {
+        DP("TARGETID %s compatible with active target %s,\n		"
+           "checking RTL %s ...\n",
+           img_info->targetid, offload_env.active_target, R.RTLName.c_str());
+      }
+
       if (!R.is_valid_binary(img)) {
         DP("Image " DPxMOD " is NOT compatible with RTL %s!\n",
             DPxPTR(img->ImageStart), R.RTLName.c_str());
@@ -400,8 +475,8 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
       TranslationTable &TransTable =
           (PM->HostEntriesBeginToTransTable)[desc->HostEntriesBegin];
 
-      DP("Registering image " DPxMOD " with RTL %s!\n",
-          DPxPTR(img->ImageStart), R.RTLName.c_str());
+      DP("Registered image " DPxMOD " with RTL %s and targid %s !\n\n",
+         DPxPTR(img->ImageStart), R.RTLName.c_str(), img_info->targetid);
       RegisterImageIntoTranslationTable(TransTable, R, img);
       PM->TrlTblMtx.unlock();
       FoundRTL = &R;

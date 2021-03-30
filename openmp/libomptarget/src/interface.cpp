@@ -105,6 +105,33 @@ EXTERN void __tgt_register_lib(__tgt_bin_desc *desc) {
   PM->RTLs.RegisterLib(desc);
 }
 
+// FIXME: malloc these with first call to register_image_info that now
+//        contains number of images.
+#define __TGT_MAX_IMAGES 16
+static __tgt_image_info *__tgt_AllImageInfos[__TGT_MAX_IMAGES];
+static bool __tgt_ImageInfoIsValid[__TGT_MAX_IMAGES] = {false};
+
+////////////////////////////////////////////////////////////////////////////////
+/// adds a target shared library to the target execution image
+EXTERN void __tgt_register_image_info(__tgt_image_info *imageInfo) {
+  DP(" register_image_info image %d of %d  targetid %s VERSION:%d\n",
+     imageInfo->image_number, imageInfo->number_images, imageInfo->targetid,
+     imageInfo->version);
+  if ((imageInfo->image_number + 1) > __TGT_MAX_IMAGES)
+    printf("ERROR: Too many images\n"); // FIXME: use malloc
+  __tgt_AllImageInfos[imageInfo->image_number] = imageInfo;
+  __tgt_ImageInfoIsValid[imageInfo->image_number] = true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// Return image information if it was registered
+EXTERN __tgt_image_info *__tgt_get_image_info(unsigned image_number) {
+  if (__tgt_ImageInfoIsValid[image_number])
+    return __tgt_AllImageInfos[image_number];
+  else
+    return nullptr;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// unloads a target shared library
 EXTERN void __tgt_unregister_lib(__tgt_bin_desc *desc) {

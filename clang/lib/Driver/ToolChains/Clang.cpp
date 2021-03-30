@@ -4117,10 +4117,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   InputInfoList ModuleHeaderInputs;
   const InputInfo *CudaDeviceInput = nullptr;
-  const InputInfo *OpenMPDeviceInput = nullptr;
+  const InputInfo *OpenMPHostInput = nullptr;
   for (const InputInfo &I : Inputs) {
     if (&I == &Input) {
       // This is the primary input.
+      // For OpenMP offload, the device pass depends on host pass
     } else if (IsHeaderModulePrecompile &&
                types::getPrecompiledType(I.getType()) == types::TY_PCH) {
       types::ID Expected = HeaderModuleInput.getType();
@@ -4132,8 +4133,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       ModuleHeaderInputs.push_back(I);
     } else if ((IsCuda || IsHIP) && !CudaDeviceInput) {
       CudaDeviceInput = &I;
-    } else if (IsOpenMPDevice && !OpenMPDeviceInput) {
-      OpenMPDeviceInput = &I;
+    } else if (IsOpenMPDevice && !OpenMPHostInput) {
+      OpenMPHostInput = &I;
     } else {
       llvm_unreachable("unexpectedly given multiple inputs");
     }
@@ -6390,9 +6391,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-disable-promote-alloca-to-vector=true");
 
     CmdArgs.push_back("-fopenmp-is-device");
-    if (OpenMPDeviceInput) {
+    if (OpenMPHostInput) {
       CmdArgs.push_back("-fopenmp-host-ir-file-path");
-      CmdArgs.push_back(Args.MakeArgString(OpenMPDeviceInput->getFilename()));
+      CmdArgs.push_back(Args.MakeArgString(OpenMPHostInput->getFilename()));
     }
   }
 
@@ -7606,9 +7607,34 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  // Add inputs.
+  // Get the Code Object Version used by all offload-archs in this compilation
+  unsigned CodeObjVer = 0;
+  auto TCs = C.getOffloadToolChains<Action::OFK_OpenMP>();
+  for (auto II = TCs.first, IE = TCs.second; II != IE; ++II) {
+    auto TC = II->second;
+    if (TC->getArch() == llvm::Triple::amdgcn)
+      CodeObjVer = getOrCheckAMDGPUCodeObjectVersion(C.getDriver(), Args);
+  }
+
+  // Add inputs with targetid
   for (const InputInfo &I : Inputs) {
     assert(I.isFilename() && "Invalid input.");
+    if (I.getAction() && I.getAction()->getOffloadingArch()) {
+      std::string targetid("--targetid=");
+      targetid.append(I.getAction()->getOffloadingArch());
+      // targetid could have user specified features such as :xnack-:sramecc+
+      // so replace ":" with "__" in targetid used for clang-offload-wrapper.
+      size_t start_pos = 0;
+      while ((start_pos = targetid.find(":", start_pos)) != std::string::npos) {
+        targetid.replace(start_pos, 1, "__");
+        start_pos += 2;
+      }
+      if (CodeObjVer > 3) // Add implied CodeObjVer feature.
+        targetid.append(
+            Args.MakeArgString(Twine("__CodeObjVer") + Twine(CodeObjVer)));
+      // FIXME: Add feature for cuda id version here
+      CmdArgs.push_back(Args.MakeArgString(targetid.c_str()));
+    }
     CmdArgs.push_back(I.getFilename());
   }
 

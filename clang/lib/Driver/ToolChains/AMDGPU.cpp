@@ -380,6 +380,8 @@ void amdgpu::getAMDGPUTargetFeatures(const Driver &D,
   // Add target ID features to -target-feature options. No diagnostics should
   // be emitted here since invalid target ID is diagnosed at other places.
   StringRef TargetID = Args.getLastArgValue(options::OPT_mcpu_EQ);
+  if (TargetID.empty())
+    TargetID = Args.getLastArgValue(options::OPT_march_EQ);
   if (!TargetID.empty()) {
     llvm::StringMap<bool> FeatureMap;
     auto OptionalGpuArch = parseTargetID(Triple, TargetID, &FeatureMap);

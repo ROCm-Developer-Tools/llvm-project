@@ -3525,8 +3525,10 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
     if (!Opts.OpenMPUseTLS)
       GenerateArg(Args, OPT_fnoopenmp_use_tls, SA);
 
-    if (Opts.OpenMPIsDevice)
+    if (Opts.OpenMPIsDevice) {
+      printf("    COMPILER INVOKE GENERATING FLAG openmp_is_device \n");
       GenerateArg(Args, OPT_fopenmp_is_device, SA);
+    }
 
     if (Opts.OpenMPIRBuilder)
       GenerateArg(Args, OPT_fopenmp_enable_irbuilder, SA);

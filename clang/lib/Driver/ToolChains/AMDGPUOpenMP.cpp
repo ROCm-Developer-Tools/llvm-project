@@ -356,29 +356,61 @@ const char *AMDGCN::OpenMPLinker::constructLlcCommand(
   return LlcOutputFile;
 }
 
+//  Similar to AMDGCN::Linker::constructLldCommand in HIP.cpp
+//  FIXME: Add Ron's change to support GetEnv("ROCM_LLD_ARGS")
 void AMDGCN::OpenMPLinker::constructLldCommand(
     Compilation &C, const JobAction &JA, const InputInfoList &Inputs,
     const InputInfo &Output, const llvm::opt::ArgList &Args,
     const char *InputFileName) const {
   // Construct lld command.
   // The output from ld.lld is an HSA code object file.
-  ArgStringList LldArgs{"-flavor",    "gnu", "--no-undefined",
-                        "-shared",    "-o",  Output.getFilename(),
-                        InputFileName};
+  ArgStringList LldArgs{"-flavor", "gnu", "--no-undefined", "-shared",
+                        "-plugin-opt=-amdgpu-internalize-symbols"};
 
-  // Get the environment variable ROCM_LLD_ARGS and add to lld.
-  Optional<std::string> OptEnv = llvm::sys::Process::GetEnv("ROCM_LLD_ARGS");
-  if (OptEnv.hasValue()) {
-    SmallVector<StringRef, 8> Envs;
-    SplitString(OptEnv.getValue(), Envs);
-    for (StringRef Env : Envs)
-      LldArgs.push_back(Args.MakeArgString(Env.trim()));
+  auto &TC = getToolChain();
+  auto &D = TC.getDriver();
+  assert(!Inputs.empty() && "Must have at least one input.");
+  addLTOOptions(TC, Args, LldArgs, Output, Inputs[0],
+                D.getLTOMode() == LTOK_Thin);
+
+  // Extract all the -m options
+  std::vector<llvm::StringRef> Features;
+  amdgpu::getAMDGPUTargetFeatures(D, TC.getTriple(), Args, Features);
+
+  // Add features to mattr such as cumode
+  std::string MAttrString = "-plugin-opt=-mattr=";
+  for (auto OneFeature : unifyTargetFeatures(Features)) {
+    MAttrString.append(Args.MakeArgString(OneFeature));
+    if (OneFeature != Features.back())
+      MAttrString.append(",");
+  }
+  if (!Features.empty())
+    LldArgs.push_back(Args.MakeArgString(MAttrString));
+
+  for (const Arg *A : Args.filtered(options::OPT_mllvm)) {
+    LldArgs.push_back(
+        Args.MakeArgString(Twine("-plugin-opt=") + A->getValue(0)));
   }
 
+  Arg *GTune =
+      Args.getLastArg(options::OPT_gTune_Group, options::OPT_ggdbN_Group);
+  if (GTune && !GTune->getOption().matches(options::OPT_glldb) &&
+      !GTune->getOption().matches(options::OPT_gsce)) {
+    LldArgs.push_back("-plugin-opt=-amdgpu-spill-cfi-saved-regs");
+    LldArgs.push_back("-plugin-opt=-disable-dwarf-locations");
+  }
+
+  if (C.getDriver().isSaveTempsEnabled())
+    LldArgs.push_back("-save-temps");
+
+  addLinkerCompressDebugSectionsOption(TC, Args, LldArgs);
+
+  LldArgs.append({"-o", Output.getFilename()});
+  // Only a single input, the output of llc
+  LldArgs.push_back(InputFileName);
   const char *Lld = Args.MakeArgString(getToolChain().GetProgramPath("lld"));
-  C.addCommand(std::make_unique<Command>(
-      JA, *this, ResponseFileSupport::AtFileCurCP(), Lld, LldArgs, Inputs,
-      InputInfo(&JA, Args.MakeArgString(Output.getFilename()))));
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         Lld, LldArgs, Inputs, Output));
 }
 
 // For amdgcn the inputs of the linker job are device bitcode and output is
@@ -394,7 +426,9 @@ void AMDGCN::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
 
   assert(getToolChain().getTriple().isAMDGCN() && "Unsupported target");
 
-  StringRef GPUArch = Args.getLastArgValue(options::OPT_march_EQ);
+  StringRef GPUArch =
+      getProcessorFromTargetID(getToolChain().getTriple(),
+                               getToolChain().getTriple().getEnvironmentName());
   assert(GPUArch.startswith("gfx") && "Unsupported sub arch");
 
   // Prefix for temporary file name.
@@ -434,12 +468,10 @@ void AMDGPUOpenMPToolChain::addClangTargetOptions(
     Action::OffloadKind DeviceOffloadingKind) const {
   HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
-  StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
+  StringRef GpuArch =
+      getProcessorFromTargetID(getTriple(), getTriple().getEnvironmentName());
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
-  (void) GpuArch;
-  assert((DeviceOffloadingKind == Action::OFK_HIP ||
-          DeviceOffloadingKind == Action::OFK_OpenMP) &&
-         "Only HIP offloading kinds are supported for GPUs.");
+
   auto Kind = llvm::AMDGPU::parseArchAMDGCN(GpuArch);
   const StringRef CanonArch = llvm::AMDGPU::getArchNameAMDGCN(Kind);
 

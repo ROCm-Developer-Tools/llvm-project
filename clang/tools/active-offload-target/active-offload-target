@@ -3612,7 +3612,7 @@ function get_amd_features()
    if [[ ! -z $kfd_version ]] ; then
       vc=$(version_compare $kfd_version 5.9.15)
       if [[ $vc == "=" ]] || [[ "$vc" == ">" ]] ; then
-         features=":CodeObjVer4"
+         features="__CodeObjVer4"
       fi
       # TODO add features for xnack and sramecc
    fi
