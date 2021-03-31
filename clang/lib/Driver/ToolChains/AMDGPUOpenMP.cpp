@@ -408,6 +408,16 @@ void AMDGCN::OpenMPLinker::constructLldCommand(
   LldArgs.append({"-o", Output.getFilename()});
   // Only a single input, the output of llc
   LldArgs.push_back(InputFileName);
+
+  // Get the environment variable ROCM_LLD_ARGS and add to lld.
+  Optional<std::string> OptEnv = llvm::sys::Process::GetEnv("ROCM_LLD_ARGS");
+  if (OptEnv.hasValue()) {
+    SmallVector<StringRef, 8> Envs;
+    SplitString(OptEnv.getValue(), Envs);
+    for (StringRef Env : Envs)
+      LldArgs.push_back(Args.MakeArgString(Env.trim()));
+  }
+
   const char *Lld = Args.MakeArgString(getToolChain().GetProgramPath("lld"));
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
                                          Lld, LldArgs, Inputs, Output));
