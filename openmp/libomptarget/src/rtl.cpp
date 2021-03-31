@@ -383,12 +383,14 @@ static bool _ImageIsCompatibleWithEnv(__tgt_image_info *img_info,
   if (!img_info)
     return true;
 
-  //  Currently, this strcmp forces only codeobjV4 images to work
+  //  Currently, these strcmp's forces only codeobjV4 or gnu images to work
   //             when active supports codeobjV4
   //  FIXME: If active image has codobjV4 then any image is acceptable
   //         MUST Still fail if image is codeobjV4 and active has
   //         no value.
-  if (strcmp(img_info->targetid, active_env->active_target))
+  // if target not the active env AND the target is not gnu, then no match
+  if (strcmp(img_info->targetid, active_env->active_target) &&
+      strcmp(img_info->targetid, "gnu"))
     return false;
 
   // FIXME: add feature comparisons here
@@ -417,7 +419,6 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
     // Scan the RTLs that have associated images until we find one that supports
     // the current image.
     for (auto &R : AllRTLs) {
-
       if (!_ImageIsCompatibleWithEnv(img_info, &offload_env)) {
         DP("Image w/targetid %s NOT compatible to active %s,\n		skip "
            "check of RTL %s ...\n",
