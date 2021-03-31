@@ -355,10 +355,12 @@ static void __tgt_get_active_offload_env(__tgt_active_offload_env *active_env,
   char *libomptarget_dir_name = new char[PATH_MAX];
   if (dlinfo(handle, RTLD_DI_ORIGIN, libomptarget_dir_name) == -1)
     DP("RTLD_DI_ORIGIN failed: %s\n", dlerror());
-  std::string cmd;
-  cmd.assign(libomptarget_dir_name).append("/../bin/active-offload-target");
+  std::string cmd_bin;
+  cmd_bin.assign(libomptarget_dir_name).append("/../bin/active-offload-target");
   struct stat stat_buffer;
-  if (stat(cmd.c_str(), &stat_buffer) == 0) {
+  if (stat(cmd_bin.c_str(), &stat_buffer) == 0) {
+    // Add flag to print required runtime features
+    std::string cmd = cmd_bin.append(" -r");
     FILE *stream = popen(cmd.c_str(), "r");
     while (fgets(env_buffer, env_buffer_size, stream) != NULL)
       ;
@@ -368,7 +370,7 @@ static void __tgt_get_active_offload_env(__tgt_active_offload_env *active_env,
     env_buffer[slen - 1] = '\0'; // terminate string before line feed
     env_buffer += slen;          // To store next value in env_buffer
   } else {
-    DP("Missing active-offload-target command at %s \n", cmd.c_str());
+    DP("Missing active-offload-target command at %s \n", cmd_bin.c_str());
   }
   delete[] libomptarget_dir_name;
 }

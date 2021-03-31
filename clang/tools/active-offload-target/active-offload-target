@@ -58,7 +58,7 @@ function usage(){
     -h  Print this help message
     -n  Prints numeric pci id, useful to fix tables if getting unknown targetid
     -c  Prints the codename instead of targetid
-    -nofeatures Do not print the current active features in the targetid. 
+    -r  Print compiler required runtime options
 
    active-offload-target uses two internal tables that need regular maintenance
    to support new GPUs. The internal tables can be overridden with environment 
@@ -3605,7 +3605,7 @@ function version_compare {
    echo "="; return 0
 }
 
-function get_amd_features()
+function get_required_runtime_features()
 {
    features=""
    kfd_version=`modinfo -F version amdgpu`
@@ -3614,8 +3614,8 @@ function get_amd_features()
       if [[ $vc == "=" ]] || [[ "$vc" == ">" ]] ; then
          features="__CodeObjVer4"
       fi
-      # TODO add features for xnack and sramecc
    fi
+   # TODO add feature for cuda required runtime version
    echo $features
 }
 
@@ -3635,7 +3635,7 @@ while [ $# -gt 0 ] ; do
       --version) 	version ;;
       -c) 	        PRINT_CODENAME=1;;
       -n) 	        PRINT_NUMERIC=1;;
-      -nofeatures) 	NOFEATURES=1;;
+      -r) 	        REQUIRED_RUNTIME=1;;
       --) 		shift ; break;;
       *) 		break;echo $1 ignored;
    esac
@@ -3652,8 +3652,8 @@ if [ "$PRINT_CODENAME" == 1 ] ; then
 else
    targetid=$(get_targetid_from_codename $codename)
 fi
-if [[ "$aot_arch" == "amdgcn" ]] && [[ "$NOFEATURES" != 1 ]] ; then
-   features=$(get_amd_features $targetid)
+if [[ "$aot_arch" == "amdgcn" ]] && [[ "$REQUIRED_RUNTIME" == 1 ]] ; then
+   features=$(get_required_runtime_features $targetid)
    targetid="$targetid$features"
 fi
 
