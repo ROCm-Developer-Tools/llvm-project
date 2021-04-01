@@ -7374,6 +7374,7 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   //   -inputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
 
   ArgStringList CmdArgs;
+  StringRef TargetID;
 
   // Get the type.
   CmdArgs.push_back(TCArgs.MakeArgString(
@@ -7405,11 +7406,26 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
     Triples += Action::GetOffloadKindName(CurKind);
     Triples += '-';
     Triples += CurTC->getTriple().normalize();
-    if ((CurKind == Action::OFK_HIP || CurKind == Action::OFK_OpenMP ||
-         CurKind == Action::OFK_Cuda) &&
+    if ((CurKind == Action::OFK_HIP || CurKind == Action::OFK_Cuda) &&
         CurDep->getOffloadingArch()) {
+      // clang-offload-bundler requires all 4 components in bundle entry ID.
+      // Add an extra '-' to represent empty triple.environment.
       Triples += '-';
       Triples += CurDep->getOffloadingArch();
+    }
+    if ((CurKind == Action::OFK_OpenMP || CurKind == Action::OFK_Cuda)) {
+      Triples += "-";
+      // Extract TargetID from TC argument list
+      for (uint ArgIndex = 0; ArgIndex < TCArgs.size(); ArgIndex++) {
+        StringRef ArchStr = StringRef(TCArgs.getArgString(ArgIndex));
+        auto Arch = ArchStr.startswith_lower("-march=");
+        if (Arch) {
+          TargetID = ArchStr.substr(7);
+          Triples += "-";
+          break;
+        }
+      }
+      Triples += TargetID.str();
     }
   }
   CmdArgs.push_back(TCArgs.MakeArgString(Triples));
@@ -7620,20 +7636,20 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
   for (const InputInfo &I : Inputs) {
     assert(I.isFilename() && "Invalid input.");
     if (I.getAction() && I.getAction()->getOffloadingArch()) {
-      std::string targetid("--targetid=");
-      targetid.append(I.getAction()->getOffloadingArch());
+      std::string TargetID("--targetid=");
+      TargetID.append(I.getAction()->getOffloadingArch());
       // targetid could have user specified features such as :xnack-:sramecc+
       // so replace ":" with "__" in targetid used for clang-offload-wrapper.
       size_t start_pos = 0;
-      while ((start_pos = targetid.find(":", start_pos)) != std::string::npos) {
-        targetid.replace(start_pos, 1, "__");
+      while ((start_pos = TargetID.find(":", start_pos)) != std::string::npos) {
+        TargetID.replace(start_pos, 1, "__");
         start_pos += 2;
       }
       if (CodeObjVer > 3) // Add implied CodeObjVer feature.
-        targetid.append(
+        TargetID.append(
             Args.MakeArgString(Twine("__CodeObjVer") + Twine(CodeObjVer)));
       // FIXME: Add feature for cuda id version here
-      CmdArgs.push_back(Args.MakeArgString(targetid.c_str()));
+      CmdArgs.push_back(Args.MakeArgString(TargetID.c_str()));
     }
     CmdArgs.push_back(I.getFilename());
   }

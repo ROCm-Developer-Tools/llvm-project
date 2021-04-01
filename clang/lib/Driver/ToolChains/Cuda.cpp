@@ -598,12 +598,12 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_v))
     CmdArgs.push_back("-v");
 
-  StringRef GPUArch =
+  StringRef TargetID =
       Args.getLastArgValue(options::OPT_march_EQ);
-  assert(!GPUArch.empty() && "At least one GPU Arch required for ptxas.");
+  assert(!TargetID.empty() && "At least one GPU Arch required for ptxas.");
 
   CmdArgs.push_back("-arch");
-  CmdArgs.push_back(Args.MakeArgString(GPUArch));
+  CmdArgs.push_back(Args.MakeArgString(TargetID));
 
   // Add paths specified in LIBRARY_PATH environment variable as -L options.
   addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
@@ -635,7 +635,7 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(CubinF);
   }
 
-  AddStaticDeviceLibs(C, *this, JA, Inputs, Args, CmdArgs, "nvptx", GPUArch,
+  AddStaticDeviceLibs(C, *this, JA, Inputs, Args, CmdArgs, "nvptx", TargetID,
                       false, false);
 
   const char *NVLinkWrapper =
@@ -685,8 +685,8 @@ void CudaToolChain::addClangTargetOptions(
     Action::OffloadKind DeviceOffloadingKind) const {
   HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
-  StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
-  assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
+  StringRef TargetID = DriverArgs.getLastArgValue(options::OPT_march_EQ);
+  assert(!TargetID.empty() && "Must have an explicit GPU arch.");
   assert((DeviceOffloadingKind == Action::OFK_OpenMP ||
           DeviceOffloadingKind == Action::OFK_Cuda) &&
          "Only OpenMP or CUDA offloading kinds are supported for NVIDIA GPUs.");
@@ -702,14 +702,14 @@ void CudaToolChain::addClangTargetOptions(
   if (DriverArgs.hasArg(options::OPT_nogpulib))
     return;
 
-  std::string LibDeviceFile = CudaInstallation.getLibDeviceFile(GpuArch);
+  std::string LibDeviceFile = CudaInstallation.getLibDeviceFile(TargetID);
 
   if (LibDeviceFile.empty()) {
     if (DeviceOffloadingKind == Action::OFK_OpenMP &&
         DriverArgs.hasArg(options::OPT_S))
       return;
 
-    getDriver().Diag(diag::err_drv_no_cuda_libdevice) << GpuArch;
+    getDriver().Diag(diag::err_drv_no_cuda_libdevice) << TargetID;
     return;
   }
 
@@ -756,10 +756,10 @@ void CudaToolChain::addClangTargetOptions(
 
   if (DeviceOffloadingKind == Action::OFK_OpenMP) {
     std::string BitcodeSuffix =
-        "nvptx-cuda_" + CudaVersionStr + "-" + GpuArch.str();
+        "nvptx-cuda_" + CudaVersionStr + "-" + TargetID.str();
     addOpenMPDeviceRTL(getDriver(), DriverArgs, CC1Args, BitcodeSuffix,
                        getTriple());
-    AddStaticDeviceLibs(getDriver(), DriverArgs, CC1Args, "nvptx", GpuArch,
+    AddStaticDeviceLibs(getDriver(), DriverArgs, CC1Args, "nvptx", TargetID,
                         /* bitcode SDL?*/ true, /* PostClang Link? */ true);
   }
 }
