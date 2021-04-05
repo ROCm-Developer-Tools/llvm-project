@@ -7410,11 +7410,12 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
         CurDep->getOffloadingArch()) {
       // clang-offload-bundler requires all 4 components in bundle entry ID.
       // Add an extra '-' to represent empty triple.environment.
-      Triples += '-';
+      Triples += "--";
       Triples += CurDep->getOffloadingArch();
     }
     if ((CurKind == Action::OFK_OpenMP || CurKind == Action::OFK_Cuda)) {
-      Triples += "-";
+      Triples += "--";
+      /*
       // Extract TargetID from TC argument list
       for (uint ArgIndex = 0; ArgIndex < TCArgs.size(); ArgIndex++) {
         StringRef ArchStr = StringRef(TCArgs.getArgString(ArgIndex));
@@ -7426,6 +7427,8 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
         }
       }
       Triples += TargetID.str();
+      */
+      Triples += CurTC->getTargetID();
     }
   }
   CmdArgs.push_back(TCArgs.MakeArgString(Triples));

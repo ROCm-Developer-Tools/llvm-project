@@ -712,8 +712,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
   // OpenMP
   //
   // Generate an instance of toolchain for each user specified target
-  // from the -fopenmp-targets option. The environment value
-  // (4th field in triple) may now contain targetid value. This value
+  // from the -fopenmp-targets option. The march value
+  // may now contain targetid value. This value
   // may include features that would result in different and potentially
   // multiple offload images.
 
@@ -764,7 +764,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
               C.setContainsError();
               return;
             }
-            legacy_march_values.push_back(std::string("-").append(IdStr.str()));
+            legacy_march_values.push_back(IdStr.str());
           }
         }
         A->claim();
@@ -774,39 +774,38 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     llvm::StringMap<const char *> FoundNormalizedTriples;
     unsigned used_march_values = 0;
     for (const char *CmdLineVal : OpenMPTargets->getValues()) {
-      llvm::Triple CmdLineTT(CmdLineVal);
-
-      if (!CmdLineTT.hasEnvironment() &&
-          (used_march_values >= legacy_march_values.size())) {
-        Diag(diag::err_drv_missing_Xopenmptarget_or_march);
-        return;
-      }
-      // If targetid not specified in triple, append legacy march value
-      std::string Val =
-          CmdLineTT.hasEnvironment()
-              ? std::string(CmdLineVal)
-              : std::string(CmdLineVal)
-                    .append(legacy_march_values[used_march_values++]);
-
-      llvm::Triple TT(Val.c_str());
+      llvm::Triple TT(CmdLineVal);
+      std::string TargetID;
+      llvm::StringMap<bool> Features;
+      StringRef IdStr = legacy_march_values[used_march_values++];
+      auto ArchStr = parseTargetID(TT, IdStr, &Features);
+      if (!ArchStr) {
+        C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
+        C.setContainsError();
+      } else
+        TargetID = getCanonicalTargetID(ArchStr.getValue(), Features);
 
       std::string NormalizedName = TT.normalize();
+      if (TT.hasEnvironment())
+        NormalizedName = Twine(TT.normalize() + "-" + TargetID).str();
+      else
+        NormalizedName = Twine(TT.normalize() + "--" + TargetID).str();
 
       // Make sure we don't have a duplicate triple.
       auto Duplicate = FoundNormalizedTriples.find(NormalizedName);
       if (Duplicate != FoundNormalizedTriples.end()) {
         Diag(clang::diag::warn_drv_omp_offload_target_duplicate)
-            << Val << Duplicate->second;
+            << NormalizedName << Duplicate->second;
         continue;
       }
 
       // Store the current triple so that we can check for duplicates in the
       // following iterations.
-      FoundNormalizedTriples[NormalizedName] = Val.c_str();
+      FoundNormalizedTriples[NormalizedName] = NormalizedName.c_str();
 
       // If the specified target is invalid, emit a diagnostic.
       if (TT.getArch() == llvm::Triple::UnknownArch) {
-        Diag(clang::diag::err_drv_invalid_omp_target) << Val;
+        Diag(clang::diag::err_drv_invalid_omp_target) << NormalizedName;
         return;
       }
       const ToolChain *TC;
@@ -817,14 +816,14 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
             C.getSingleOffloadToolChain<Action::OFK_Host>();
         assert(HostTC && "Host toolchain should be always defined.");
         auto &DeviceTC =
-            ToolChains[TT.str() + "/" + HostTC->getTriple().normalize()];
+            ToolChains[NormalizedName + "/" + HostTC->getTriple().normalize()];
         if (!DeviceTC) {
           if (TT.isNVPTX())
             DeviceTC = std::make_unique<toolchains::CudaToolChain>(
-                *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP);
+                *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP, TargetID);
           else if (TT.isAMDGCN())
             DeviceTC = std::make_unique<toolchains::AMDGPUOpenMPToolChain>(
-                *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP);
+                *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP, TargetID);
           else
             assert(DeviceTC && "Device toolchain not defined.");
         }
@@ -3287,8 +3286,7 @@ class OffloadingActionBuilder final {
       auto OpenMPTCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
       for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
            ++TI) {
-        GpuArchList.push_back(
-            TI->second->getTriple().getEnvironmentName().data());
+        GpuArchList.push_back(TI->second->getTriple().getEnvironmentName().data());
         ToolChains.push_back(TI->second);
       }
 

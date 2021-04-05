@@ -287,7 +287,7 @@ const char *AMDGCN::OpenMPLinker::constructOptCommand(
   auto &D = TC.getDriver();
   // Extract all the -m options
   std::vector<llvm::StringRef> Features;
-  amdgpu::getAMDGPUTargetFeatures(D, TC.getTriple(), Args, Features);
+  amdgpu::getAMDGPUTargetFeatures(D, TC.getTriple(), Args, Features, TC.getTargetID());
 
   // Add features to mattr such as xnack
   std::string MAttrString = "-mattr=";
@@ -348,7 +348,7 @@ const char *AMDGCN::OpenMPLinker::constructLlcCommand(
   auto &D = TC.getDriver();
   // Extract all the -m options
   std::vector<llvm::StringRef> Features;
-  amdgpu::getAMDGPUTargetFeatures(D, TC.getTriple(), Args, Features);
+  amdgpu::getAMDGPUTargetFeatures(D, TC.getTriple(), Args, Features, TC.getTargetID());
 
   // Add features to mattr such as xnack
   std::string MAttrString = "-mattr=";
@@ -395,7 +395,7 @@ void AMDGCN::OpenMPLinker::constructLldCommand(
 
   // Extract all the -m options
   std::vector<llvm::StringRef> Features;
-  amdgpu::getAMDGPUTargetFeatures(D, TC.getTriple(), Args, Features);
+  amdgpu::getAMDGPUTargetFeatures(D, TC.getTriple(), Args, Features, TC.getTargetID());
 
   // Add features to mattr such as cumode
   std::string MAttrString = "-plugin-opt=-mattr=";
@@ -457,7 +457,7 @@ void AMDGCN::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
   llvm::Triple TT(getToolChain().getTriple());
   assert(TT.isAMDGCN() && "Unsupported target");
 
-  StringRef TargetID = TT.getEnvironmentName();
+  std::string TargetID = getToolChain().getTargetID();
   StringRef GPUArch = getProcessorFromTargetID(TT, TargetID);
   assert(GPUArch.startswith("gfx") && "Unsupported sub arch");
 
@@ -471,7 +471,7 @@ void AMDGCN::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Each command outputs different files.
   const char *LLVMLinkCommand =
-      constructLLVMLinkCommand( C, JA, Inputs, Args,  TargetID.str(), Prefix);
+      constructLLVMLinkCommand( C, JA, Inputs, Args,  TargetID, Prefix);
   const char *OptCommand = constructOptCommand(C, JA, Inputs, Args,
 		                               GPUArch.str(),
                                                Prefix, LLVMLinkCommand);
@@ -493,13 +493,23 @@ AMDGPUOpenMPToolChain::AMDGPUOpenMPToolChain(const Driver &D, const llvm::Triple
   getProgramPaths().push_back(getDriver().Dir);
 }
 
+AMDGPUOpenMPToolChain::AMDGPUOpenMPToolChain(const Driver &D, const llvm::Triple &Triple,
+                             const ToolChain &HostTC, const ArgList &Args,
+                             const Action::OffloadKind OK, const std::string TargetID)
+    : ROCMToolChain(D, Triple, Args), HostTC(HostTC), OK(OK) {
+  // Lookup binaries into the driver directory, this is used to
+  // discover the clang-offload-bundler executable.
+  getProgramPaths().push_back(getDriver().Dir);
+  setTargetID(TargetID);
+}
+
 void AMDGPUOpenMPToolChain::addClangTargetOptions(
     const llvm::opt::ArgList &DriverArgs, llvm::opt::ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadingKind) const {
   HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
   StringRef GpuArch =
-      getProcessorFromTargetID(getTriple(), getTriple().getEnvironmentName());
+      getProcessorFromTargetID(getTriple(), this->getTargetID());
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
 
   auto Kind = llvm::AMDGPU::parseArchAMDGCN(GpuArch);
