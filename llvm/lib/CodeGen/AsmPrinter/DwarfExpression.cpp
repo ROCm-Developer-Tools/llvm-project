@@ -314,11 +314,7 @@ bool DwarfExpression::addMachineRegExpression(const TargetRegisterInfo &TRI,
       return false;
     }
 
-  assert(DwarfRegs.size() == 1);
-  auto Reg = DwarfRegs[0];
-  bool FBReg = isFrameRegister(TRI, MachineReg);
   int SignedOffset = 0;
-  assert(!Reg.isSubRegister() && "full register expected");
 
   // Pattern-match combinations for which more efficient representations exist.
   // [Reg, DW_OP_plus_uconst, Offset] --> [DW_OP_breg, Offset].
@@ -348,10 +344,25 @@ bool DwarfExpression::addMachineRegExpression(const TargetRegisterInfo &TRI,
     }
   }
 
+  auto Reg = DwarfRegs[0];
+  bool FBReg = isFrameRegister(TRI, MachineReg);
+
   if (FBReg)
     addFBReg(SignedOffset);
-  else
+  else {
     addBReg(Reg.DwarfRegNo, SignedOffset);
+    // Compose the remaining subregs.
+    unsigned ShAmt = Reg.SubRegSize;
+    for (unsigned i = 1, e = DwarfRegs.size(); i < e; ++i) {
+      Reg = DwarfRegs[i];
+      addBReg(Reg.DwarfRegNo, 0);
+      emitOp(dwarf::DW_OP_constu);
+      emitUnsigned(ShAmt);
+      emitOp(dwarf::DW_OP_shl);
+      emitOp(dwarf::DW_OP_plus);
+      ShAmt += Reg.SubRegSize;
+    }
+  }
   DwarfRegs.clear();
   return true;
 }
