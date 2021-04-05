@@ -26,6 +26,13 @@ struct private_common *kmp_threadprivate_insert(int gtid, void *pc_addr,
 
 struct shared_table __kmp_threadprivate_d_table;
 
+#if KMP_THREADPRIVATE_TLS
+__thread shared_common *kmpc_threadprivate_d_table_data_head_local = NULL;
+#endif
+
+/* ------------------------------------------------------------------------ */
+/* ------------------------------------------------------------------------ */
+
 static
 #ifdef KMP_INLINE_SUBR
     __forceinline
@@ -220,7 +227,7 @@ void __kmp_common_destroy(void) {
 }
 
 /* Call all destructors for threadprivate data belonging to this thread */
-void __kmp_common_destroy_gtid(int gtid) {
+void __kmp_common_destroy_gtid( int gtid ) {
   struct private_common *tn;
   struct shared_common *d_tn;
 
@@ -235,6 +242,17 @@ void __kmp_common_destroy_gtid(int gtid) {
   if ((__kmp_foreign_tp) ? (!KMP_INITIAL_GTID(gtid)) : (!KMP_UBER_GTID(gtid))) {
 
     if (TCR_4(__kmp_init_common)) {
+
+#if KMP_THREADPRIVATE_TLS
+
+      for(d_tn = kmpc_threadprivate_d_table_data_head_local;
+          d_tn != NULL;
+          d_tn = d_tn->next) {
+        // call destructor
+        if (d_tn->dt.dtor) d_tn->dt.dtor(NULL);
+      }
+
+#else
 
       /* Cannot do this here since not all threads have destroyed their data */
       /* TCW_4(__kmp_init_common, FALSE); */
@@ -261,9 +279,10 @@ void __kmp_common_destroy_gtid(int gtid) {
           }
         }
       }
+#endif
+
       KC_TRACE(30, ("__kmp_common_destroy_gtid: T#%d threadprivate destructors "
-                    "complete\n",
-                    gtid));
+                    "complete\n", gtid));
     }
   }
 }
@@ -512,6 +531,41 @@ void __kmpc_threadprivate_register(ident_t *loc, void *data, kmpc_ctor ctor,
   KMP_ASSERT(cctor == 0);
 #endif /* USE_CHECKS_COMMON */
 
+#if KMP_THREADPRIVATE_TLS
+  /*
+     Check if unique. We use here only data[0], as we need to
+     maintain a uniqe ordering between each of the entries on the
+     list. This is because each thread maintain a private variable
+     pointing to the entries it has already initialized.  When a
+     worker starts a parallel region, it will check if his private
+     pointer points to the most recent entry. If not, the thread
+     will call the constructors for all entries between the top and
+     the ones already processed.
+  */
+  for (d_tn = __kmp_threadprivate_d_table.data[0]; d_tn; d_tn = d_tn->next) {
+    if (d_tn->gbl_addr == data) {
+      // nothing to be done, already here
+      return;
+    }
+  }
+  // not found, create one
+  d_tn = (struct shared_common *) __kmp_allocate( sizeof( struct shared_common ) );
+  d_tn->gbl_addr = data;
+  d_tn->ct.ctor = ctor;
+  d_tn->cct.cctor = cctor;
+  d_tn->dt.dtor = dtor;
+
+  // use only one list (0th, arbitrary)
+  lnk_tn = &(__kmp_threadprivate_d_table.data[0]);
+  // set new element at head of list
+  d_tn->next = __kmp_threadprivate_d_table.data[0];
+  // Make sure that if a thread see the new element, then it must
+  // see the new next pointer value.
+  KMP_MB();
+  __kmp_threadprivate_d_table.data[0] = d_tn;
+  return;
+#endif
+
   /* Only the global data table exists. */
   d_tn = __kmp_find_shared_task_common(&__kmp_threadprivate_d_table, -1, data);
 
@@ -535,6 +589,38 @@ void __kmpc_threadprivate_register(ident_t *loc, void *data, kmpc_ctor ctor,
     *lnk_tn = d_tn;
   }
 }
+
+#if KMP_THREADPRIVATE_TLS
+
+/*!
+ @ingroup THREADPRIVATE
+
+ Call unprocessed constructors.  This function detects if there are
+ unprocess constructors, by comparing its TLS head to the global head
+ pointer of registered constructors. If the two pointers are not
+ equal, then the function proceed to call the unprocessed
+ constructors. Finally, it updates its TLS version of te head pointer
+ so as to never call these constructors again.
+ */
+
+void
+kmpc_threadprivate_call_unprocessed_constructors()
+{
+  struct shared_common *d_tn, *local_head_tn, *global_head_tn;
+  local_head_tn = kmpc_threadprivate_d_table_data_head_local;
+  global_head_tn = __kmp_threadprivate_d_table.data[0];
+  if (local_head_tn != global_head_tn) {
+    // one or more registrations occured since the last parallel loop
+    for(d_tn = global_head_tn; d_tn != local_head_tn; d_tn = d_tn->next) {
+      // call constructor
+      if (d_tn->ct.ctor) d_tn->ct.ctor(NULL);
+    }
+    // update local pointer
+    kmpc_threadprivate_d_table_data_head_local = global_head_tn;
+  }
+}
+
+#endif
 
 void *__kmpc_threadprivate(ident_t *loc, kmp_int32 global_tid, void *data,
                            size_t size) {

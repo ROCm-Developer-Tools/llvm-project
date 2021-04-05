@@ -1,5 +1,9 @@
 // RUN: %libomp-compile-and-run | %sort-threads | FileCheck %s
 // REQUIRES: ompt
+// UNSUPPORTED: gcc-4
+
+// It seems "depend" isn't supported by gcc-4.8, while "&&label" causes the
+// the problem with gcc-4.9.
 
 #include "callback.h"
 #include <omp.h>

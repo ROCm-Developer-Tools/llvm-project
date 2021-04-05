@@ -1,5 +1,8 @@
 // RUN: %libomp-cxx-compile-and-run | %sort-threads | FileCheck %s
 // REQUIRES: ompt
+// UNSUPPORTED: gcc-4.8
+
+// The problem for gcc-4.8 represents the command line argument -std=c++14
 
 #include <iostream>
 #include <thread>
@@ -55,7 +58,6 @@ int main() {
 // first master thread
 // CHECK: {{^}}[[MASTER_ID_1:[0-9]+]]: ompt_event_thread_begin:
 // CHECK-SAME: thread_type=ompt_thread_initial=1, thread_id=[[MASTER_ID_1]]
-
 
 // CHECK: {{^}}[[MASTER_ID:[0-9]+]]: ompt_event_initial_task_begin: parallel_id={{[0-9]+}}
 // CHECK-SAME: task_id=[[PARENT_TASK_ID_1:[0-9]+]], actual_parallelism=1,

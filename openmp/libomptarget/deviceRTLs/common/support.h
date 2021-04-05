@@ -56,9 +56,9 @@ int GetMasterThreadID();
 int GetNumberOfWorkersInTeam();
 
 // get OpenMP thread and team ids
-int GetOmpThreadId(int threadId,
-                   bool isSPMDExecutionMode); // omp_thread_num
-int GetOmpTeamId();                           // omp_team_num
+DEVICE int GetOmpThreadId(int threadId,
+                          bool isSPMDExecutionMode); // omp_thread_num
+DEVICE int GetOmpTeamId();                           // omp_team_num
 
 // get OpenMP number of threads and team
 int GetNumberOfOmpThreads(bool isSPMDExecutionMode); // omp_num_threads

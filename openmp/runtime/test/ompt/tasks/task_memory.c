@@ -1,6 +1,6 @@
 // RUN: %libomp-compile-and-run | FileCheck %s
 // REQUIRES: ompt
-// UNSUPPORTED: gcc-4, gcc-5, gcc-6, gcc-7
+// UNSUPPORTED: gcc-4, gcc-6
 #define USE_PRIVATE_TOOL 1
 #include "callback.h"
 #include <omp.h>

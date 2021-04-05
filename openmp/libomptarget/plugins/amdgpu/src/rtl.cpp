@@ -1816,7 +1816,7 @@ int32_t __tgt_rtl_run_target_team_region_locked(
   if (print_kernel_trace >= LAUNCH) {
     int num_groups = GridSize / WorkgroupSize;
     // enum modes are SPMD, GENERIC, NONE 0,1,2
-    // if we are doing launch timing, print to stdout, else stderr.
+    // if doing rtl timing, print to stderr, unless stdout requested.
     bool traceToStdout = print_kernel_trace & (RTL_TO_STDOUT | RTL_TIMING);
     fprintf(traceToStdout ? stdout : stderr,
             "DEVID:%2d SGN:%1d ConstWGSize:%-4d args:%2d teamsXthrds:(%4dX%4d) "

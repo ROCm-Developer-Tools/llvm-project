@@ -565,10 +565,8 @@ static inline void __ompt_task_init(kmp_taskdata_t *task, int tid) {
   task->ompt_task_info.task_data.value = 0;
   task->ompt_task_info.frame.exit_frame = ompt_data_none;
   task->ompt_task_info.frame.enter_frame = ompt_data_none;
-  task->ompt_task_info.frame.exit_frame_flags =
-      ompt_frame_runtime | ompt_frame_framepointer;
-  task->ompt_task_info.frame.enter_frame_flags =
-      ompt_frame_runtime | ompt_frame_framepointer;
+  task->ompt_task_info.frame.exit_frame_flags = 0;
+  task->ompt_task_info.frame.enter_frame_flags = 0;
 }
 
 // __ompt_task_start:
@@ -614,7 +612,8 @@ static inline void __ompt_task_finish(kmp_task_t *task,
 template <bool ompt>
 static void __kmpc_omp_task_begin_if0_template(ident_t *loc_ref, kmp_int32 gtid,
                                                kmp_task_t *task,
-                                               void *frame_address,
+                                               void *enter_frame_address,
+                                               void *exit_frame_address,
                                                void *return_address) {
   kmp_taskdata_t *taskdata = KMP_TASK_TO_TASKDATA(task);
   kmp_taskdata_t *current_task = __kmp_threads[gtid]->th.th_current_task;
@@ -640,11 +639,17 @@ static void __kmpc_omp_task_begin_if0_template(ident_t *loc_ref, kmp_int32 gtid,
 #if OMPT_SUPPORT
   if (ompt) {
     if (current_task->ompt_task_info.frame.enter_frame.ptr == NULL) {
-      current_task->ompt_task_info.frame.enter_frame.ptr =
-          taskdata->ompt_task_info.frame.exit_frame.ptr = frame_address;
+      current_task->ompt_task_info.frame.enter_frame.ptr = enter_frame_address;
+      taskdata->ompt_task_info.frame.exit_frame.ptr = exit_frame_address;
+      // FIXME vi3-merge: whether ompt_frame_application can be used for enter_frame?
+      //  Standardard isn't completely clear about this.
       current_task->ompt_task_info.frame.enter_frame_flags =
+          taskdata->ompt_task_info.frame.exit_frame_flags = ompt_frame_application | OMPT_FRAME_POSITION_DEFAULT;
+#if 0
+    //johnmc this is how flags are set up in main
           taskdata->ompt_task_info.frame.exit_frame_flags =
               ompt_frame_application | ompt_frame_framepointer;
+#endif
     }
     if (ompt_enabled.ompt_callback_task_create) {
       ompt_task_info_t *parent_info = &(current_task->ompt_task_info);
@@ -666,9 +671,12 @@ static void __kmpc_omp_task_begin_if0_template(ident_t *loc_ref, kmp_int32 gtid,
 OMPT_NOINLINE
 static void __kmpc_omp_task_begin_if0_ompt(ident_t *loc_ref, kmp_int32 gtid,
                                            kmp_task_t *task,
-                                           void *frame_address,
+                                           void *enter_frame_address,
+                                           void *exit_frame_address,
                                            void *return_address) {
-  __kmpc_omp_task_begin_if0_template<true>(loc_ref, gtid, task, frame_address,
+  __kmpc_omp_task_begin_if0_template<true>(loc_ref, gtid, task,
+                                           enter_frame_address,
+                                           exit_frame_address,
                                            return_address);
 }
 #endif // OMPT_SUPPORT
@@ -684,13 +692,25 @@ void __kmpc_omp_task_begin_if0(ident_t *loc_ref, kmp_int32 gtid,
 #if OMPT_SUPPORT
   if (UNLIKELY(ompt_enabled.enabled)) {
     OMPT_STORE_RETURN_ADDRESS(gtid);
+    // enter_frame address points to the last application frame of the
+    // th_current_task (the caller of this function).
+    // exit_frame address points to this frame, which at the moment
+    // belongs to the runtime, but after this function returns,
+    // the frame will be swapped with the explicit task frame (that belongs
+    // to the application).
+    // The only inconsistency that the tool may see is if the sample
+    // is delevered after this function, but before starting to execute
+    // the new explicit task.
+    // vi3-merge: Note that OMPT_GET_FRAME_ADDRESS(1) belongs to the
+    // outer task so it may not be used as an exit_frame of the new task.
     __kmpc_omp_task_begin_if0_ompt(loc_ref, gtid, task,
                                    OMPT_GET_FRAME_ADDRESS(1),
+                                   OMPT_GET_FRAME_ADDRESS(0),
                                    OMPT_LOAD_RETURN_ADDRESS(gtid));
     return;
   }
 #endif
-  __kmpc_omp_task_begin_if0_template<false>(loc_ref, gtid, task, NULL, NULL);
+  __kmpc_omp_task_begin_if0_template<false>(loc_ref, gtid, task, NULL, NULL, NULL);
 }
 
 #ifdef TASK_UNUSED
@@ -999,11 +1019,17 @@ static void __kmpc_omp_task_complete_if0_template(ident_t *loc_ref,
 
 #if OMPT_SUPPORT
   if (ompt) {
+    ompt_frame_t *ompt_frame = &OMPT_CUR_TASK_INFO(__kmp_threads[gtid])->frame;
+    OMPT_FRAME_CLEAR(ompt_frame, enter);
+#if 0
+    //johnmc: main gets frame pointer using get_task_info_internal
+    //johnmc: main also sets enter frame flags. why?
     ompt_frame_t *ompt_frame;
     __ompt_get_task_info_internal(0, NULL, NULL, &ompt_frame, NULL, NULL);
     ompt_frame->enter_frame = ompt_data_none;
     ompt_frame->enter_frame_flags =
         ompt_frame_runtime | ompt_frame_framepointer;
+#endif
   }
 #endif
 
@@ -1522,7 +1548,6 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
     thread->th.ompt_thread_info.state = (thread->th.th_team_serialized)
                                             ? ompt_state_work_serial
                                             : ompt_state_work_parallel;
-    taskdata->ompt_task_info.frame.exit_frame.ptr = OMPT_GET_FRAME_ADDRESS(0);
   }
 #endif
 
@@ -1552,12 +1577,16 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
       ompt_data_t *task_data;
       if (UNLIKELY(ompt_enabled.ompt_callback_cancel)) {
         __ompt_get_task_info_internal(0, NULL, &task_data, NULL, NULL, NULL);
+	ompt_frame_t *task_frame = &OMPT_CUR_TASK_INFO(thread)->frame;
+	OMPT_FRAME_SET(task_frame, exit, OMPT_GET_FRAME_ADDRESS(0),
+		       (ompt_frame_runtime | OMPT_FRAME_POSITION_DEFAULT));
         ompt_callbacks.ompt_callback(ompt_callback_cancel)(
             task_data,
             ((taskgroup && taskgroup->cancel_request) ? ompt_cancel_taskgroup
                                                       : ompt_cancel_parallel) |
                 ompt_cancel_discarded_task,
             NULL);
+	OMPT_FRAME_CLEAR(task_frame, exit);
       }
 #endif
       KMP_COUNT_BLOCK(TASK_cancelled);
@@ -1599,8 +1628,13 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
 
 // OMPT task begin
 #if OMPT_SUPPORT
-    if (UNLIKELY(ompt_enabled.enabled))
+    ompt_frame_t *task_frame;
+    if (UNLIKELY(ompt_enabled.enabled)) {
+      task_frame = &OMPT_CUR_TASK_INFO(thread)->frame;
+      OMPT_FRAME_SET(task_frame, exit, OMPT_GET_FRAME_ADDRESS(0),
+		     (ompt_frame_runtime | OMPT_FRAME_POSITION_DEFAULT));
       __ompt_task_start(task, current_task, gtid);
+    }
 #endif
 
 #if USE_ITT_BUILD && USE_ITT_NOTIFY
@@ -1629,6 +1663,14 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
     }
     KMP_POP_PARTITIONED_TIMER();
 
+
+// OMPT task done
+#if OMPT_SUPPORT
+    if (UNLIKELY(ompt_enabled.enabled)) {
+      OMPT_FRAME_CLEAR(task_frame, exit);
+    }
+#endif
+
 #if USE_ITT_BUILD && USE_ITT_NOTIFY
     if (kmp_itt_count_task) {
       // Barrier imbalance - adjust arrive time with the task duration
@@ -1650,9 +1692,6 @@ static void __kmp_invoke_task(kmp_int32 gtid, kmp_task_t *task,
 #if OMPT_SUPPORT
     if (UNLIKELY(ompt_enabled.enabled)) {
       thread->th.ompt_thread_info = oldInfo;
-      if (taskdata->td_flags.tiedness == TASK_TIED) {
-        taskdata->ompt_task_info.frame.exit_frame = ompt_data_none;
-      }
       __kmp_task_finish<true>(gtid, task, current_task);
     } else
 #endif
@@ -1777,21 +1816,34 @@ kmp_int32 __kmpc_omp_task(ident_t *loc_ref, kmp_int32 gtid,
 
 #if OMPT_SUPPORT
   kmp_taskdata_t *parent = NULL;
+  ompt_frame_t *parent_frame;
+  ompt_frame_t *child_frame;
+  bool set_parent_frame;
   if (UNLIKELY(ompt_enabled.enabled)) {
+    parent = new_taskdata->td_parent;
+    parent_frame = &parent->ompt_task_info.frame;
+    set_parent_frame = OMPT_FRAME_SET_P(parent_frame, enter);
     if (!new_taskdata->td_flags.started) {
-      OMPT_STORE_RETURN_ADDRESS(gtid);
-      parent = new_taskdata->td_parent;
-      if (!parent->ompt_task_info.frame.enter_frame.ptr) {
-        parent->ompt_task_info.frame.enter_frame.ptr =
-            OMPT_GET_FRAME_ADDRESS(0);
+      if (!set_parent_frame) {
+	OMPT_FRAME_SET(parent_frame, enter, OMPT_GET_FRAME_ADDRESS(0),
+		       (ompt_frame_runtime | OMPT_FRAME_POSITION_DEFAULT));
+	OMPT_STORE_RETURN_ADDRESS(gtid);
       }
+      child_frame = &new_taskdata->ompt_task_info.frame;
+      OMPT_FRAME_SET(child_frame, exit, OMPT_GET_FRAME_ADDRESS(0),
+		     (ompt_frame_runtime | OMPT_FRAME_POSITION_DEFAULT));
       if (ompt_enabled.ompt_callback_task_create) {
+        ompt_data_t task_data = ompt_data_none;
+        void *codeptr = OMPT_CUR_TEAM_INFO(__kmp_threads[gtid])->master_return_address;
         ompt_callbacks.ompt_callback(ompt_callback_task_create)(
             &(parent->ompt_task_info.task_data),
             &(parent->ompt_task_info.frame),
             &(new_taskdata->ompt_task_info.task_data),
             ompt_task_explicit | TASK_TYPE_DETAILS_FORMAT(new_taskdata), 0,
-            OMPT_LOAD_RETURN_ADDRESS(gtid));
+            codeptr);
+	if (!set_parent_frame) {
+	  OMPT_CLEAR_RETURN_ADDRESS(gtid);
+	}
       }
     } else {
       // We are scheduling the continuation of an UNTIED task.
@@ -1799,7 +1851,8 @@ kmp_int32 __kmpc_omp_task(ident_t *loc_ref, kmp_int32 gtid,
       __ompt_task_finish(new_task,
                          new_taskdata->ompt_task_info.scheduling_parent,
                          ompt_task_switch);
-      new_taskdata->ompt_task_info.frame.exit_frame = ompt_data_none;
+      child_frame = &new_taskdata->ompt_task_info.frame;
+      OMPT_FRAME_CLEAR(child_frame, exit);
     }
   }
 #endif
@@ -1810,8 +1863,8 @@ kmp_int32 __kmpc_omp_task(ident_t *loc_ref, kmp_int32 gtid,
                 "TASK_CURRENT_NOT_QUEUED: loc=%p task=%p\n",
                 gtid, loc_ref, new_taskdata));
 #if OMPT_SUPPORT
-  if (UNLIKELY(ompt_enabled.enabled && parent != NULL)) {
-    parent->ompt_task_info.frame.enter_frame = ompt_data_none;
+  if (UNLIKELY(ompt_enabled.enabled && !set_parent_frame)) {
+    OMPT_FRAME_CLEAR(parent_frame, enter);
   }
 #endif
   return res;

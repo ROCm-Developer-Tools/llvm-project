@@ -1040,6 +1040,11 @@ enum kmp_warnings_level {
 } // extern "C"
 #endif // __cplusplus
 
+/* ---------------------- Support for TLS threadprivate. -----------------*/
+
+// add architecctures/OS to the macro below to enable TLS based threadprivate 
+#define KMP_THREADPRIVATE_TLS ((KMP_ARCH_PPC64))
+
 // Macros for C++11 atomic functions
 #define KMP_ATOMIC_LD(p, order) (p)->load(std::memory_order_##order)
 #define KMP_ATOMIC_OP(op, p, v, order) (p)->op(v, std::memory_order_##order)

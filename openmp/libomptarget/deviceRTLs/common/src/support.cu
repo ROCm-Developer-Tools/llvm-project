@@ -58,7 +58,7 @@ bool checkSPMDMode(kmp_Ident *loc) {
   return isSPMDMode();
 }
 
-bool checkGenericMode(kmp_Ident *loc) { return !checkSPMDMode(loc); }
+DEVICE bool checkGenericMode(kmp_Ident *loc) { return !checkSPMDMode(loc); }
 
 bool checkRuntimeUninitialized(kmp_Ident *loc) {
   if (!loc)
@@ -105,7 +105,7 @@ bool checkRuntimeInitialized(kmp_Ident *loc) {
 //      If NumThreads is 1024, master id is 992.
 //
 // Called in Generic Execution Mode only.
-int GetMasterThreadID() {
+DEVICE int GetMasterThreadID() {
   return (GetNumberOfThreadsInBlock() - 1) & ~(WARPSIZE - 1);
 }
 

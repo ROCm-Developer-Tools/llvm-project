@@ -503,8 +503,10 @@ public:
         CUdevice Device;
         checkResult(cuCtxGetDevice(&Device),
                     "Error returned from cuCtxGetDevice\n");
+#if 0
         checkResult(cuDevicePrimaryCtxRelease(Device),
                     "Error returned from cuDevicePrimaryCtxRelease\n");
+#endif
       }
     }
   }

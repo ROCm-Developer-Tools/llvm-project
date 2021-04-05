@@ -42,15 +42,15 @@ int main()
   // CHECK: 0: NULL_POINTER=[[NULL:.*$]]
 
   // master thread implicit barrier at parallel end
-  // CHECK: {{^}}[[MASTER_ID:[0-9]+]]: ompt_event_barrier_begin: parallel_id=0, task_id=[[TASK_ID:[0-9]+]], codeptr_ra={{0x[0-f]*}}
-  // CHECK: {{^}}[[MASTER_ID]]: ompt_event_wait_barrier_begin: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra={{0x[0-f]*}}
-  // CHECK: {{^}}[[MASTER_ID]]: ompt_event_wait_barrier_end: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra={{0x[0-f]*}}
-  // CHECK: {{^}}[[MASTER_ID]]: ompt_event_barrier_end: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra={{0x[0-f]*}}
+  // CHECK: {{^}}[[MASTER_ID:[0-9]+]]: ompt_event_barrier_begin: parallel_id=0, task_id=[[TASK_ID:[0-9]+]], codeptr_ra=[[MRA:0x[0-f]+]]
+  // CHECK: {{^}}[[MASTER_ID]]: ompt_event_wait_barrier_begin: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra=[[MRA]]
+  // CHECK: {{^}}[[MASTER_ID]]: ompt_event_wait_barrier_end: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra=[[MRA]]
+  // CHECK: {{^}}[[MASTER_ID]]: ompt_event_barrier_end: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra=[[MRA]]
 
 
   // worker thread implicit barrier at parallel end
-  // CHECK: {{^}}[[THREAD_ID:[0-9]+]]: ompt_event_barrier_begin: parallel_id=0, task_id=[[TASK_ID:[0-9]+]], codeptr_ra=[[NULL]]
-  // CHECK: {{^}}[[THREAD_ID]]: ompt_event_wait_barrier_begin: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra=[[NULL]]
+  // CHECK: {{^}}[[THREAD_ID:[0-9]+]]: ompt_event_barrier_begin: parallel_id=0, task_id=[[TASK_ID:[0-9]+]], codeptr_ra=[[WRA:0x[0-f]+]]
+  // CHECK: {{^}}[[THREAD_ID]]: ompt_event_wait_barrier_begin: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra=[[WRA]]
   // CHECK: {{^}}[[THREAD_ID]]: ompt_event_wait_barrier_end: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra=[[NULL]]
   // CHECK: {{^}}[[THREAD_ID]]: ompt_event_barrier_end: parallel_id=0, task_id=[[TASK_ID]], codeptr_ra=[[NULL]]
 

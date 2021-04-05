@@ -109,6 +109,7 @@ static HMODULE ompt_tool_module = NULL;
 static void *ompt_tool_module = NULL;
 #define OMPT_DLCLOSE(Lib) dlclose(Lib)
 #endif
+static ompt_start_tool_result_t *libomptarget_ompt_result = NULL;
 
 /*****************************************************************************
  * forward declarations
@@ -487,13 +488,19 @@ void ompt_post_init() {
       ompt_callbacks.ompt_callback(ompt_callback_thread_begin)(
           ompt_thread_initial, __ompt_get_thread_data_internal());
     }
-    ompt_data_t *task_data;
-    ompt_data_t *parallel_data;
-    __ompt_get_task_info_internal(0, NULL, &task_data, NULL, &parallel_data,
-                                  NULL);
+    ompt_data_t *task_data = nullptr;
+    ompt_frame_t *task_frame = nullptr;
+    ompt_data_t *parallel_data = nullptr;
+    __ompt_get_task_info_internal(0, NULL, &task_data, &task_frame, 
+				  &parallel_data, NULL);
     if (ompt_enabled.ompt_callback_implicit_task) {
+      OMPT_FRAME_SET(task_frame, exit, OMPT_GET_FRAME_ADDRESS(0),
+		     (ompt_frame_runtime | OMPT_FRAME_POSITION_DEFAULT));   
       ompt_callbacks.ompt_callback(ompt_callback_implicit_task)(
-          ompt_scope_begin, parallel_data, task_data, 1, 1, ompt_task_initial);
+        ompt_scope_begin, parallel_data /*parallel data*/, 
+	task_data, 1 /*team size*/, 1 /*initial task: index=1*/, 
+	ompt_task_initial);
+      OMPT_FRAME_CLEAR(task_frame, exit);
     }
 
     ompt_set_thread_state(root_thread, ompt_state_work_serial);
@@ -502,6 +509,9 @@ void ompt_post_init() {
 
 void ompt_fini() {
   if (ompt_enabled.enabled) {
+    if (libomptarget_ompt_result) {
+      libomptarget_ompt_result->finalize(NULL);
+    }
     ompt_start_tool_result->finalize(&(ompt_start_tool_result->tool_data));
   }
 
@@ -857,5 +867,49 @@ static ompt_interface_fn_t ompt_fn_lookup(const char *s) {
 
   FOREACH_OMPT_INQUIRY_FN(ompt_interface_fn)
 
+#undef ompt_interface_fn
+
+  return (ompt_interface_fn_t)0;
+}
+
+static int ompt_set_frame_enter(void *addr, int flags, int state) {
+ return __ompt_set_frame_enter_internal(addr, flags, state);
+}
+
+static ompt_data_t * ompt_get_task_data() {
+  ompt_data_t *data;
+  if (ompt_get_task_info(0, NULL, &data, NULL, NULL, NULL)) {
+    return data;
+  }
   return NULL;
+}
+
+static ompt_interface_fn_t libomp_target_fn_lookup(const char *s) {
+  if (strcmp(s, "ompt_set_frame_enter") == 0) 
+    return (ompt_interface_fn_t) ompt_set_frame_enter;
+
+  if (strcmp(s, "ompt_get_task_data") == 0) 
+    return (ompt_interface_fn_t) ompt_get_task_data;
+
+#define ompt_interface_fn(fn) \
+  if (strcmp(s, #fn) == 0) \
+  return (ompt_interface_fn_t) ompt_callbacks.ompt_callback(fn);
+
+  FOREACH_OMPT_TARGET_CALLBACK(ompt_interface_fn)
+
+#undef ompt_interface_fn
+
+  return (ompt_interface_fn_t) 0;
+}
+
+_OMP_EXTERN void libomp_libomptarget_ompt_init(ompt_start_tool_result_t *result) {
+  __ompt_force_initialization();
+
+  if (ompt_enabled.enabled && 
+      ompt_callbacks.ompt_callback(ompt_callback_device_initialize)) {
+    if (result) {
+      result->initialize(libomp_target_fn_lookup, 0, NULL); 
+      libomptarget_ompt_result = result;
+    }
+  }
 }

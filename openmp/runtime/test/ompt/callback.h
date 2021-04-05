@@ -117,7 +117,19 @@ static void print_ids(int level)
            frame->enter_frame.ptr, buffer, task_type, thread_num);
 }
 
+#if (KMP_ARCH_PPC64 | KMP_ARCH_ARM)
+// On Power and ARM, the frame pointer (__builtin_frame_address(0)) 
+// // points to the top of the stack frame. For gcc4, this is not a useful 
+// // value after returning from GOMP_parallel_start to call an outlined
+// // task in the master thread. To support gcc4 in a uniform fashion, 
+// // always use the canonical frame address (known as CFA, which is the 
+// // top of the caller's stack), which is available as 
+// // __builtin_frame_address(1), for the OMPT frame pointer for a frame.
+//
+#define get_frame_address(level) __builtin_frame_address(level+1)
+#else
 #define get_frame_address(level) __builtin_frame_address(level)
+#endif
 
 #define print_frame(level)                                                     \
   printf("%" PRIu64 ": __builtin_frame_address(%d)=%p\n",                      \
@@ -1029,7 +1041,8 @@ on_ompt_callback_dependences(
 {
   char buffer[2048];
   char *progress = buffer;
-  for (int i = 0; i < ndeps && progress < buffer + 2000; i++) {
+  int i;
+  for (i = 0; i < ndeps && progress < buffer + 2000; i++) {
     if (deps[i].dependence_type == ompt_dependence_type_source ||
         deps[i].dependence_type == ompt_dependence_type_sink)
       progress +=

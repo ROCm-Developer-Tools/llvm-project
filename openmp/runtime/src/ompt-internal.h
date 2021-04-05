@@ -13,6 +13,8 @@
 #ifndef __OMPT_INTERNAL_H__
 #define __OMPT_INTERNAL_H__
 
+#include "kmp_platform.h"
+
 #include "ompt-event-specific.h"
 #include "omp-tools.h"
 
@@ -20,10 +22,23 @@
 
 #define _OMP_EXTERN extern "C"
 
-#define OMPT_INVOKER(x)                                                        \
-  ((x == fork_context_gnu) ? ompt_parallel_invoker_program                     \
-                           : ompt_parallel_invoker_runtime)
+#define OMPT_INVOKER(x)							\
+  ((x == fork_context_gnu_task_program)					\
+   ? ompt_parallel_invoker_program					\
+   : ompt_parallel_invoker_runtime)
 
+#define OMPT_FRAME_SET(frame, which, ptr_value, flags)		\
+  {								\
+    frame-> which ## _frame.ptr = ptr_value;			\
+    frame-> which ## _frame_flags = flags;			\
+  }
+
+#define OMPT_FRAME_CLEAR(frame, which)		\
+  OMPT_FRAME_SET(frame, which, 0, 0)	
+
+#define OMPT_FRAME_SET_P(frame, which)		\
+  (frame-> which ## _frame.ptr != NULL)
+ 
 #define ompt_callback(e) e##_callback
 
 typedef struct ompt_callbacks_internal_s {
@@ -104,7 +119,24 @@ void ompt_post_init(void);
 void ompt_fini(void);
 
 #define OMPT_GET_RETURN_ADDRESS(level) __builtin_return_address(level)
+
+
+#if (KMP_ARCH_PPC64 | KMP_ARCH_ARM)
+// On Power and ARM, the frame pointer (__builtin_frame_address(0)) 
+// points to the top of the stack frame. For gcc4, this is not a useful 
+// value after returning from GOMP_parallel_start to call an outlined
+// task in the master thread. To support gcc4 in a uniform fashion, 
+// always use the canonical frame address (known as CFA, which is the 
+// top of the caller's stack), which is available as 
+// __builtin_frame_address(1), for the OMPT frame pointer for a frame.
+#define OMPT_GET_FRAME_ADDRESS(level) __builtin_frame_address(level+1)
+#define OMPT_FRAME_POSITION_DEFAULT ompt_frame_cfa 
+#define OMPT_FRAME_POSITION_GCC4_TASK ompt_frame_cfa 
+#else
 #define OMPT_GET_FRAME_ADDRESS(level) __builtin_frame_address(level)
+#define OMPT_FRAME_POSITION_DEFAULT ompt_frame_framepointer 
+#define OMPT_FRAME_POSITION_GCC4_TASK ompt_frame_stackaddress 
+#endif
 
 int __kmp_control_tool(uint64_t command, uint64_t modifier, void *arg);
 

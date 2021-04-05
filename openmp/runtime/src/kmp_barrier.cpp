@@ -1317,7 +1317,7 @@ static int __kmp_barrier_template(enum barrier_type bt, int gtid, int is_split,
 #if OMPT_OPTIONAL
     my_task_data = OMPT_CUR_TASK_DATA(this_thr);
     my_parallel_data = OMPT_CUR_TEAM_DATA(this_thr);
-    return_address = OMPT_LOAD_RETURN_ADDRESS(gtid);
+    return_address = this_thr->th.ompt_thread_info.return_address; 
     barrier_kind = __ompt_get_barrier_kind(bt, this_thr);
     if (ompt_enabled.ompt_callback_sync_region) {
       ompt_callbacks.ompt_callback(ompt_callback_sync_region)(
@@ -1724,9 +1724,8 @@ void __kmp_join_barrier(int gtid) {
     ompt_data_t *my_parallel_data;
     void *codeptr = NULL;
     int ds_tid = this_thr->th.th_info.ds.ds_tid;
-    if (KMP_MASTER_TID(ds_tid) &&
-        (ompt_callbacks.ompt_callback(ompt_callback_sync_region_wait) ||
-         ompt_callbacks.ompt_callback(ompt_callback_sync_region)))
+    if (ompt_callbacks.ompt_callback(ompt_callback_sync_region_wait) ||
+         ompt_callbacks.ompt_callback(ompt_callback_sync_region))
       codeptr = team->t.ompt_team_info.master_return_address;
     my_task_data = OMPT_CUR_TASK_DATA(this_thr);
     my_parallel_data = OMPT_CUR_TEAM_DATA(this_thr);

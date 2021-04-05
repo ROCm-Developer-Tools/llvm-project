@@ -1,6 +1,8 @@
 // RUN: %libomp-compile-and-run | %sort-threads | FileCheck %s
 // REQUIRES: ompt
-// UNSUPPORTED: gcc-4, gcc-5, gcc-6, gcc-7
+
+// vi3-merge: It seems that this isn't supported for gcc-5
+// UNSUPPORTED: gcc-4, gcc-5, gcc-6
 #include "callback.h"
 #include <omp.h>
 

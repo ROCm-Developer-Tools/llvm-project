@@ -999,7 +999,10 @@ __kmp_dispatch_init(ident_t *loc, int gtid, enum sched_type schedule, T lb,
     ompt_task_info_t *task_info = __ompt_get_task_info_object(0);
     ompt_callbacks.ompt_callback(ompt_callback_work)(
         ompt_work_loop, ompt_scope_begin, &(team_info->parallel_data),
-        &(task_info->task_data), pr->u.p.tc, OMPT_LOAD_RETURN_ADDRESS(gtid));
+        &(task_info->task_data), pr->u.p.tc,
+        (th->th.ompt_thread_info.return_address)
+            ? (th->th.ompt_thread_info.return_address)
+            : team_info->master_return_address);
   }
 #endif
   KMP_PUSH_PARTITIONED_TIMER(OMP_loop_dynamic);

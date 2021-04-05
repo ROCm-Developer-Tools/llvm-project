@@ -11,10 +11,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <omptarget.h>
+
 #include "device.h"
 #include "omptarget.h"
 #include "private.h"
 #include "rtl.h"
+#include "ompt_callback.h"
 
 #include <cassert>
 #include <cstdio>
@@ -119,6 +122,10 @@ EXTERN void __tgt_target_data_begin_mapper(ident_t *loc, int64_t device_id,
   TIMESCOPE_WITH_IDENT(loc);
   DP("Entering data begin region for device %" PRId64 " with %d mappings\n",
      device_id, arg_num);
+
+  ompt_interface.ompt_state_set(OMPT_GET_FRAME_ADDRESS(0), OMPT_GET_RETURN_ADDRESS(0));
+  ompt_interface.target_data_enter_begin(device_id);
+
   if (checkDeviceAndCtors(device_id, loc) != OFFLOAD_SUCCESS) {
     DP("Not offloading to device %" PRId64 "\n", device_id);
     return;
@@ -144,6 +151,9 @@ EXTERN void __tgt_target_data_begin_mapper(ident_t *loc, int64_t device_id,
   if (rc == OFFLOAD_SUCCESS)
     rc = AsyncInfo.synchronize();
   handleTargetOutcome(rc == OFFLOAD_SUCCESS, loc);
+
+  ompt_interface.target_data_enter_end(device_id);
+  ompt_interface.ompt_state_clear();
 }
 
 EXTERN void __tgt_target_data_begin_nowait_mapper(
@@ -212,11 +222,18 @@ EXTERN void __tgt_target_data_end_mapper(ident_t *loc, int64_t device_id,
 #endif
 
   AsyncInfoTy AsyncInfo(Device);
+
+  ompt_interface.ompt_state_set(OMPT_GET_FRAME_ADDRESS(0), OMPT_GET_RETURN_ADDRESS(0));
+  ompt_interface.target_data_exit_begin(device_id);
+
   int rc = targetDataEnd(loc, Device, arg_num, args_base, args, arg_sizes,
                          arg_types, arg_names, arg_mappers, AsyncInfo);
   if (rc == OFFLOAD_SUCCESS)
     rc = AsyncInfo.synchronize();
   handleTargetOutcome(rc == OFFLOAD_SUCCESS, loc);
+
+  ompt_interface.target_data_exit_end(device_id);
+  ompt_interface.ompt_state_clear();
 }
 
 EXTERN void __tgt_target_data_end_nowait_mapper(
@@ -269,6 +286,9 @@ EXTERN void __tgt_target_data_update_mapper(ident_t *loc, int64_t device_id,
     printKernelArguments(loc, device_id, arg_num, arg_sizes, arg_types,
                          arg_names, "Updating OpenMP data");
 
+  ompt_interface.ompt_state_set(OMPT_GET_FRAME_ADDRESS(0), OMPT_GET_RETURN_ADDRESS(0));
+  ompt_interface.target_update_begin(device_id);
+
   DeviceTy &Device = PM->Devices[device_id];
   AsyncInfoTy AsyncInfo(Device);
   int rc = targetDataUpdate(loc, Device, arg_num, args_base, args, arg_sizes,
@@ -276,6 +296,9 @@ EXTERN void __tgt_target_data_update_mapper(ident_t *loc, int64_t device_id,
   if (rc == OFFLOAD_SUCCESS)
     rc = AsyncInfo.synchronize();
   handleTargetOutcome(rc == OFFLOAD_SUCCESS, loc);
+
+  ompt_interface.target_update_end(device_id);
+  ompt_interface.ompt_state_clear();
 }
 
 EXTERN void __tgt_target_data_update_nowait_mapper(
@@ -339,12 +362,20 @@ EXTERN int __tgt_target_mapper(ident_t *loc, int64_t device_id, void *host_ptr,
 
   DeviceTy &Device = PM->Devices[device_id];
   AsyncInfoTy AsyncInfo(Device);
+
+  ompt_interface.ompt_state_set(OMPT_GET_FRAME_ADDRESS(0), OMPT_GET_RETURN_ADDRESS(0));
+  ompt_interface.target_begin(device_id);
+
   int rc = target(loc, Device, host_ptr, arg_num, args_base, args, arg_sizes,
                   arg_types, arg_names, arg_mappers, 0, 0, false /*team*/,
                   AsyncInfo);
   if (rc == OFFLOAD_SUCCESS)
     rc = AsyncInfo.synchronize();
   handleTargetOutcome(rc == OFFLOAD_SUCCESS, loc);
+
+  ompt_interface.target_end(device_id);
+  ompt_interface.ompt_state_clear();
+
   return rc;
 }
 
@@ -416,12 +447,20 @@ EXTERN int __tgt_target_teams_mapper(ident_t *loc, int64_t device_id,
 
   DeviceTy &Device = PM->Devices[device_id];
   AsyncInfoTy AsyncInfo(Device);
+
+  ompt_interface.ompt_state_set(OMPT_GET_FRAME_ADDRESS(0), OMPT_GET_RETURN_ADDRESS(0));
+  ompt_interface.target_begin(device_id);
+
   int rc = target(loc, Device, host_ptr, arg_num, args_base, args, arg_sizes,
                   arg_types, arg_names, arg_mappers, team_num, thread_limit,
                   true /*team*/, AsyncInfo);
   if (rc == OFFLOAD_SUCCESS)
     rc = AsyncInfo.synchronize();
   handleTargetOutcome(rc == OFFLOAD_SUCCESS, loc);
+
+  ompt_interface.target_end(device_id);
+  ompt_interface.ompt_state_clear();
+
   return rc;
 }
 

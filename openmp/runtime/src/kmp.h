@@ -3614,8 +3614,11 @@ extern int __kmp_barrier_gomp_cancel(int gtid);
  * to deal with the call.
  */
 enum fork_context_e {
-  fork_context_gnu, /**< Called from GNU generated code, so must not invoke the
+  fork_context_gnu_task_program, /**< Called from GNU generated code, so must not invoke the
                        microtask internally. */
+  fork_context_gnu_task_library, /**< Called from GNU generated code, so must not invoke the
+                       microtask internally. */
+  fork_context_gnu, /**vi3-merge: This one should replace the previous two I suppose*/
   fork_context_intel, /**< Called from Intel generated code.  */
   fork_context_last
 };
