@@ -267,6 +267,10 @@ private:
 ModulePass *createR600OpenCLImageTypeLoweringPass();
 FunctionPass *createAMDGPUAnnotateUniformValues();
 
+ModulePass *createAMDGPULowerKernelCallsPass();
+void initializeAMDGPULowerKernelCallsPass(PassRegistry&);
+extern char &AMDGPULowerKernelCallsID;
+
 ModulePass *createAMDGPUPrintfRuntimeBinding();
 void initializeAMDGPUPrintfRuntimeBindingPass(PassRegistry&);
 extern char &AMDGPUPrintfRuntimeBindingID;
