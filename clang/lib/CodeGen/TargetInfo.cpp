@@ -9026,13 +9026,25 @@ void AMDGPUTargetCodeGenInfo::setTargetAttributes(
     GV->setDSOLocal(true);
   }
 
-  if (GV->isDeclaration())
-    return;
+  // Move the GV->isDeclaration() check till after properly setting
+  // device function attributes.
+
   const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D);
   if (!FD)
     return;
 
   llvm::Function *F = cast<llvm::Function>(GV);
+
+  if (M.getLangOpts().OpenMP) {
+    F->removeFnAttr(llvm::Attribute::OptimizeNone);
+    F->removeFnAttr(llvm::Attribute::NoInline);
+    F->addFnAttr(llvm::Attribute::AlwaysInline);
+    F->addFnAttr(llvm::Attribute::NoUnwind);
+    F->addFnAttr(llvm::Attribute::NoRecurse);
+  }
+  if (GV->isDeclaration())
+    return;
+  // The rest of setTargetAttributes is for Function definitions
 
   const auto *ReqdWGS = M.getLangOpts().OpenCL ?
     FD->getAttr<ReqdWorkGroupSizeAttr>() : nullptr;
@@ -9042,7 +9054,9 @@ void AMDGPUTargetCodeGenInfo::setTargetAttributes(
                               FD->hasAttr<OpenCLKernelAttr>();
   const bool IsHIPKernel = M.getLangOpts().HIP &&
                            FD->hasAttr<CUDAGlobalAttr>();
-  if ((IsOpenCLKernel || IsHIPKernel) &&
+  const bool IsOmpRegion =
+      M.getLangOpts().OpenMP && FD->hasAttr<CUDAGlobalAttr>();
+  if ((IsOpenCLKernel || IsHIPKernel || IsOmpRegion) &&
       (M.getTriple().getOS() == llvm::Triple::AMDHSA))
     F->addFnAttr("amdgpu-implicitarg-num-bytes", "56");
 
@@ -9173,20 +9187,31 @@ AMDGPUTargetCodeGenInfo::getLLVMSyncScopeID(const LangOptions &LangOpts,
                                             llvm::LLVMContext &Ctx) const {
   std::string Name;
   switch (Scope) {
+  case SyncScope::HIPSingleThread:
+    Name = "singlethread";
+    break;
+  case SyncScope::HIPWavefront:
+  case SyncScope::OpenCLSubGroup:
+    Name = "wavefront";
+    break;
+  case SyncScope::HIPWorkgroup:
   case SyncScope::OpenCLWorkGroup:
     Name = "workgroup";
     break;
+  case SyncScope::HIPAgent:
   case SyncScope::OpenCLDevice:
     Name = "agent";
     break;
+  case SyncScope::HIPSystem:
   case SyncScope::OpenCLAllSVMDevices:
     Name = "";
     break;
-  case SyncScope::OpenCLSubGroup:
-    Name = "wavefront";
+  default:
+    assert(false && "NOT IMPLEMENTED!");
+    break;
   }
 
-  if (Ordering != llvm::AtomicOrdering::SequentiallyConsistent) {
+  if(Ordering != llvm::AtomicOrdering::SequentiallyConsistent) {
     if (!Name.empty())
       Name = Twine(Twine(Name) + Twine("-")).str();
 
