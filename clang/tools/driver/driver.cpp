@@ -280,21 +280,16 @@ static void FixupDiagPrefixExeName(TextDiagnosticPrinter *DiagClient,
 
 // This lets us create the DiagnosticsEngine with a properly-filled-out
 // DiagnosticOptions instance.
-static DiagnosticOptions *
-CreateAndPopulateDiagOpts(ArrayRef<const char *> argv, bool &UseNewCC1Process) {
+static DiagnosticOptions *CreateAndPopulateDiagOpts(ArrayRef<const char *> argv,
+                                                    InputArgList &Args) {
   auto *DiagOpts = new DiagnosticOptions;
   unsigned MissingArgIndex, MissingArgCount;
-  InputArgList Args = getDriverOptTable().ParseArgs(
-      argv.slice(1), MissingArgIndex, MissingArgCount);
+  Args = getDriverOptTable().ParseArgs(argv.slice(1), MissingArgIndex,
+                                       MissingArgCount);
   // We ignore MissingArgCount and the return value of ParseDiagnosticArgs.
   // Any errors that would be diagnosed here will also be diagnosed later,
   // when the DiagnosticsEngine actually exists.
   (void)ParseDiagnosticArgs(*DiagOpts, Args);
-
-  UseNewCC1Process =
-      Args.hasFlag(clang::driver::options::OPT_fno_integrated_cc1,
-                   clang::driver::options::OPT_fintegrated_cc1,
-                   /*Default=*/CLANG_SPAWN_CC1);
 
   return DiagOpts;
 }
@@ -466,9 +461,10 @@ int main(int Argc, const char **Argv) {
   // Not having an additional process saves some execution time of Windows,
   // and makes debugging and profiling easier.
   bool UseNewCC1Process;
+  InputArgList ArgList;
 
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts =
-      CreateAndPopulateDiagOpts(Args, UseNewCC1Process);
+      CreateAndPopulateDiagOpts(Args, ArgList);
 
   TextDiagnosticPrinter *DiagClient
     = new TextDiagnosticPrinter(llvm::errs(), &*DiagOpts);
@@ -477,6 +473,12 @@ int main(int Argc, const char **Argv) {
   IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
 
   DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagClient);
+  unsigned NumParallelJobs =
+      getLastArgIntValue(ArgList, options::OPT_parallel_jobs_EQ, 1, Diags);
+  UseNewCC1Process =
+      ArgList.hasFlag(clang::driver::options::OPT_fno_integrated_cc1,
+                      clang::driver::options::OPT_fintegrated_cc1,
+                      /*Default=*/NumParallelJobs > 1 ? true : CLANG_SPAWN_CC1);
 
   if (!DiagOpts->DiagnosticSerializationFile.empty()) {
     auto SerializedConsumer =
