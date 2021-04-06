@@ -238,6 +238,7 @@ class UnwindRow {
   /// The address will be valid when parsing the instructions in a FDE. If
   /// invalid, this object represents the initial instructions of a CIE.
   Optional<uint64_t> Address; ///< Address for row in FDE, invalid for CIE.
+  uint32_t CFAAddressSpace = 0; /// The address space for the CFA address.
   UnwindLocation CFAValue;    ///< How to unwind the Call Frame Address (CFA).
   RegisterLocations RegLocs;  ///< How to unwind all registers in this list.
 
@@ -253,11 +254,23 @@ public:
   /// address with a call to \see hasAddress().
   uint64_t getAddress() const { return *Address; }
 
+  /// Get the address space for address of this row.
+  ///
+  /// This represents the address space the address of this row is located in.
+  uint8_t getCFAAddressSpace() const { return CFAAddressSpace; }
+
   /// Set the address for this UnwindRow.
   ///
   /// The address represents the first address for which the CFAValue and
   /// RegLocs are valid within a function.
   void setAddress(uint64_t Addr) { Address = Addr; }
+
+  /// Set the address space for address of this row.
+  ///
+  /// Capture the address space of the CFA address of this row, if any.
+  void setCFAAddressSpace(uint8_t NewCFAAddrSpace) {
+    CFAAddressSpace = NewCFAAddrSpace;
+  }
 
   /// Offset the address for this UnwindRow.
   ///
@@ -388,7 +401,7 @@ raw_ostream &operator<<(raw_ostream &OS, const UnwindTable &Rows);
 /// manual, "6.4.1 Structure of Call Frame Information".
 class CFIProgram {
 public:
-  typedef SmallVector<uint64_t, 2> Operands;
+  typedef SmallVector<uint64_t, 3> Operands;
 
   /// An instruction consists of a DWARF CFI opcode and an optional sequence of
   /// operands. If it refers to an expression, then this expression has its own
@@ -467,6 +480,15 @@ private:
     Instructions.back().Ops.push_back(Operand2);
   }
 
+  /// Add a new instruction that has three operands.
+  void addInstruction(uint8_t Opcode, uint64_t Operand1, uint64_t Operand2,
+                      uint64_t Operand3) {
+    Instructions.push_back(Instruction(Opcode));
+    Instructions.back().Ops.push_back(Operand1);
+    Instructions.back().Ops.push_back(Operand2);
+    Instructions.back().Ops.push_back(Operand3);
+  }
+
   /// Types of operands to CFI instructions
   /// In DWARF, this type is implicitly tied to a CFI instruction opcode and
   /// thus this type doesn't need to be explictly written to the file (this is
@@ -482,6 +504,7 @@ private:
     OT_SignedFactDataOffset,
     OT_UnsignedFactDataOffset,
     OT_Register,
+    OT_AddressSpace,
     OT_Expression
   };
 
@@ -490,7 +513,7 @@ private:
 
   /// Retrieve the array describing the types of operands according to the enum
   /// above. This is indexed by opcode.
-  static ArrayRef<OperandType[2]> getOperandTypes();
+  static ArrayRef<OperandType[3]> getOperandTypes();
 
   /// Print \p Opcode's operand number \p OperandIdx which has value \p Operand.
   void printOperand(raw_ostream &OS, DIDumpOptions DumpOpts,
