@@ -228,10 +228,10 @@ RocmInstallationDetector::getInstallationPathCandidates() {
     }
 
     // Some versions of the rocm llvm package install to /opt/rocm/llvm/bin
-    // Some versions of the aomp package install to /opt/rocm/aomp/bin
-    if (ParentName == "llvm" || ParentName.startswith("aomp"))
+    if (ParentName == "llvm")
       ParentDir = llvm::sys::path::parent_path(ParentDir);
-
+    // Some versions of the aomp package install to /opt/rocm/aomp/bin
+    // and it seems ParentDir is already pointing to correct place.
     return Candidate(ParentDir.str(), /*StrictChecking=*/true);
   };
 
@@ -554,6 +554,14 @@ void amdgpu::getAMDGPUTargetFeatures(const Driver &D,
                    options::OPT_mno_wavefrontsize64, false))
     Features.push_back("+wavefrontsize64");
 
+  // TODO: Remove during upstreaming target id.
+  if (Args.getLastArg(options::OPT_msram_ecc_legacy)) {
+    Features.push_back("+sramecc");
+  }
+  if (Args.getLastArg(options::OPT_mno_sram_ecc_legacy)) {
+    Features.push_back("-sramecc");
+  }
+
   handleTargetFeaturesGroup(
     Args, Features, options::OPT_m_amdgpu_Features_Group);
 }
@@ -568,7 +576,8 @@ AMDGPUToolChain::AMDGPUToolChain(const Driver &D, const llvm::Triple &Triple,
   // and errors for the last invalid code object version options.
   // It is done here to avoid repeated warning or error messages for
   // each tool invocation.
-  (void)getOrCheckAMDGPUCodeObjectVersion(D, Args, /*Diagnose=*/true);
+  CodeObjectVersion =
+    getOrCheckAMDGPUCodeObjectVersion(D, Args, /*Diagnose=*/true);
 }
 
 Tool *AMDGPUToolChain::buildLinker() const {
