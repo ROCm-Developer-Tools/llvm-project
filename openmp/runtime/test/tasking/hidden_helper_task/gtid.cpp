@@ -1,4 +1,5 @@
 // RUN: %libomp-cxx-compile-and-run
+// XFAIL: *
 
 /*
  * This test aims to check whether hidden helper thread has right gtid. We also

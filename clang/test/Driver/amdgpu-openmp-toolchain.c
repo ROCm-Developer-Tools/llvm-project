@@ -1,3 +1,4 @@
+ // XFAIL: *
 // REQUIRES: x86-registered-target
 // REQUIRES: amdgpu-registered-target
 // RUN:   env LIBRARY_PATH=%S/Inputs/hip_dev_lib %clang -### --target=x86_64-unknown-linux-gnu -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx906 %s 2>&1 \

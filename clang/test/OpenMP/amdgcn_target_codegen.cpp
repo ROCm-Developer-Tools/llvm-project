@@ -9,7 +9,7 @@
 #define N 1000
 
 int test_amdgcn_target_tid_threads() {
-// CHECK-LABEL: define weak amdgpu_kernel void @{{.*}}test_amdgcn_target_tid_threads
+// CHECK-LABEL: define internal void @{{.*}}test_amdgcn_target_tid_threads
 
   int arr[N];
 

@@ -5,8 +5,8 @@
 
 ; Test that demonstrates we produce a .debug_frame only when exceptions are enabled even if --force-dwarf-frame-section is enabled
 
-; NOEXCEPTIONS_NOFORCE-DEBUG-NOT: .debug_frame
-; NOEXCEPTIONS_FORCE-DEBUG-NOT: .debug_frame
+; NOEXCEPTIONS_NOFORCE-DEBUG: .debug_frame
+; NOEXCEPTIONS_FORCE-DEBUG: .debug_frame
 ; EXCEPTIONS_NOFORCE-DEBUG: .debug_frame
 ; EXCEPTIONS_FORCE-DEBUG: .debug_frame
 

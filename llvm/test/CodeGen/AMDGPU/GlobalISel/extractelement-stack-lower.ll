@@ -316,8 +316,8 @@ define i16 @v_extract_v128i16_varidx(<128 x i16> addrspace(1)* %ptr, i32 %idx) {
 ; GCN-NEXT:    v_and_b32_e32 v0, 63, v0
 ; GCN-NEXT:    v_lshlrev_b32_e32 v0, 2, v0
 ; GCN-NEXT:    v_and_b32_e32 v1, 1, v2
-; GCN-NEXT:    v_lshlrev_b32_e32 v1, 4, v1
 ; GCN-NEXT:    s_add_u32 s32, s32, 0x10000
+; GCN-NEXT:    v_lshlrev_b32_e32 v1, 4, v1
 ; GCN-NEXT:    s_sub_u32 s32, s32, 0x10000
 ; GCN-NEXT:    s_waitcnt vmcnt(0)
 ; GCN-NEXT:    buffer_store_dword v40, off, s[0:3], s33 offset:640 ; 4-byte Folded Spill

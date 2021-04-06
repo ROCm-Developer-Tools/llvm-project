@@ -7,7 +7,7 @@
 ; RUN: llc -filetype=obj -march=amdgcn -mcpu=gfx908 -mattr=+sramecc < %s | llvm-readobj -file-headers - | FileCheck --check-prefix=SRAM-ECC-GFX908 %s
 
 ; RUN: llc -filetype=obj -march=amdgcn -mcpu=gfx90a < %s | llvm-readobj -file-headers - | FileCheck --check-prefix=SRAM-ECC-GFX90A %s
-; RUN: llc -filetype=obj -march=amdgcn -mcpu=gfx90a < %s | llvm-readobj -file-headers - | FileCheck --check-prefix=SRAM-ECC-GFX90A %s
+; RUN: llc -filetype=obj -march=amdgcn -mcpu=gfx90a -mattr=+sramecc < %s | llvm-readobj -file-headers - | FileCheck --check-prefix=SRAM-ECC-GFX90A %s
 
 ; NO-SRAM-ECC-GFX906:      Flags [
 ; NO-SRAM-ECC-GFX906-NEXT:   EF_AMDGPU_FEATURE_XNACK_V3   (0x100)
