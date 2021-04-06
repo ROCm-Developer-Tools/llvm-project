@@ -25,7 +25,6 @@ omptarget_device_environmentTy omptarget_device_environment;
 // global data holding OpenMP state information
 ////////////////////////////////////////////////////////////////////////////////
 
-// OpenMP will try to call its ctor if we don't add the attribute explicitly
 [[clang::loader_uninitialized]] omptarget_nvptx_Queue<
     omptarget_nvptx_ThreadPrivateContext, OMP_STATE_COUNT>
     omptarget_nvptx_device_State[MAX_SM];
