@@ -16,17 +16,25 @@
 #error "amdgcn target_impl.h expects to be compiled under __AMDGCN__"
 #endif
 
+#include "interface.h"
 #include "amdgcn_interface.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef _OPENMP
 // subset of inttypes.h
 #define PRId64 "ld"
 #define PRIu64 "lu"
 
-#define INLINE inline
-#define NOINLINE __attribute__((noinline))
+#define DEVICE
+#else
+#define DEVICE __attribute__((device))
+#endif
+
+#define INLINE inline DEVICE
+#define NOINLINE __attribute__((noinline)) DEVICE
+
 #define ALIGN(N) __attribute__((aligned(N)))
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -42,7 +50,7 @@
 
 // Maximum number of preallocated arguments to an outlined parallel/simd
 // function. Anything more requires dynamic memory allocation.
-#define MAX_SHARED_ARGS 20
+#define MAX_SHARED_ARGS 40
 
 // Maximum number of omp state objects per SM allocated statically in global
 // memory.
