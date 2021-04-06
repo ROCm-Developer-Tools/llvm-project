@@ -65,6 +65,12 @@ EXTERN void __kmpc_kernel_init(int ThreadLimit, int16_t RequiresOMPRuntime) {
   nThreads = GetNumberOfThreadsInBlock();
   threadLimit = ThreadLimit;
   __kmpc_impl_target_init();
+  omptarget_nvptx_workFn = 0; // Initialized to zero in case there is no work
+#ifdef OMPD_SUPPORT
+  ompd_init();
+  ompd_init_thread_master();
+  ompd_bp_thread_begin();
+#endif /*OMPD_SUPPORT*/
 }
 
 EXTERN void __kmpc_kernel_deinit(int16_t IsOMPRuntimeInitialized) {
@@ -75,6 +81,9 @@ EXTERN void __kmpc_kernel_deinit(int16_t IsOMPRuntimeInitialized) {
   int slot = usedSlotIdx;
   omptarget_nvptx_device_State[slot].Enqueue(
       omptarget_nvptx_threadPrivateContext);
+#ifdef OMPD_SUPPORT
+  ompd_bp_thread_end();
+#endif
   // Done with work.  Kill the workers.
   omptarget_nvptx_workFn = 0;
 }
@@ -114,6 +123,11 @@ EXTERN void __kmpc_spmd_kernel_init(int ThreadLimit,
     omptarget_nvptx_WorkDescr &workDescr = getMyWorkDescriptor();
     // init team context
     currTeamDescr.InitTeamDescr();
+#ifdef OMPD_SUPPORT
+    ompd_init();
+    ompd_bp_parallel_begin(); // This should be placed later, but the parallel
+                              // handle is ready from here on.
+#endif /*OMPD_SUPPORT*/
   }
   __kmpc_impl_syncthreads();
 
@@ -136,6 +150,12 @@ EXTERN void __kmpc_spmd_kernel_init(int ThreadLimit,
         "thread will execute parallel region with id %d in a team of "
         "%d threads\n",
         (int)newTaskDescr->ThreadId(), (int)ThreadLimit);
+
+#ifdef OMPD_SUPPORT
+  ompd_init_thread_parallel(); // __kmpc_kernel_parallel() is not called in
+                               // spmd mode
+  ompd_bp_thread_begin();
+#endif
 }
 
 EXTERN void __kmpc_spmd_kernel_deinit_v2(int16_t RequiresOMPRuntime) {
@@ -145,8 +165,14 @@ EXTERN void __kmpc_spmd_kernel_deinit_v2(int16_t RequiresOMPRuntime) {
     return;
 
   __kmpc_impl_syncthreads();
+#ifdef OMPD_SUPPORT
+  ompd_bp_thread_end();
+#endif
   int threadId = GetThreadIdInBlock();
   if (threadId == 0) {
+#ifdef OMPD_SUPPORT
+    ompd_bp_parallel_end();
+#endif
     // Enqueue omp state object for use by another team.
     int slot = usedSlotIdx;
     omptarget_nvptx_device_State[slot].Enqueue(
