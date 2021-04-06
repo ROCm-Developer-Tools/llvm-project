@@ -60,7 +60,8 @@ int32_t __kmpc_impl_shfl_down_sync(uint64_t Mask, int32_t Var, uint32_t Delta,
 
 inline int32_t __kmpc_impl_shfl_sync(uint64_t Mask, int32_t Var,
                                      int32_t SrcLane) {
-  int Width = GetWarpSize();
+  //int Width = GetWarpSize();
+  int Width = WARPSIZE;
   int Self = GetLaneId();
   int Index = SrcLane + (Self & ~(Width - 1));
   return __builtin_amdgcn_ds_bpermute(Index << 2, Var);
