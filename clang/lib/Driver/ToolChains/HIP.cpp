@@ -19,6 +19,7 @@
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/TargetParser.h"
 
 using namespace clang::driver;
@@ -71,6 +72,14 @@ void AMDGCN::Linker::constructLldCommand(Compilation &C, const JobAction &JA,
         Args.MakeArgString(Twine("-plugin-opt=") + A->getValue(0)));
   }
 
+  Arg *GTune =
+      Args.getLastArg(options::OPT_gTune_Group, options::OPT_ggdbN_Group);
+  if (GTune && !GTune->getOption().matches(options::OPT_glldb) &&
+      !GTune->getOption().matches(options::OPT_gsce)) {
+    LldArgs.push_back("-plugin-opt=-amdgpu-spill-cfi-saved-regs");
+    LldArgs.push_back("-plugin-opt=-disable-dwarf-locations");
+  }
+
   if (C.getDriver().isSaveTempsEnabled())
     LldArgs.push_back("-save-temps");
 
@@ -108,11 +117,12 @@ void AMDGCN::constructHIPFatbinCommand(Compilation &C, const JobAction &JA,
   std::string BundlerTargetArg = "-targets=host-x86_64-unknown-linux";
   std::string BundlerInputArg = "-inputs=" NULL_FILE;
 
-  // TODO: Change the bundle ID as requested by HIP runtime.
   // For code object version 2 and 3, the offload kind in bundle ID is 'hip'
   // for backward compatibility. For code object version 4 and greater, the
   // offload kind in bundle ID is 'hipv4'.
   std::string OffloadKind = "hip";
+  if (getOrCheckAMDGPUCodeObjectVersion(C.getDriver(), Args) >= 4)
+    OffloadKind = OffloadKind + "v4";
   for (const auto &II : Inputs) {
     const auto* A = II.getAction();
     BundlerTargetArg = BundlerTargetArg + "," + OffloadKind +
@@ -229,6 +239,15 @@ HIPToolChain::HIPToolChain(const Driver &D, const llvm::Triple &Triple,
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
+}
+
+void HIPToolChain::addActionsFromClangTargetOptions(
+    const llvm::opt::ArgList &DriverArgs, llvm::opt::ArgStringList &CC1Args,
+    const JobAction &JA, Compilation &C, const InputInfoList &Inputs) const {
+  StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_mcpu_EQ);
+  AddStaticDeviceLibs(C, *getTool(JA.getKind()), JA, Inputs, DriverArgs,
+                      CC1Args, "amdgcn", GpuArch,
+                      /* bitcode SDL?*/ true, /* PostClang Link? */ true);
 }
 
 void HIPToolChain::addClangTargetOptions(
