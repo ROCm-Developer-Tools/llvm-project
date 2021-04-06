@@ -172,6 +172,12 @@ void UnwindRow::dump(raw_ostream &OS, const MCRegisterInfo *MRI, bool IsEH,
     OS << format("0x%" PRIx64 ": ", *Address);
   OS << "CFA=";
   CFAValue.dump(OS, MRI, IsEH);
+  if (CFAAddressSpace != 0) {
+    auto Offset = CFAValue.getOffset();
+    if (Offset == 0)
+      OS << " +" << Offset;
+    OS << " as" << CFAAddressSpace;
+  }
   if (RegLocs.hasLocations()) {
     OS << ": ";
     RegLocs.dump(OS, MRI, IsEH);
@@ -214,7 +220,10 @@ Expected<UnwindTable> UnwindTable::create(const FDE *Fde) {
   const RegisterLocations InitialLocs = Row.getRegisterLocations();
   if (Error FdeError = UT.parseRows(Fde->cfis(), Row, &InitialLocs))
     return std::move(FdeError);
-  UT.Rows.push_back(Row);
+  // Do not add empty row
+  if (Row.getRegisterLocations().hasLocations() ||
+      Row.getCFAValue().getLocation() != UnwindLocation::Unspecified)
+    UT.Rows.push_back(Row);
   return UT;
 }
 
@@ -223,7 +232,10 @@ Expected<UnwindTable> UnwindTable::create(const CIE *Cie) {
   UnwindRow Row;
   if (Error CieError = UT.parseRows(Cie->cfis(), Row, nullptr))
     return std::move(CieError);
-  UT.Rows.push_back(Row);
+  // Do not add empty row
+  if (Row.getRegisterLocations().hasLocations() ||
+      Row.getCFAValue().getLocation() != UnwindLocation::Unspecified)
+    UT.Rows.push_back(Row);
   return UT;
 }
 
@@ -299,6 +311,16 @@ Error CFIProgram::parse(DWARFDataExtractor Data, uint64_t *Offset,
       // Operands: SLEB128
       addInstruction(Opcode, Data.getSLEB128(C));
       break;
+    case DW_CFA_LLVM_def_aspace_cfa:
+    case DW_CFA_LLVM_def_aspace_cfa_sf: {
+      auto RegNum = Data.getULEB128(C);
+      auto CfaOffset = Opcode == DW_CFA_LLVM_def_aspace_cfa
+                           ? Data.getULEB128(C)
+                           : Data.getSLEB128(C);
+      auto AddressSpace = Data.getULEB128(C);
+      addInstruction(Opcode, RegNum, CfaOffset, AddressSpace);
+      break;
+    }
     case DW_CFA_offset_extended:
     case DW_CFA_register:
     case DW_CFA_def_cfa:
@@ -376,6 +398,7 @@ const char *CFIProgram::operandTypeString(CFIProgram::OperandType OT) {
     ENUM_TO_CSTR(OT_SignedFactDataOffset);
     ENUM_TO_CSTR(OT_UnsignedFactDataOffset);
     ENUM_TO_CSTR(OT_Register);
+    ENUM_TO_CSTR(OT_AddressSpace);
     ENUM_TO_CSTR(OT_Expression);
   }
   return "<unknown CFIProgram::OperandType>";
@@ -384,7 +407,7 @@ const char *CFIProgram::operandTypeString(CFIProgram::OperandType OT) {
 llvm::Expected<uint64_t>
 CFIProgram::Instruction::getOperandAsUnsigned(const CFIProgram &CFIP,
                                               uint32_t OperandIdx) const {
-  if (OperandIdx >= 2)
+  if (OperandIdx >= 3)
     return createStringError(errc::invalid_argument,
                              "operand index %" PRIu32 " is not valid",
                              OperandIdx);
@@ -409,6 +432,7 @@ CFIProgram::Instruction::getOperandAsUnsigned(const CFIProgram &CFIP,
 
   case OT_Address:
   case OT_Register:
+  case OT_AddressSpace:
     return Operand;
 
   case OT_FactoredCodeOffset: {
@@ -428,7 +452,7 @@ CFIProgram::Instruction::getOperandAsUnsigned(const CFIProgram &CFIP,
 llvm::Expected<int64_t>
 CFIProgram::Instruction::getOperandAsSigned(const CFIProgram &CFIP,
                                             uint32_t OperandIdx) const {
-  if (OperandIdx >= 2)
+  if (OperandIdx >= 3)
     return createStringError(errc::invalid_argument,
                              "operand index %" PRIu32 " is not valid",
                              OperandIdx);
@@ -444,6 +468,7 @@ CFIProgram::Instruction::getOperandAsSigned(const CFIProgram &CFIP,
 
   case OT_Address:
   case OT_Register:
+  case OT_AddressSpace:
     return createStringError(
         errc::invalid_argument,
         "op[%" PRIu32 "] has OperandType %s which produces an unsigned result, "
@@ -731,6 +756,24 @@ Error UnwindTable::parseRows(const CFIProgram &CFIP, UnwindRow &Row,
       break;
     }
 
+    case dwarf::DW_CFA_LLVM_def_aspace_cfa:
+    case dwarf::DW_CFA_LLVM_def_aspace_cfa_sf: {
+      llvm::Expected<uint64_t> RegNum = Inst.getOperandAsUnsigned(CFIP, 0);
+      if (!RegNum)
+        return RegNum.takeError();
+      llvm::Expected<int64_t> Offset = Inst.getOperandAsSigned(CFIP, 1);
+      if (!Offset)
+        return Offset.takeError();
+      llvm::Expected<uint64_t> CFAAddrSpace =
+          Inst.getOperandAsUnsigned(CFIP, 2);
+      if (!CFAAddrSpace)
+        return CFAAddrSpace.takeError();
+      Row.getCFAValue() =
+          UnwindLocation::createIsRegisterPlusOffset(*RegNum, *Offset);
+      Row.setCFAAddressSpace(*CFAAddrSpace);
+      break;
+    }
+
     case dwarf::DW_CFA_def_cfa_expression:
       Row.getCFAValue() =
           UnwindLocation::createIsDWARFExpression(*Inst.Expression);
@@ -740,19 +783,22 @@ Error UnwindTable::parseRows(const CFIProgram &CFIP, UnwindRow &Row,
   return Error::success();
 }
 
-ArrayRef<CFIProgram::OperandType[2]> CFIProgram::getOperandTypes() {
-  static OperandType OpTypes[DW_CFA_restore+1][2];
+ArrayRef<CFIProgram::OperandType[3]> CFIProgram::getOperandTypes() {
+  static OperandType OpTypes[DW_CFA_restore + 1][3];
   static bool Initialized = false;
   if (Initialized) {
-    return ArrayRef<OperandType[2]>(&OpTypes[0], DW_CFA_restore+1);
+    return ArrayRef<OperandType[3]>(&OpTypes[0], DW_CFA_restore + 1);
   }
   Initialized = true;
 
-#define DECLARE_OP2(OP, OPTYPE0, OPTYPE1)       \
-  do {                                          \
-    OpTypes[OP][0] = OPTYPE0;                   \
-    OpTypes[OP][1] = OPTYPE1;                   \
+#define DECLARE_OP3(OP, OPTYPE0, OPTYPE1, OPTYPE2)                             \
+  do {                                                                         \
+    OpTypes[OP][0] = OPTYPE0;                                                  \
+    OpTypes[OP][1] = OPTYPE1;                                                  \
+    OpTypes[OP][2] = OPTYPE2;                                                  \
   } while (false)
+#define DECLARE_OP2(OP, OPTYPE0, OPTYPE1)                                      \
+  DECLARE_OP3(OP, OPTYPE0, OPTYPE1, OT_None)
 #define DECLARE_OP1(OP, OPTYPE0) DECLARE_OP2(OP, OPTYPE0, OT_None)
 #define DECLARE_OP0(OP) DECLARE_OP1(OP, OT_None)
 
@@ -765,6 +811,10 @@ ArrayRef<CFIProgram::OperandType[2]> CFIProgram::getOperandTypes() {
   DECLARE_OP2(DW_CFA_def_cfa, OT_Register, OT_Offset);
   DECLARE_OP2(DW_CFA_def_cfa_sf, OT_Register, OT_SignedFactDataOffset);
   DECLARE_OP1(DW_CFA_def_cfa_register, OT_Register);
+  DECLARE_OP3(DW_CFA_LLVM_def_aspace_cfa, OT_Register, OT_Offset,
+              OT_AddressSpace);
+  DECLARE_OP3(DW_CFA_LLVM_def_aspace_cfa_sf, OT_Register,
+              OT_SignedFactDataOffset, OT_AddressSpace);
   DECLARE_OP1(DW_CFA_def_cfa_offset, OT_Offset);
   DECLARE_OP1(DW_CFA_def_cfa_offset_sf, OT_SignedFactDataOffset);
   DECLARE_OP1(DW_CFA_def_cfa_expression, OT_Expression);
@@ -790,7 +840,7 @@ ArrayRef<CFIProgram::OperandType[2]> CFIProgram::getOperandTypes() {
 #undef DECLARE_OP1
 #undef DECLARE_OP2
 
-  return ArrayRef<OperandType[2]>(&OpTypes[0], DW_CFA_restore+1);
+  return ArrayRef<OperandType[3]>(&OpTypes[0], DW_CFA_restore + 1);
 }
 
 /// Print \p Opcode's operand number \p OperandIdx which has value \p Operand.
@@ -798,7 +848,7 @@ void CFIProgram::printOperand(raw_ostream &OS, DIDumpOptions DumpOpts,
                               const MCRegisterInfo *MRI, bool IsEH,
                               const Instruction &Instr, unsigned OperandIdx,
                               uint64_t Operand) const {
-  assert(OperandIdx < 2);
+  assert(OperandIdx < 3);
   uint8_t Opcode = Instr.Opcode;
   OperandType Type = getOperandTypes()[Opcode][OperandIdx];
 
@@ -844,6 +894,9 @@ void CFIProgram::printOperand(raw_ostream &OS, DIDumpOptions DumpOpts,
   case OT_Register:
     OS << ' ';
     printRegister(OS, MRI, IsEH, Operand);
+    break;
+  case OT_AddressSpace:
+    OS << format(" as%" PRId64, Operand);
     break;
   case OT_Expression:
     assert(Instr.Expression && "missing DWARFExpression object");
