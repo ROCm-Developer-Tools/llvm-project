@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
   Option
   ProfileData
   Support
+  Object
   )
 
 if(WIN32)
@@ -38,6 +39,7 @@ add_clang_library(clangDriver
   ToolChains/Ananas.cpp
   ToolChains/AMDGPU.cpp
   ToolChains/AMDGPUOpenMP.cpp
+  ToolChains/AmdOptArgs.cpp
   ToolChains/AVR.cpp
   ToolChains/BareMetal.cpp
   ToolChains/Clang.cpp
@@ -49,6 +51,7 @@ add_clang_library(clangDriver
   ToolChains/Darwin.cpp
   ToolChains/DragonFly.cpp
   ToolChains/Flang.cpp
+  ToolChains/AMDFlang.cpp
   ToolChains/FreeBSD.cpp
   ToolChains/Fuchsia.cpp
   ToolChains/Gnu.cpp
