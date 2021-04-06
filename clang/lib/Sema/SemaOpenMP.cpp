@@ -2139,12 +2139,13 @@ bool Sema::isOpenMPCapturedByRef(const ValueDecl *D, unsigned Level,
   // and alignment, because the runtime library only deals with uintptr types.
   // If it does not fit the uintptr size, we need to pass the data by reference
   // instead.
-  if (!IsByRef &&
-      (Ctx.getTypeSizeInChars(Ty) >
-           Ctx.getTypeSizeInChars(Ctx.getUIntPtrType()) ||
-       Ctx.getDeclAlign(D) > Ctx.getTypeAlignInChars(Ctx.getUIntPtrType()))) {
-    IsByRef = true;
-  }
+  if (!Ctx.getTargetInfo().getTriple().isAMDGCN())
+    if (!IsByRef &&
+        (Ctx.getTypeSizeInChars(Ty) >
+             Ctx.getTypeSizeInChars(Ctx.getUIntPtrType()) ||
+         Ctx.getDeclAlign(D) > Ctx.getTypeAlignInChars(Ctx.getUIntPtrType()))) {
+      IsByRef = true;
+    }
 
   return IsByRef;
 }
