@@ -24,6 +24,7 @@
 #include "clang/Driver/ToolChain.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TargetParser.h"
 #include "llvm/Support/VirtualFileSystem.h"
@@ -551,6 +552,12 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     ToolChain.addFastMathRuntimeIfAvailable(Args, CmdArgs);
   }
 
+  // Make sure openmp finds it libomp.so before all others.
+  if (JA.isHostOffloading(Action::OFK_OpenMP)) {
+    addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
+    CmdArgs.push_back(Args.MakeArgString("-L" + D.Dir + "/../lib"));
+  }
+
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   Args.AddAllArgs(CmdArgs, options::OPT_u);
 
@@ -561,6 +568,9 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     addLTOOptions(ToolChain, Args, CmdArgs, Output, Inputs[0],
                   D.getLTOMode() == LTOK_Thin);
   }
+  bool ProprietaryToolChain =
+    checkForAMDProprietaryOptOptions(ToolChain, D, Args, CmdArgs,
+	                             true /*isLLD*/);
 
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
@@ -571,6 +581,18 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
   // The profile runtime also needs access to system libraries.
   getToolChain().addProfileRTLibs(Args, CmdArgs);
+
+  // Add Fortran runtime libraries
+  if (needFortranLibs(D, Args)) {
+    ToolChain.AddFortranStdlibLibArgs(Args, CmdArgs);
+    CmdArgs.push_back("-rpath");
+    CmdArgs.push_back(Args.MakeArgString(D.Dir + "/../lib"));
+  } else {
+    // Claim "no Flang libraries" arguments if any
+    for (auto Arg : Args.filtered(options::OPT_noFlangLibs)) {
+      Arg->claim();
+    }
+  }
 
   if (D.CCCIsCXX() &&
       !Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
@@ -672,7 +694,20 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_T);
 
-  const char *Exec = Args.MakeArgString(ToolChain.GetLinkerPath());
+  // if a linker other than ld.lld is specified, dont use closed ld.lld.
+  if (Args.hasArg(options::OPT_fuse_ld_EQ)) {
+    StringRef LinkerName = Args.getLastArgValue(options::OPT_fuse_ld_EQ, "ld");
+    if (!LinkerName.equals_lower("lld"))
+      ProprietaryToolChain = false;
+  }
+
+  std::string AltPath = D.getInstalledDir();
+  AltPath += "/../alt/bin/ld.lld";
+  const char *Exec = ProprietaryToolChain
+         ? Args.MakeArgString(AltPath.c_str())
+         : Args.MakeArgString(ToolChain.GetLinkerPath());
+
+
   C.addCommand(std::make_unique<Command>(JA, *this,
                                          ResponseFileSupport::AtFileCurCP(),
                                          Exec, CmdArgs, Inputs, Output));
