@@ -30,6 +30,8 @@ class MachineOperand;
 class MCDwarfDwoLineTable;
 class MCSymbol;
 
+extern bool DisableDwarfLocations;
+
 //===----------------------------------------------------------------------===//
 /// This dwarf writer support class manages information associated with a
 /// source file.
