@@ -1715,14 +1715,8 @@ Value *SCEVExpander::visitSMaxExpr(const SCEVSMaxExpr *S) {
       LHS = InsertNoopCastOfTo(LHS, Ty);
     }
     Value *RHS = expandCodeForImpl(S->getOperand(i), Ty, false);
-    Value *Sel;
-    if (Ty->isIntegerTy())
-      Sel = Builder.CreateIntrinsic(Intrinsic::smax, {Ty}, {LHS, RHS},
-                                    /*FMFSource=*/nullptr, "smax");
-    else {
-      Value *ICmp = Builder.CreateICmpSGT(LHS, RHS);
-      Sel = Builder.CreateSelect(ICmp, LHS, RHS, "smax");
-    }
+    Value *ICmp = Builder.CreateICmpSGT(LHS, RHS);
+    Value *Sel = Builder.CreateSelect(ICmp, LHS, RHS, "smax");
     LHS = Sel;
   }
   // In the case of mixed integer and pointer types, cast the
@@ -1744,14 +1738,8 @@ Value *SCEVExpander::visitUMaxExpr(const SCEVUMaxExpr *S) {
       LHS = InsertNoopCastOfTo(LHS, Ty);
     }
     Value *RHS = expandCodeForImpl(S->getOperand(i), Ty, false);
-    Value *Sel;
-    if (Ty->isIntegerTy())
-      Sel = Builder.CreateIntrinsic(Intrinsic::umax, {Ty}, {LHS, RHS},
-                                    /*FMFSource=*/nullptr, "umax");
-    else {
-      Value *ICmp = Builder.CreateICmpUGT(LHS, RHS);
-      Sel = Builder.CreateSelect(ICmp, LHS, RHS, "umax");
-    }
+    Value *ICmp = Builder.CreateICmpUGT(LHS, RHS);
+    Value *Sel = Builder.CreateSelect(ICmp, LHS, RHS, "umax");
     LHS = Sel;
   }
   // In the case of mixed integer and pointer types, cast the
@@ -1773,14 +1761,8 @@ Value *SCEVExpander::visitSMinExpr(const SCEVSMinExpr *S) {
       LHS = InsertNoopCastOfTo(LHS, Ty);
     }
     Value *RHS = expandCodeForImpl(S->getOperand(i), Ty, false);
-    Value *Sel;
-    if (Ty->isIntegerTy())
-      Sel = Builder.CreateIntrinsic(Intrinsic::smin, {Ty}, {LHS, RHS},
-                                    /*FMFSource=*/nullptr, "smin");
-    else {
-      Value *ICmp = Builder.CreateICmpSLT(LHS, RHS);
-      Sel = Builder.CreateSelect(ICmp, LHS, RHS, "smin");
-    }
+    Value *ICmp = Builder.CreateICmpSLT(LHS, RHS);
+    Value *Sel = Builder.CreateSelect(ICmp, LHS, RHS, "smin");
     LHS = Sel;
   }
   // In the case of mixed integer and pointer types, cast the
@@ -1802,14 +1784,8 @@ Value *SCEVExpander::visitUMinExpr(const SCEVUMinExpr *S) {
       LHS = InsertNoopCastOfTo(LHS, Ty);
     }
     Value *RHS = expandCodeForImpl(S->getOperand(i), Ty, false);
-    Value *Sel;
-    if (Ty->isIntegerTy())
-      Sel = Builder.CreateIntrinsic(Intrinsic::umin, {Ty}, {LHS, RHS},
-                                    /*FMFSource=*/nullptr, "umin");
-    else {
-      Value *ICmp = Builder.CreateICmpULT(LHS, RHS);
-      Sel = Builder.CreateSelect(ICmp, LHS, RHS, "umin");
-    }
+    Value *ICmp = Builder.CreateICmpULT(LHS, RHS);
+    Value *Sel = Builder.CreateSelect(ICmp, LHS, RHS, "umin");
     LHS = Sel;
   }
   // In the case of mixed integer and pointer types, cast the
@@ -2286,7 +2262,6 @@ template<typename T> static InstructionCost costAndCollectOperands(
   case scUMaxExpr:
   case scSMinExpr:
   case scUMinExpr: {
-    // FIXME: should this ask the cost for Intrinsic's?
     Cost += CmpSelCost(Instruction::ICmp, S->getNumOperands() - 1, 0, 1);
     Cost += CmpSelCost(Instruction::Select, S->getNumOperands() - 1, 0, 2);
     break;
