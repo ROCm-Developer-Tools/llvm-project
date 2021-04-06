@@ -25,6 +25,8 @@
 
 #define OFFLOAD_DEVICE_DEFAULT -1
 
+#define HOST_DEVICE                -10
+
 // Don't format out enums and structs.
 // clang-format off
 
