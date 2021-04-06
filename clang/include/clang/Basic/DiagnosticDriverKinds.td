@@ -88,6 +88,10 @@ def err_drv_invalid_linker_name : Error<
   "invalid linker name in argument '%0'">;
 def err_drv_invalid_rtlib_name : Error<
   "invalid runtime library name in argument '%0'">;
+def err_drv_invalid_allocatable_mode : Error<
+  "invalid semantic mode for assignments to allocatables in argument '%0'">;
+def err_drv_unsupported_fixed_line_length : Error<
+  "unsupported fixed-format line length in argument '%0'">;
 def err_drv_unsupported_rtlib_for_platform : Error<
   "unsupported runtime library '%0' for platform '%1'">;
 def err_drv_invalid_unwindlib_name : Error<
@@ -119,6 +123,9 @@ def err_drv_invalid_diagnotics_hotness_threshold : Error<
   "invalid argument in '%0', only integer or 'auto' is supported">;
 def err_drv_missing_argument : Error<
   "argument to '%0' is missing (expected %1 value%s1)">;
+def err_drv_missing_Xopenmptarget_or_march: Error<
+  "The option -fopenmp-targets= requires additional options -Xopenmp-target= and -march= .">,
+  DefaultFatal;
 def err_drv_invalid_Xarch_argument_with_args : Error<
   "invalid Xarch argument: '%0', options requiring arguments are unsupported">;
 def err_drv_Xopenmp_target_missing_triple : Error<
@@ -490,6 +497,10 @@ def warn_drv_global_isel_incomplete : Warning<
 def warn_drv_global_isel_incomplete_opt : Warning<
   "-fglobal-isel support is incomplete for this architecture at the current optimization level">,
   InGroup<GlobalISel>;
+
+def warn_drv_amd_opt_not_found : Warning<
+  "The [AMD] propietary optimization compiler installation was not found">,
+  InGroup<UnusedCommandLineArgument>;
 
 def warn_drv_moutline_unsupported_opt : Warning<
   "The '%0' architecture does not support -moutline; flag ignored">,
