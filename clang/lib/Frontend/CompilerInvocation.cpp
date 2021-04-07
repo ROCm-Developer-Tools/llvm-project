@@ -3918,6 +3918,13 @@ bool CompilerInvocation::ParseLangArgsImpl(LangOptions &Opts, ArgList &Args,
 
     for (unsigned i = 0; i < A->getNumValues(); ++i) {
       llvm::Triple TT(A->getValue(i));
+      
+      if(StringRef(A->getValue(i)).startswith("gfx")) {
+        TT.setTriple("amdgcn-amd-amdhsa");
+      } else if(StringRef(A->getValue(i)).startswith("sm_")) {
+        T.isArch64Bit() ? TT.setTriple("nvptx64-nvidia-cuda") 
+                        : TT.setTriple("nvptx-nvidia-cuda");
+      }
 
       if (TT.getArch() == llvm::Triple::UnknownArch ||
           !(TT.getArch() == llvm::Triple::aarch64 || TT.isPPC() ||

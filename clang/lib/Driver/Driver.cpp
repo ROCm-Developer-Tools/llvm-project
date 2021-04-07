@@ -655,6 +655,59 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
   return RT;
 }
 
+struct TripleTargetID {
+      std::string Triple, TargetID;
+      TripleTargetID(std::string Triple, std::string TargetID) :
+        Triple(Triple), TargetID(TargetID) {}
+};
+
+void GetTargetInfoFromOpenMPTargets(Compilation &C, const char* OpenMPTarget,
+                            std::vector<TripleTargetID> &Targets) {
+  if (!std::strncmp(OpenMPTarget, "gfx", 3)) {
+    Targets.push_back(TripleTargetID("amdgcn-amd-amdhsa", std::string(OpenMPTarget)));
+  } else if (!std::strncmp(OpenMPTarget, "sm_", 3)) {
+    const ToolChain *HostTC = C.getSingleOffloadToolChain<Action::OFK_Host>();
+    const llvm::Triple &HostTriple = HostTC->getTriple();
+    StringRef DeviceTripleStr;
+    DeviceTripleStr =
+        HostTriple.isArch64Bit() ? "nvptx64-nvidia-cuda" : "nvptx-nvidia-cuda";
+
+    Targets.push_back(TripleTargetID(DeviceTripleStr.str(), std::string(OpenMPTarget)));
+  }
+}
+
+void GetTargetInfoFromMArch(Compilation &C,
+                            std::vector<TripleTargetID> &Targets) {
+  StringRef IdStr;
+  for (Arg *A : C.getInputArgs()) {
+    if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
+      for (auto *V : A->getValues()) {
+        StringRef VStr = StringRef(V);
+        if (VStr.startswith("-march=")) {
+          IdStr = VStr.split('=').second;
+          StringRef ArchProc = IdStr.split(":").first;
+          if (ArchProc.empty()) {
+            C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << VStr;
+            C.setContainsError();
+            return;
+          }
+          CudaArch Arch = StringToCudaArch(ArchProc);
+          if (Arch == CudaArch::UNKNOWN) {
+            C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch)
+                << VStr;
+            C.setContainsError();
+            return;
+          }
+          auto Triple = StringRef(A->getValue(0));
+          if(!Triple.empty() && !IdStr.empty())
+            Targets.push_back(TripleTargetID(Triple.str(), IdStr.str()));
+        }
+        A->claim();
+      }
+    }
+  }
+}
+
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                                               InputList &Inputs) {
 
@@ -742,42 +795,27 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       return;
     }
 
-    // Before processing each openmp-target value, collect legacy -march values
-    // to append if openmp-targets triples do not have environment.
-    std::vector<std::string> legacy_march_values;
-    for (Arg *A : C.getInputArgs()) {
-      if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
-        for (auto *V : A->getValues()) {
-          StringRef VStr = StringRef(V);
-          if (VStr.startswith("-march=")) {
-            StringRef IdStr = VStr.split('=').second;
-            StringRef ArchProc = IdStr.split(":").first;
-            if (ArchProc.empty()) {
-              C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << VStr;
-              C.setContainsError();
-              return;
-            }
-            CudaArch Arch = StringToCudaArch(ArchProc);
-            if (Arch == CudaArch::UNKNOWN) {
-              C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch)
-                  << VStr;
-              C.setContainsError();
-              return;
-            }
-            legacy_march_values.push_back(IdStr.str());
-          }
-        }
-        A->claim();
-      }
-    }
-
+    
+    std::vector<TripleTargetID> Targets;
+    
+    // extract all arch shorthands given in -fopenmp-targets
+    // triple will be automatically populated if shorthand starts
+    // with "gfx" or "sm_"
+    for (const char *CmdLineVal : OpenMPTargets->getValues())
+        GetTargetInfoFromOpenMPTargets(C, CmdLineVal,Targets);
+    
+    // process arguments of -fopenmp-targets using -Xopenmp-target
+    // and -march
+    GetTargetInfoFromMArch(C, Targets);
+    
     llvm::StringMap<const char *> FoundNormalizedTriples;
-    unsigned used_march_values = 0;
-    for (const char *CmdLineVal : OpenMPTargets->getValues()) {
+    for (auto &Target: Targets) {
+      const char * CmdLineVal = Target.Triple.c_str();
       llvm::Triple TT(CmdLineVal);
-      std::string TargetID;
+    
+      std::string TargetID = Target.TargetID;
       llvm::StringMap<bool> Features;
-      StringRef IdStr = legacy_march_values[used_march_values++];
+      StringRef IdStr = Target.TargetID;
       auto ArchStr = parseTargetID(TT, IdStr, &Features);
       if (!ArchStr) {
         C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
@@ -785,7 +823,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       } else
         TargetID = getCanonicalTargetID(ArchStr.getValue(), Features);
 
-      std::string NormalizedName = TT.normalize();
+      std::string NormalizedName;
       if (TT.hasEnvironment())
         NormalizedName = Twine(TT.normalize() + "-" + TargetID).str();
       else
