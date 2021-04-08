@@ -28,8 +28,10 @@
 #pragma push_macro("__DEVICE__")
 #ifdef __OPENMP_AMDGCN__
 #define __DEVICE__ static constexpr __attribute__((always_inline, nothrow))
+#define __DEVICE_isfn__ int constexpr __attribute__((always_inline, nothrow))
 #else
 #define __DEVICE__ static __device__ inline __attribute__((always_inline))
+#define __DEVICE_isfn__ bool __device__ inline __attribute__((always_inline))
 #endif
 
 // Start with functions that cannot be defined by DEF macros below.
@@ -66,8 +68,8 @@ __DEVICE__ bool isgreaterequal(float __x, float __y) {
 __DEVICE__ bool isgreaterequal(double __x, double __y) {
   return __builtin_isgreaterequal(__x, __y);
 }
-__DEVICE__ bool isinf(float __x) { return ::__isinff(__x); }
-__DEVICE__ bool isinf(double __x) { return ::__isinf(__x); }
+__DEVICE_isfn__ isinf(float __x) { return ::__isinff(__x); }
+__DEVICE_isfn__ isinf(double __x) { return ::__isinf(__x); }
 __DEVICE__ bool isless(float __x, float __y) {
   return __builtin_isless(__x, __y);
 }
@@ -86,8 +88,8 @@ __DEVICE__ bool islessgreater(float __x, float __y) {
 __DEVICE__ bool islessgreater(double __x, double __y) {
   return __builtin_islessgreater(__x, __y);
 }
-__DEVICE__ bool isnan(float __x) { return ::__isnanf(__x); }
-__DEVICE__ bool isnan(double __x) { return ::__isnan(__x); }
+__DEVICE_isfn__ isnan(float __x) { return ::__isnanf(__x); }
+__DEVICE_isfn__ isnan(double __x) { return ::__isnan(__x); }
 __DEVICE__ bool isnormal(float __x) { return __builtin_isnormal(__x); }
 __DEVICE__ bool isnormal(double __x) { return __builtin_isnormal(__x); }
 __DEVICE__ bool isunordered(float __x, float __y) {
