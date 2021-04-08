@@ -1,6 +1,8 @@
 #!/bin/bash
 #
 #  active-offload-target: print the current active targetid 
+#  amdgpu-arch: link to active-offload-target that exits 0 if amdgpu is active, 1 otherwise
+#  nvptx-arch:  link to active-offload-target that exits 0 if cuda is active, 1 otherwise
 #
 # Written by Greg Rodgers Gregory.Rodgers@amd.com
 # Copyright (c) 2021 ADVANCED MICRO DEVICES, INC.  
@@ -47,35 +49,47 @@ AOT_SUPPORTED_PCI_DRIVERS=${AOT_SUPPORTED_PCI_DRIVERS:-"DRIVER=amdgpu|DRIVER=nvi
 function usage(){
 /bin/cat 2>&1 <<"EOF"
 
-   active-offload-target: Print out the targetid for the current active system.
-           With no args, it prints values accepted by clang for offloading
-           such as the clang command line argument --cuda-gpu-arch
+   active-offload-target: Print offload targetid for the current active system.
 
-   Usage: active-offload-target 
+   Usage:
 
-   Options:
-        With no options active-offload-target prints the active targetid 
-    -h  Print this help message
-    -n  Prints numeric pci id, useful to fix tables if getting unknown targetid
-    -c  Prints the codename instead of targetid
-    -nofeatures Do not print the current active features in the targetid. 
+     With no args, it prints the offload-arch value used by various clang
+     frontends. For example, to compile for openmp offloading to current
+     system one could call clang as follows.
 
-   active-offload-target uses two internal tables that need regular maintenance
-   to support new GPUs. The internal tables can be overridden with environment 
-   variables (AOT_PCI2CODENAME_TABLE and AOT_TARGETID_TABLE) that name 
-   alternative external files to search. 
+     clang -fopenmp -openmp-targets=`active-offload-target` foo.c
 
-   The first table is a reformated subset of the famous pci.ids file. It maps
-   numeric pci values to codenames. Even thoush this is a subset of pci.ids ,
-   the internal table is still very large because there are so many supported
-   GPUs for offloading. The function build_pci_to_codename_table builds this 
-   table if AOT_PCI2CODENAME_TABLE is not set. 
+     Options:
+        With no options active-offload-target prints the active offload target
+     -h  Print this help message
+     -n  Prints numeric pci id, useful to fix tables if getting unknown targetid
+     -c  Prints the codename instead of targetid
+     -r  Print compiler required runtime options
 
-   The 2nd table is a mapping of codenames to targetids. The function
-   build_codename_to_targetid_table builds this table if AOT_TARGETID_TABLE
-   is not set. 
+     The alias amdgpu-arch returns 1 if no amdgcn GPU is found.
+     The alias nvptx-arch returns 1 if no cuda GPU is found.
+     These aliases are useful to determine if architecture-specific tests
+     should run or archecture-specific software should be loaded.
 
-   The two internal tables can be overriden with environment variables
+   Maintenance:
+
+     active-offload-target uses two internal tables that need regular maintenance
+     to support new GPUs. The internal tables can be overridden with environment
+     variables (AOT_PCI2CODENAME_TABLE and AOT_TARGETID_TABLE) that name
+     alternative external files to search.
+
+     The first table is a reformated subset of the famous pci.ids file. It maps
+     numeric pci values to codenames. Even thoush this is a subset of pci.ids ,
+     the internal table is still very large because there are so many supported
+     GPUs for offloading. The function build_pci_to_codename_table builds this
+     table if AOT_PCI2CODENAME_TABLE is not set.
+
+     The 2nd table is a mapping of codenames to targetids. The function
+     build_codename_to_targetid_table builds this table if AOT_TARGETID_TABLE
+     is not set.
+
+     The two internal tables can be overriden with environment variables
+     AOT_PCI2CODENAME_TABLE and AOT_TARGEID_TABLE.
 
    Copyright (c) 2021 ADVANCED MICRO DEVICES, INC.
 
@@ -3605,25 +3619,26 @@ function version_compare {
    echo "="; return 0
 }
 
-function get_amd_features()
+function get_amdgpu_required_runtime_features()
 {
    features=""
    kfd_version=`modinfo -F version amdgpu`
    if [[ ! -z $kfd_version ]] ; then
       vc=$(version_compare $kfd_version 5.9.15)
       if [[ $vc == "=" ]] || [[ "$vc" == ">" ]] ; then
-         features=":CodeObjVer4"
+         features="__CodeObjVer4"
       fi
-      # TODO add features for xnack and sramecc
    fi
+   # TODO add features for xnack and sramecc
    echo $features
 }
 
 #  ===========  Main code starts here ======================
 tmp_gputable_file=/tmp/gputable$$.txt
 tmp_targetid_file=/tmp/offloadarchtable$$.txt
+#  See if this is called with alias amdgpu-arch or nvptx-arch
+typerun=${0##*\/}
 AOT_RC=0
-aot_arch="nvidia"
 
 #  process args
 while [ $# -gt 0 ] ; do
@@ -3635,7 +3650,7 @@ while [ $# -gt 0 ] ; do
       --version) 	version ;;
       -c) 	        PRINT_CODENAME=1;;
       -n) 	        PRINT_NUMERIC=1;;
-      -nofeatures) 	NOFEATURES=1;;
+      -r) 	        PRINT_REQUIRED_RUNTIME=1;;
       --) 		shift ; break;;
       *) 		break;echo $1 ignored;
    esac
@@ -3646,23 +3661,31 @@ build_pci_to_codename_table
 build_codename_to_targetid_table
 codename_arch=$(get_codename_and_arch_from_os)
 codename=${codename_arch%:*}
+if [ "$codename" == "unknown" ] ; then
+   AOT_RC=1
+fi
 aot_arch=${codename_arch#*:}
 if [ "$PRINT_CODENAME" == 1 ] ; then 
    targetid=$codename
 else
    targetid=$(get_targetid_from_codename $codename)
 fi
-if [[ "$aot_arch" == "amdgcn" ]] && [[ "$NOFEATURES" != 1 ]] ; then
-   features=$(get_amd_features $targetid)
-   targetid="$targetid$features"
+if [ "$PRINT_REQUIRED_RUNTIME" == 1 ] ; then
+   if [ "$aot_arch" == "amdgcn" ] ; then
+      features=$(get_required_runtime_features $targetid)
+      targetid="$targetid$features"
+   fi
+fi
+if [[ "$typerun" == "amdgpu-arch" ]] && [[ "$aot_arch" != "amdgcn" ]] ; then
+   AOT_RC=1
+fi
+if [[ "$typerun" == "nvptx-arch" ]] && [[ "$aot_arch" != "nvidia" ]] ; then
+   AOT_RC=1
 fi
 
 # cleanup tmp search tables
-[ -f $tmp_gputable_file ] &&  rm $tmp_gputable_file
+[ -f $tmp_gputable_file ] && rm $tmp_gputable_file
 [ -f $tmp_targetid_file ] && rm $tmp_targetid_file
 
-if [ $targetid == "unknown" ] ; then 
-   AOT_RC=1
-fi
 echo $targetid
 exit $AOT_RC
