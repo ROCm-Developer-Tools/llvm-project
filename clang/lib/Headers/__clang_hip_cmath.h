@@ -51,6 +51,10 @@ __DEVICE__ int fpclassify(double __x) {
   return __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL,
                               FP_ZERO, __x);
 }
+__DEVICE__ int fpclassify(long double __x) {
+  return __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL,
+                              FP_ZERO, __x);
+}
 __DEVICE__ float frexp(float __arg, int *__exp) {
   return ::frexpf(__arg, __exp);
 }
@@ -564,7 +568,7 @@ using ::trunc;
 // Well this is fun: We need to pull these symbols in for libc++, but we can't
 // pull them in with libstdc++, because its ::isinf and ::isnan are different
 // than its std::isinf and std::isnan.
-#ifndef __GLIBCXX__
+#if !defined(__GLIBCXX__) || defined(__OPENMP_AMDGCN__)
 using ::isinf;
 using ::isnan;
 #endif
