@@ -63,6 +63,7 @@ add_library(omptarget.rtl.amdgpu SHARED
       impl/utils.cpp
       impl/msgpack.cpp
       src/rtl.cpp
+      src/ompt_callback.cpp
       )
 
 # Install plugin under the lib destination folder.

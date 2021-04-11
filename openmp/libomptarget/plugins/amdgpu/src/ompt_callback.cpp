@@ -1,0 +1,149 @@
+//****************************************************************************
+// global includes
+//****************************************************************************
+
+#include <string.h>
+
+
+//****************************************************************************
+// debug macro needed by include files
+//****************************************************************************
+
+#ifndef DEBUG_PREFIX 
+#define DEBUG_PREFIX "Target AMDGPU RTL"
+#endif
+
+
+
+//****************************************************************************
+// local includes
+//****************************************************************************
+
+#include <Debug.h>
+#include <ompt-connector.h>
+#include <ompt_device_callbacks.h>
+
+
+
+//****************************************************************************
+// macros
+//****************************************************************************
+
+
+#define FOREACH_TARGET_FN(macro)
+
+#define fnptr_to_ptr(x) ((void *) (uint64_t) x)
+
+
+#define ompt_ptr_unknown ((void *) 0)
+
+
+
+//****************************************************************************
+// global data
+//****************************************************************************
+
+ompt_device_callbacks_t ompt_interface;
+
+
+
+//****************************************************************************
+// private data
+//****************************************************************************
+
+static bool ompt_enabled = false;
+
+static ompt_get_target_info_t LIBOMPTARGET_GET_TARGET_OPID;
+
+const char *ompt_device_callbacks_t::documentation = 0; 
+
+
+//****************************************************************************
+// private operations
+//****************************************************************************
+
+ompt_device_t *
+ompt_device_callbacks_t::lookup_device
+(
+ int device_num
+ )
+{
+  return nullptr;
+}
+
+ompt_interface_fn_t 
+ompt_device_callbacks_t::lookup
+(
+ const char *interface_function_name
+)
+{
+#define macro(fn) \
+  if (strcmp(name, #fn) == 0) return (ompt_interface_fn_t) fn;
+
+  FOREACH_TARGET_FN(macro);
+
+#undef macro
+
+  return (ompt_interface_fn_t) 0;
+}
+
+
+static int
+ompt_device_rtl_init
+(
+ ompt_function_lookup_t lookup,
+ int initial_device_num,
+ ompt_data_t *tool_data
+)
+{
+  DP("OMPT: Enter ompt_device_rtl_init\n");
+
+  ompt_enabled = true;
+
+  LIBOMPTARGET_GET_TARGET_OPID = (ompt_get_target_info_t)
+    lookup(stringify(LIBOMPTARGET_GET_TARGET_OPID));
+
+  DP("OMPT: libomptarget_get_target_info = %p\n",
+     fnptr_to_ptr(LIBOMPTARGET_GET_TARGET_OPID));
+
+    ompt_interface.register_callbacks(lookup);
+  
+  DP("OMPT: Exit ompt_device_rtl_init\n");
+
+  return 0;
+}
+
+
+static void
+ompt_device_rtl_fini
+(
+ ompt_data_t *tool_data
+)
+{
+  DP("OMPT: executing amdgpu_ompt_device_rtl_fini\n");
+}
+
+
+
+//****************************************************************************
+// constructor
+//****************************************************************************
+
+__attribute__((constructor))
+static void
+ompt_init
+(
+ void
+)
+{
+  DP("OMPT: Entering ompt_init\n");
+  static library_ompt_connector_t libomptarget_connector("libomptarget"); 
+  static ompt_start_tool_result_t ompt_result;
+
+  ompt_result.initialize       = ompt_device_rtl_init;
+  ompt_result.finalize         = ompt_device_rtl_fini;
+  ompt_result.tool_data.value  = 0;;
+
+  libomptarget_connector.connect(&ompt_result);
+  DP("OMPT: Exiting ompt_init\n");
+}

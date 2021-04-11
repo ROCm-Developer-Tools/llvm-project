@@ -902,14 +902,18 @@ static ompt_interface_fn_t libomp_target_fn_lookup(const char *s) {
   return (ompt_interface_fn_t) 0;
 }
 
-_OMP_EXTERN void libomp_libomptarget_ompt_init(ompt_start_tool_result_t *result) {
+_OMP_EXTERN void libomp_ompt_connect(ompt_start_tool_result_t *result) {
+  OMPT_VERBOSE_INIT_PRINT("libomp --> OMPT: Enter libomp_ompt_connect\n");
+
   __ompt_force_initialization();
 
   if (ompt_enabled.enabled && 
       ompt_callbacks.ompt_callback(ompt_callback_device_initialize)) {
     if (result) {
+      OMPT_VERBOSE_INIT_PRINT("libomp --> OMPT: Connecting with libomptarget\n");
       result->initialize(libomp_target_fn_lookup, 0, NULL); 
       libomptarget_ompt_result = result;
     }
   }
+  OMPT_VERBOSE_INIT_PRINT("libomp --> OMPT: Exit libomp_ompt_connect\n");
 }

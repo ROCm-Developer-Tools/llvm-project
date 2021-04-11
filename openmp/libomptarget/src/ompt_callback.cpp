@@ -10,15 +10,24 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ompt_callback.h"
 
 #include <atomic>
 #include <cstring>
 #include <dlfcn.h>
 #include <assert.h>
 
+
+
+//****************************************************************************
+// local include files
+//****************************************************************************
+
 #include <ompt.h>
+
+#include "ompt_callback.h"
 #include "private.h"
+
+#include <ompt-connector.h>
 
 
 
@@ -398,7 +407,7 @@ void OmptInterface::target_end(int64_t device_id) {
  * OMPT interface operations
  *****************************************************************************/
 
-static void libomptarget_get_target_info(uint64_t *device_num,
+static void LIBOMPTARGET_GET_TARGET_OPID(uint64_t *device_num,
   ompt_id_t *target_id, ompt_id_t *host_op_id) {
   *host_op_id = ompt_target_region_opid;
 }
@@ -444,8 +453,9 @@ static void libomptarget_ompt_finalize(ompt_data_t *data) {
 
 
 static ompt_interface_fn_t libomptarget_rtl_fn_lookup(const char *fname) {
-  if (strcmp(fname, "libomptarget_get_target_info") == 0)
-    return (ompt_interface_fn_t) libomptarget_get_target_info;
+
+  if (strcmp(fname, stringify(LIBOMPTARGET_GET_TARGET_OPID)) == 0)
+    return (ompt_interface_fn_t) LIBOMPTARGET_GET_TARGET_OPID;
 
 #define lookup_libomp_fn(fn) \
   if (strcmp(fname, #fn) == 0) return (ompt_interface_fn_t) fn ## _fn;
@@ -475,36 +485,34 @@ void libomp_libomptarget_ompt_init(ompt_start_tool_result_t *result) {
  * constructor
  *****************************************************************************/
 
-__attribute__((constructor(102))) static void ompt_init() {
-  static ompt_start_tool_result_t libomptarget_ompt_result;
-  static bool initialized = false;
+__attribute__((constructor(102)))
+static void
+ompt_init
+(
+ void
+)
+{
+  static library_ompt_connector_t libomp_connector("libomp"); 
+  static ompt_start_tool_result_t ompt_result;
 
-  if (initialized == false) {
-    libomptarget_ompt_result.initialize = libomptarget_ompt_initialize;
-    libomptarget_ompt_result.finalize   = libomptarget_ompt_finalize;
+  ompt_result.initialize        = libomptarget_ompt_initialize;
+  ompt_result.finalize          = libomptarget_ompt_finalize;
+  ompt_result.tool_data.value   = 0;
     
-    DP("in ompt_init\n");
-    libomp_libomptarget_ompt_init_t libomp_libomptarget_ompt_init_fn = 
-      (libomp_libomptarget_ompt_init_t) // (uint64_t)
-      dlsym(NULL, "libomp_libomptarget_ompt_init");
-
-    if (libomp_libomptarget_ompt_init_fn) {
-      libomp_libomptarget_ompt_init_fn(&libomptarget_ompt_result);
-    }
-    initialized = true;
-  }
+  libomp_connector.connect(&ompt_result);
+  DP("OMPT: Exit ompt_init\n");
 }
 
 
 extern "C" {
 
-void libomptarget_rtl_ompt_init(ompt_start_tool_result_t *result) {
-  DP("enter libomptarget_rtl_ompt_init\n");
+void libomptarget_ompt_connect(ompt_start_tool_result_t *result) {
+  DP("OMPT: Enter libomptarget_ompt_connect\n");
   if (ompt_enabled && result) {
     libomptarget_rtl_finalizer.register_rtl(result->finalize); 
     result->initialize(libomptarget_rtl_fn_lookup, 0, NULL);
   }
-  DP("leave libomptarget_rtl_ompt_init\n");
+  DP("OMPT: Leave libomptarget_ompt_connect\n");
 }
 
 }

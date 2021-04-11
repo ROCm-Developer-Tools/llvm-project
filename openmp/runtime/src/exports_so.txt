@@ -27,7 +27,7 @@ VERSION {
         #
         ompt_control;        # OMPT control interface
         ompt_start_tool;     # OMPT start interface
-        libomp_libomptarget_ompt_init;   # OMPT libomptarget interface
+        libomp_ompt_connect; # OMPT libomptarget interface
 
         # icc drops weak attribute at linking step without the following line:
         Annotate*;           # TSAN annotation

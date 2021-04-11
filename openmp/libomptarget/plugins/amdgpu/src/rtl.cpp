@@ -48,6 +48,8 @@
 #endif
 #define DEBUG_PREFIX "Target " GETNAME(TARGET_NAME) " RTL"
 
+#include <ompt_device_callbacks.h>
+
 // hostrpc interface, FIXME: consider moving to its own include these are
 // statically linked into amdgpu/plugin if present from hostrpc_services.a,
 // linked as --whole-archive to override the weak symbols that are used to
@@ -843,6 +845,11 @@ int32_t __tgt_rtl_init_device(int device_id) {
      DeviceInfo.GroupsPerDevice[device_id],
      DeviceInfo.GroupsPerDevice[device_id] *
          DeviceInfo.ThreadsPerGroup[device_id]);
+
+  {
+    const char *type = nullptr;
+    ompt_interface.device_initialize(device_id, type);
+  }
 
   return OFFLOAD_SUCCESS;
 }
