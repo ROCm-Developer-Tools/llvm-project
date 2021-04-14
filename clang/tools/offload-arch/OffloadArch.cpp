@@ -1,4 +1,4 @@
-//===-- offload-arch/offload-arch.cpp ----------*- C++ -*-===//
+//===-- offload-arch/OffloadArch.cpp ----------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,8 +7,8 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// Implementation of offload-arch tool and commands "amdgpu-arch" and 
-/// "nvidia-arch" that are symbolic links to offload-arch (aliases).
+/// Implementation of offload-arch tool and alias commands "amdgpu-arch" and
+/// "nvidia-arch". The alias commands are symbolic links to offload-arch.
 /// This tool prints offload architecture(s) for the current active system.\n\
 ///
 //===----------------------------------------------------------------------===//
@@ -29,12 +29,21 @@ void aot_usage(){
 \n\
    Usage:\
 \n\
+     offload-arch [ Options ] [ Optional lookup-value ]\n\
+\n\
      With no options, offload-arch prints a value for first offload architecture \n\
      found in current system.  This value can be used by various clang frontends.\n\
      For example, to compile for openmp offloading on current current system\n\
      one could invoke clang with the following command:\n\
 \n\
      clang -fopenmp -openmp-targets=`offload-arch` foo.c\n\
+\n\
+     If an optional lookup-value is specified, offload-arch\n\
+     will check if the value is either a valid offload-arch or codename\n\
+     and lookup requested additional information. For example,\n\
+     this provides the triple information for offload-arch gfx906\n\
+\n\
+     offload-arch gfx906 -t \n\
 \n\
      Options:\n\
      -h  Print this help message\n\
@@ -59,7 +68,7 @@ void aot_usage(){
   exit(1);
 }
 
-static bool AOT_collect_all_devices;
+static bool AOT_get_all_active_devices;
 
 std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
   std::vector<std::string> PCI_IDS;
@@ -94,12 +103,12 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
 	  std::string remainder = str_contents.substr(pcipos);
 	  std::size_t nextval = remainder.find("PCI")-1;
 	  PCI_IDS.push_back(remainder.substr(0,nextval));
-	  if (!AOT_collect_all_devices) {
+          if (!AOT_get_all_active_devices) {
             free(file_contents);
 	    fclose(fd);
 	    return PCI_IDS;
-	  } 
-	} 
+          }
+        } 
         free(file_contents);
 	fclose(fd);
       } else {
@@ -110,6 +119,47 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
   } else {
      fprintf(stderr,"Could not open dir %s \n",sys_bus_pci_devices_dir); exit (1);
   }
+  return PCI_IDS;
+}
+
+std::vector<std::string> _aot_lookup_codename(std::string lookup_codename) {
+  std::vector<std::string> PCI_IDS;
+  for (auto id2str : AOT_CODENAMES)
+    if (lookup_codename.compare(id2str.codename) == 0)
+      for (auto aot_table_entry : AOT_TABLE) {
+        if (id2str.codename_id == aot_table_entry.codename_id) {
+          uint16_t VendorID;
+          uint16_t DeviceID;
+          char pci_id[10];
+          VendorID = aot_table_entry.vendorid;
+          DeviceID = aot_table_entry.devid;
+          sprintf(&pci_id[0], "%x:%x", VendorID, DeviceID);
+          PCI_IDS.push_back(std::string(&pci_id[0]));
+          if (!AOT_get_all_active_devices)
+            return PCI_IDS;
+        }
+      }
+  return PCI_IDS;
+}
+
+std::vector<std::string>
+_aot_lookup_offload_arch(std::string lookup_offload_arch) {
+  std::vector<std::string> PCI_IDS;
+  for (auto id2str : AOT_TARGETS)
+    if (lookup_offload_arch.compare(id2str.target) == 0)
+      for (auto aot_table_entry : AOT_TABLE) {
+        if (id2str.target_id == aot_table_entry.target_id) {
+          uint16_t VendorID;
+          uint16_t DeviceID;
+          char pci_id[10];
+          VendorID = aot_table_entry.vendorid;
+          DeviceID = aot_table_entry.devid;
+          sprintf(&pci_id[0], "%x:%x", VendorID, DeviceID);
+          PCI_IDS.push_back(std::string(&pci_id[0]));
+          if (!AOT_get_all_active_devices)
+            return PCI_IDS;
+        }
+      }
   return PCI_IDS;
 }
 
@@ -141,11 +191,19 @@ std::string _aot_get_amdgpu_capabilities() {
   size_t bytes_read;
   FILE* fd;
   fd = fopen("/sys/module/amdgpu/version", "r");
+  if (!fd) {
+    fprintf(stderr, "Unable to open /sys/module/amdgpu/version\n");
+    exit(1);
+  }
   fseek(fd, 0 , SEEK_END);
   size_t fSize = ftell(fd);
   rewind (fd);
   file_contents = (char*) malloc (sizeof(char)*fSize);
   bytes_read = fread(file_contents,1,fSize,fd);
+  if (bytes_read > fSize) {
+    fprintf(stderr, "Read error on /sys/module/amdgpu/version\n");
+    exit(3);
+  }
   int ver,rel,mod;
   sscanf(file_contents,"%d.%d.%d\n",&ver,&rel,&mod);
   if ((ver > 5) ||
@@ -157,7 +215,7 @@ std::string _aot_get_amdgpu_capabilities() {
   return amdgpu_capabilities;
 }
 
-std::string _aot_get_required_runtime_capabilities( uint16_t vid) {
+std::string _aot_get_capabilities(uint16_t vid) {
   switch(vid){
     case 0x1002: 
       return(_aot_get_amdgpu_capabilities());
@@ -185,12 +243,13 @@ std::string _aot_get_triple( uint16_t VendorID, uint16_t DeviceID) {
 int main(int argc, char **argv) {
   bool print_codename = false;
   bool print_numeric = false;
-  bool print_required_runtime = false;
+  bool print_capabilities_for_runtime_requirements = false;
   bool print_long_codename = false;
   bool amdgpu_arch = false;
   bool nvidia_arch = false;
-  AOT_collect_all_devices = false;
+  AOT_get_all_active_devices = false;
   bool print_triple = false;
+  std::string lookup_value;
 
   std::string a;
   for(int argi=0 ; argi<argc ; argi++){
@@ -207,38 +266,56 @@ int main(int argc, char **argv) {
       } else if ( a == "-l" ) {
         print_long_codename = true;
       } else if ( a == "-r" ) {
-        print_required_runtime = true;
+        print_capabilities_for_runtime_requirements = true;
       } else if ( a == "-h" ) {
         aot_usage();
       } else if ( a == "-a" ) {
-        AOT_collect_all_devices = true;
+        AOT_get_all_active_devices = true;
       } else if ( a == "-t" ) {
         print_triple= true;
       } else {
-        fprintf(stderr,"option %s ignored\n",a.c_str());
+        lookup_value = a;
       }
     }
   }
 
   std::vector<std::string> PCI_IDS;
 
-  // Check for arch specific invocation
-  if (amdgpu_arch) {
-    PCI_IDS = _aot_get_pci_ids("DRIVER=amdgpu");
-  } else if (nvidia_arch) {
-    PCI_IDS = _aot_get_pci_ids("DRIVER=nvidia");
-  } else {
-    // Search for all archs; 
-    PCI_IDS = _aot_get_pci_ids("DRIVER=amdgpu");
-    if (AOT_collect_all_devices) {
-      std::vector<std::string> PCI_IDs_next_arch;
-      PCI_IDs_next_arch = _aot_get_pci_ids("DRIVER=nvidia");
-      for(auto PCI_ID : PCI_IDs_next_arch)
-        PCI_IDS.push_back(PCI_ID); 
+  if (lookup_value.empty()) {
+    // No lookup_value so get the current pci ids.
+    // First check if invocation was arch specific.
+    if (print_capabilities_for_runtime_requirements) {
+      fprintf(stderr, "Error: cannot lookup offload-arch/codenane AND query\n");
+      fprintf(stderr, "       active capabilities (-r).\n");
+      return 1;
+    }
+    if (amdgpu_arch) {
+      PCI_IDS = _aot_get_pci_ids("DRIVER=amdgpu");
+    } else if (nvidia_arch) {
+      PCI_IDS = _aot_get_pci_ids("DRIVER=nvidia");
     } else {
-      // stop offload-arch at the first device found`
-      if(PCI_IDS.empty())
-        PCI_IDS = _aot_get_pci_ids("DRIVER=nvidia"); 
+      // Search for all supported offload archs;
+      PCI_IDS = _aot_get_pci_ids("DRIVER=amdgpu");
+      if (AOT_get_all_active_devices) {
+        std::vector<std::string> PCI_IDs_next_arch;
+        PCI_IDs_next_arch = _aot_get_pci_ids("DRIVER=nvidia");
+        for (auto PCI_ID : PCI_IDs_next_arch)
+          PCI_IDS.push_back(PCI_ID);
+      } else {
+        // stop offload-arch at first device found`
+        if (PCI_IDS.empty())
+          PCI_IDS = _aot_get_pci_ids("DRIVER=nvidia");
+      }
+    }
+  } else {
+    PCI_IDS = _aot_lookup_offload_arch(lookup_value);
+    if (PCI_IDS.empty())
+      PCI_IDS = _aot_lookup_codename(lookup_value);
+    if (PCI_IDS.empty()) {
+      fprintf(stderr, "Error: Could not find \"%s\" in offload-arch tables\n",
+              lookup_value.c_str());
+      fprintf(stderr, "       as either an offload-arch or codename\n");
+      return 1;
     }
   }
 
@@ -256,45 +333,10 @@ int main(int argc, char **argv) {
     DeviceIDs.push_back(devid);
   }
 
-  if (print_numeric) {
-    int i = 0;
-    for (auto vid : VendorIDs) {
-      printf("%x:%x\n",vid,DeviceIDs[i]);
-      i++;
-    }
-    return 0;
-  }
-
-  // Use Jonathan's parsing code to find long name from pci.ids
-  if (print_long_codename) {
-    struct pci_ids pacc;
-    char namebuf[MAXPATHSIZE];
+  struct pci_ids pacc;
+  char namebuf[MAXPATHSIZE];
+  if (print_long_codename)
     pacc = pci_ids_create();
-    int i = 0;
-    for (auto vid : VendorIDs) {
-      char* long_code_name = pci_ids_lookup(pacc, namebuf, 
-      sizeof(namebuf), vid, DeviceIDs[i++]);
-      printf("%s\n",long_code_name);
-    }
-    pci_ids_destroy(pacc);
-    return 0;
-  }
-
-  if (print_codename) {
-    int i = 0;
-    int rc = 0;
-    for (auto vid : VendorIDs) {
-      std::string codename = _aot_get_codename(vid,DeviceIDs[i]);
-      if (codename.empty()) {
-        fprintf(stderr, "Could not find codename for %x:%x\n",vid,DeviceIDs[i]);
-        rc = 1;
-      } else {
-        printf("%s\n",codename.c_str());
-      }
-      i++;
-    }
-    return rc;
-  }
 
   int i = 0;
   int rc = 0;
@@ -304,17 +346,27 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Could not find targetid for %x:%x\n",vid,DeviceIDs[i]);
       rc = 1;
     } else {
-      if(print_triple) {
-        printf("%s %s\n",target.c_str(),
-          _aot_get_triple(vid,DeviceIDs[i]).c_str());
-      } else if (print_required_runtime) { 
-	printf("%s %s\n",target.c_str(),
-          _aot_get_required_runtime_capabilities(vid).c_str());
-      } else  {
-        printf("%s\n",target.c_str());
+      std::string xinfo;
+      if (print_codename)
+        xinfo.append(" ").append(_aot_get_codename(vid, DeviceIDs[i]));
+      if (print_numeric)
+        xinfo.append(" ").append(PCI_IDS[i]);
+      if (print_triple)
+        xinfo.append(" ").append(_aot_get_triple(vid, DeviceIDs[i]));
+      if (print_capabilities_for_runtime_requirements)
+        xinfo.append(" ").append(_aot_get_capabilities(vid));
+      if (print_long_codename) {
+        // Use Jonathan's parsing code to find long name from pci.ids
+        std::string long_code_name(
+            pci_ids_lookup(pacc, namebuf, sizeof(namebuf), vid, DeviceIDs[i]));
+        xinfo.append(" : ").append(long_code_name);
       }
+      printf("%s%s\n", target.c_str(), xinfo.c_str());
     }
     i++;
   }
+
+  if (print_long_codename)
+    pci_ids_destroy(pacc);
   return rc;
 }
