@@ -2,13 +2,14 @@
 project(offload-arch)
 
 cmake_policy(SET CMP0002 NEW)
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.5)
 
 add_executable(offload-arch
   OffloadArch.cpp
   pci_ids.c
 )
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
 
 # This is needed to find the generated header.
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
