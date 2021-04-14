@@ -273,8 +273,8 @@ int main(int argc, char **argv) {
     a = std::string(argv[argi]);
     if (argi == 0) {
       // look for arch-specific invocation with symlink
-      amdgpu_arch = (a.find("amdgpu-arch") != -1);
-      nvidia_arch = (a.find("nvidia-arch") != -1);
+      amdgpu_arch = (a.find("amdgpu-arch") != std::string::npos);
+      nvidia_arch = (a.find("nvidia-arch") != std::string::npos);
     } else {
       if (a == "-n") {
         print_numeric = true;

@@ -51,7 +51,9 @@
  *	0201  US201
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <string.h>
 
 #include "pci_ids.h"
