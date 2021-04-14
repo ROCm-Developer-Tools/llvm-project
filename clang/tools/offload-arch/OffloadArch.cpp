@@ -233,16 +233,16 @@ std::string _aot_get_amdgpu_capabilities() {
 }
 
 std::string _aot_get_capabilities(uint16_t vid) {
+  std::string capabilities(" ");
   switch (vid) {
   case 0x1002:
-    return (_aot_get_amdgpu_capabilities());
+    capabilities.append(_aot_get_amdgpu_capabilities());
     break;
-  case 0x1dba:
+  case 0x10de:
     // FIXME return version of cuda here
-    return nullptr;
     break;
   }
-  return nullptr;
+  return capabilities;
 }
 
 std::string _aot_get_triple(uint16_t VendorID, uint16_t DeviceID) {
@@ -250,7 +250,7 @@ std::string _aot_get_triple(uint16_t VendorID, uint16_t DeviceID) {
   case 0x1002:
     return (std::string("amdgcn-amd-amdhsa"));
     break;
-  case 0x1dba:
+  case 0x10de:
     return (std::string("nvptx64-nvidia-cuda"));
     break;
   }
@@ -306,11 +306,6 @@ int main(int argc, char **argv) {
   if (lookup_value.empty()) {
     // No lookup_value so get the current pci ids.
     // First check if invocation was arch specific.
-    if (print_capabilities_for_runtime_requirements) {
-      fprintf(stderr, "Error: cannot lookup offload-arch/codenane AND query\n");
-      fprintf(stderr, "       active runtime capabilities (-r).\n");
-      return 1;
-    }
     if (amdgpu_arch) {
       PCI_IDS = _aot_get_pci_ids("DRIVER=amdgpu");
     } else if (nvidia_arch) {
@@ -330,6 +325,11 @@ int main(int argc, char **argv) {
       }
     }
   } else {
+    if (print_capabilities_for_runtime_requirements) {
+      fprintf(stderr, "Error: cannot lookup offload-arch/codename AND query\n");
+      fprintf(stderr, "       active runtime capabilities (-r).\n");
+      return 1;
+    }
     PCI_IDS = _aot_lookup_offload_arch(lookup_value);
     if (PCI_IDS.empty())
       PCI_IDS = _aot_lookup_codename(lookup_value);
