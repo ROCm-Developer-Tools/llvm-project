@@ -9,59 +9,61 @@
 /// \file
 /// Implementation of offload-arch tool and alias commands "amdgpu-arch" and
 /// "nvidia-arch". The alias commands are symbolic links to offload-arch.
-/// This tool prints offload architecture(s) for the current active system.\n\
+/// offload-arch prints the offload-arch for the current active system or
+/// looks up numeric pci ids and codenames for a given offload-arch.
 ///
 //===----------------------------------------------------------------------===//
 
+#include "generated_offload_arch.h"
 #include "pci_ids.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
 #include <vector>
-#include "generated_offload_arch.h"
 
 #define MAXPATHSIZE 512
 
 void aot_usage() {
   printf("\n\
    offload-arch: Print offload architecture(s) for the current active system.\n\
+                 or lookup information about offload architectures\n\
 \n\
    Usage:\
 \n\
      offload-arch [ Options ] [ Optional lookup-value ]\n\
 \n\
-     With no options, offload-arch prints a value for first offload architecture \n\
+     With no options, offload-arch prints a value for first offload architecture\n\
      found in current system.  This value can be used by various clang frontends.\n\
      For example, to compile for openmp offloading on current current system\n\
      one could invoke clang with the following command:\n\
 \n\
      clang -fopenmp -openmp-targets=`offload-arch` foo.c\n\
 \n\
-     If an optional lookup-value is specified, offload-arch\n\
-     will check if the value is either a valid offload-arch or codename\n\
+     If an optional lookup-value is specified, offload-arch will\n\
+     check if the value is either a valid offload-arch or a codename\n\
      and lookup requested additional information. For example,\n\
-     this provides the all information for offload-arch gfx906\n\
+     this provides all information for offload-arch gfx906:\n\
 \n\
      offload-arch gfx906 -v \n\
 \n\
      Options:\n\
      -h  Print this help message\n\
-     -a  Print value for each device found. Don't stop at first device found.\n\
-     -c  Print short codename instead of targetid\n\
-     -n  Print numeric pci-id, useful to fix tables if getting unknown targetid\n\
-     -t  Print the recommended offload triple.\n\
+     -a  Print values for all devices. Don't stop at first device found.\n\
+     -c  Print codename\n\
+     -n  Print numeric pci-id\n\
+     -t  Print recommended offload triple.\n\
      -v  Verbose = -a -c -n -t \n\
-     -l  Print long codename as found in pci.ids file\n\
-     -r  Print capabilities of current system to satisfy potential runtime\n\
-         requirements of compiled offload images.  This is used by runtime to\n\
+     -l  Print long codename found in pci.ids file\n\
+     -r  Print capabilities of current system to satisfy runtime requirements\n\
+         of compiled offload images.  This option is used by the runtime to\n\
 	 choose correct image when multiple compiled images are availble.\n\
 \n\
      The alias amdgpu-arch returns 1 if no amdgcn GPU is found.\n\
      The alias nvidia-arch returns 1 if no cuda GPU is found.\n\
      These aliases are useful to determine if architecture-specific tests\n\
      should be run. Or these aliases could be used to conditionally load\n\
-     archecture-specific software at runtime.\n\
+     archecture-specific software.\n\
 \n\
    Copyright (c) 2021 ADVANCED MICRO DEVICES, INC.\n\
 \n\
@@ -96,12 +98,12 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
         rewind(fd);
         file_contents = (char *)malloc(sizeof(char) * fSize);
         if (file_contents == NULL) {
-          fprintf(stderr, "malloc fail for %ld bytes\n", fSize);
+          fprintf(stderr, "Error: malloc fail for %ld bytes.\n", fSize);
           exit(2);
         }
         bytes_read = fread(file_contents, 1, fSize, fd);
         if (bytes_read > fSize) {
-          fprintf(stderr, "Read error on %s\n", uevent_filename);
+          fprintf(stderr, "Error: Read error on file %s.\n", uevent_filename);
           exit(3);
         }
         std::string str_contents(file_contents);
@@ -120,13 +122,14 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
         free(file_contents);
         fclose(fd);
       } else {
-        fprintf(stderr, "File error opening %s\n", uevent_filename);
+        fprintf(stderr, "Error: failed to open file  %s.\n", uevent_filename);
         exit(1);
       }
     } // end of foreach subdir
     closedir(dirp);
   } else {
-    fprintf(stderr, "Could not open dir %s \n", sys_bus_pci_devices_dir);
+    fprintf(stderr, "Error: failed to open directory %s.\n",
+            sys_bus_pci_devices_dir);
     exit(1);
   }
   return PCI_IDS;
@@ -143,7 +146,7 @@ std::vector<std::string> _aot_lookup_codename(std::string lookup_codename) {
           char pci_id[10];
           VendorID = aot_table_entry.vendorid;
           DeviceID = aot_table_entry.devid;
-          sprintf(&pci_id[0], "%x:%x", VendorID, DeviceID);
+          snprintf(&pci_id[0], 10, "%x:%x", VendorID, DeviceID);
           PCI_IDS.push_back(std::string(&pci_id[0]));
           if (!AOT_get_all_active_devices)
             return PCI_IDS;
@@ -164,7 +167,7 @@ _aot_lookup_offload_arch(std::string lookup_offload_arch) {
           char pci_id[10];
           VendorID = aot_table_entry.vendorid;
           DeviceID = aot_table_entry.devid;
-          sprintf(&pci_id[0], "%x:%x", VendorID, DeviceID);
+          snprintf(&pci_id[0], 10, "%x:%x", VendorID, DeviceID);
           PCI_IDS.push_back(std::string(&pci_id[0]));
           if (!AOT_get_all_active_devices)
             return PCI_IDS;
@@ -198,20 +201,25 @@ std::string _aot_get_target(uint16_t VendorID, uint16_t DeviceID) {
 std::string _aot_get_amdgpu_capabilities() {
   std::string amdgpu_capabilities;
   char *file_contents;
+  const char *versionfname = "/sys/module/amdgpu/version";
   size_t bytes_read;
   FILE *fd;
-  fd = fopen("/sys/module/amdgpu/version", "r");
+  fd = fopen(versionfname, "r");
   if (!fd) {
-    fprintf(stderr, "Unable to open /sys/module/amdgpu/version\n");
+    fprintf(stderr, "Error: Failed to open %s.\n", versionfname);
     exit(1);
   }
   fseek(fd, 0, SEEK_END);
   size_t fSize = ftell(fd);
   rewind(fd);
   file_contents = (char *)malloc(sizeof(char) * fSize);
+  if (file_contents == NULL) {
+    fprintf(stderr, "Error: malloc fail for %ld bytes.\n", fSize);
+    exit(2);
+  }
   bytes_read = fread(file_contents, 1, fSize, fd);
   if (bytes_read > fSize) {
-    fprintf(stderr, "Read error on /sys/module/amdgpu/version\n");
+    fprintf(stderr, "Error: Failed to read %s.\n", versionfname);
     exit(3);
   }
   int ver, rel, mod;
@@ -300,7 +308,7 @@ int main(int argc, char **argv) {
     // First check if invocation was arch specific.
     if (print_capabilities_for_runtime_requirements) {
       fprintf(stderr, "Error: cannot lookup offload-arch/codenane AND query\n");
-      fprintf(stderr, "       active capabilities (-r).\n");
+      fprintf(stderr, "       active runtime capabilities (-r).\n");
       return 1;
     }
     if (amdgpu_arch) {
@@ -328,7 +336,7 @@ int main(int argc, char **argv) {
     if (PCI_IDS.empty()) {
       fprintf(stderr, "Error: Could not find \"%s\" in offload-arch tables\n",
               lookup_value.c_str());
-      fprintf(stderr, "       as either an offload-arch or codename\n");
+      fprintf(stderr, "       as either an offload-arch or a codename.\n");
       return 1;
     }
   }
@@ -357,7 +365,8 @@ int main(int argc, char **argv) {
   for (auto vid : VendorIDs) {
     std::string target = _aot_get_target(vid, DeviceIDs[i]);
     if (target.empty()) {
-      fprintf(stderr, "Could not find targetid for %x:%x\n", vid, DeviceIDs[i]);
+      fprintf(stderr, "Error: Could not find offload-arch for pci id %x:%x.\n",
+              vid, DeviceIDs[i]);
       rc = 1;
     } else {
       std::string xinfo;
