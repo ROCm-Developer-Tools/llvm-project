@@ -73,7 +73,7 @@ void aot_usage() {
 
 static bool AOT_get_all_active_devices;
 
-std::string _aot_get_file_contents(char *fname) {
+std::string _aot_get_file_contents(std::string fname) {
   std::string file_contents;
   std::string line;
   std::ifstream myfile(fname);
@@ -101,7 +101,8 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
         continue;
       snprintf(uevent_filename, MAXPATHSIZE, "%s/%s/uevent",
                sys_bus_pci_devices_dir, dir->d_name);
-      std::string file_contents = _aot_get_file_contents(uevent_filename);
+      std::string file_contents =
+          _aot_get_file_contents(std::string(uevent_filename));
       if (!file_contents.empty()) {
         std::size_t driver_found_loc = file_contents.find(driver_search_phrase);
         if (driver_found_loc == 0) {
@@ -189,7 +190,7 @@ std::string _aot_get_offload_arch(uint16_t VendorID, uint16_t DeviceID) {
 std::string _aot_get_amdgpu_capabilities() {
   std::string amdgpu_capabilities;
   std::string file_contents =
-      _aot_get_file_contents((char *)"/sys/module/amdgpu/version");
+      _aot_get_file_contents(std::string("/sys/module/amdgpu/version"));
   if (!file_contents.empty()) {
     int ver, rel, mod;
     sscanf(file_contents.c_str(), "%d.%d.%d\n", &ver, &rel, &mod);
