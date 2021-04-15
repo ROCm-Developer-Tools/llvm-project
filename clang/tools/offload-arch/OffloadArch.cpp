@@ -15,8 +15,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "generated_offload_arch.h"
-#include "pci_ids.h"
 #include <dirent.h>
+#include <fstream>
+#include <iostream>
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -54,7 +55,6 @@ void aot_usage() {
      -n  Print numeric pci-id\n\
      -t  Print recommended offload triple.\n\
      -v  Verbose = -a -c -n -t \n\
-     -l  Print long codename found in pci.ids file\n\
      -r  Print capabilities of current system to satisfy runtime requirements\n\
          of compiled offload images.  This option is used by the runtime to\n\
 	 choose correct image when multiple compiled images are availble.\n\
@@ -73,15 +73,25 @@ void aot_usage() {
 
 static bool AOT_get_all_active_devices;
 
+std::string _aot_get_file_contents(char *fname) {
+  std::string file_contents;
+  std::string line;
+  std::ifstream myfile(fname);
+  if (myfile.is_open()) {
+    while (getline(myfile, line)) {
+      file_contents.append(line).append("\n");
+    }
+    myfile.close();
+  }
+  return file_contents;
+}
+
 std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
   std::vector<std::string> PCI_IDS;
   char uevent_filename[MAXPATHSIZE];
   const char *sys_bus_pci_devices_dir = "/sys/bus/pci/devices";
   DIR *dirp;
   struct dirent *dir;
-  char *file_contents;
-  size_t bytes_read;
-  FILE *fd;
 
   dirp = opendir(sys_bus_pci_devices_dir);
   if (dirp) {
@@ -91,39 +101,17 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
         continue;
       snprintf(uevent_filename, MAXPATHSIZE, "%s/%s/uevent",
                sys_bus_pci_devices_dir, dir->d_name);
-      fd = fopen(uevent_filename, "r");
-      if (fd) {
-        fseek(fd, 0, SEEK_END);
-        size_t fSize = ftell(fd);
-        rewind(fd);
-        file_contents = (char *)malloc(sizeof(char) * fSize);
-        if (file_contents == NULL) {
-          fprintf(stderr, "Error: malloc fail for %ld bytes.\n", fSize);
-          exit(2);
-        }
-        bytes_read = fread(file_contents, 1, fSize, fd);
-        if (bytes_read > fSize) {
-          fprintf(stderr, "Error: Read error on file %s.\n", uevent_filename);
-          exit(3);
-        }
-        std::string str_contents(file_contents);
-        std::size_t driver_found_loc = str_contents.find(driver_search_phrase);
+      std::string file_contents = _aot_get_file_contents(uevent_filename);
+      if (!file_contents.empty()) {
+        std::size_t driver_found_loc = file_contents.find(driver_search_phrase);
         if (driver_found_loc == 0) {
-          std::size_t pcipos = str_contents.find("PCI_ID") + 7;
-          std::string remainder = str_contents.substr(pcipos);
+          std::size_t pcipos = file_contents.find("PCI_ID") + 7;
+          std::string remainder = file_contents.substr(pcipos);
           std::size_t nextval = remainder.find("PCI") - 1;
           PCI_IDS.push_back(remainder.substr(0, nextval));
-          if (!AOT_get_all_active_devices) {
-            free(file_contents);
-            fclose(fd);
+          if (!AOT_get_all_active_devices)
             return PCI_IDS;
-          }
         }
-        free(file_contents);
-        fclose(fd);
-      } else {
-        fprintf(stderr, "Error: failed to open file  %s.\n", uevent_filename);
-        exit(1);
       }
     } // end of foreach subdir
     closedir(dirp);
@@ -158,10 +146,10 @@ std::vector<std::string> _aot_lookup_codename(std::string lookup_codename) {
 std::vector<std::string>
 _aot_lookup_offload_arch(std::string lookup_offload_arch) {
   std::vector<std::string> PCI_IDS;
-  for (auto id2str : AOT_TARGETS)
-    if (lookup_offload_arch.compare(id2str.target) == 0)
+  for (auto id2str : AOT_OFFLOADARCHS)
+    if (lookup_offload_arch.compare(id2str.offloadarch) == 0)
       for (auto aot_table_entry : AOT_TABLE) {
-        if (id2str.target_id == aot_table_entry.target_id) {
+        if (id2str.offloadarch_id == aot_table_entry.offloadarch_id) {
           uint16_t VendorID;
           uint16_t DeviceID;
           char pci_id[10];
@@ -187,48 +175,28 @@ std::string _aot_get_codename(uint16_t VendorID, uint16_t DeviceID) {
   return nullptr;
 }
 
-std::string _aot_get_target(uint16_t VendorID, uint16_t DeviceID) {
+std::string _aot_get_offload_arch(uint16_t VendorID, uint16_t DeviceID) {
   for (auto aot_table_entry : AOT_TABLE) {
     if ((VendorID == aot_table_entry.vendorid) &&
         (DeviceID == aot_table_entry.devid))
-      for (auto id2str : AOT_TARGETS)
-        if (id2str.target_id == aot_table_entry.target_id)
-          return std::string(id2str.target);
+      for (auto id2str : AOT_OFFLOADARCHS)
+        if (id2str.offloadarch_id == aot_table_entry.offloadarch_id)
+          return std::string(id2str.offloadarch);
   }
   return nullptr;
 }
 
 std::string _aot_get_amdgpu_capabilities() {
   std::string amdgpu_capabilities;
-  char *file_contents;
-  const char *versionfname = "/sys/module/amdgpu/version";
-  size_t bytes_read;
-  FILE *fd;
-  fd = fopen(versionfname, "r");
-  if (!fd) {
-    fprintf(stderr, "Error: Failed to open %s.\n", versionfname);
-    exit(1);
+  std::string file_contents =
+      _aot_get_file_contents((char *)"/sys/module/amdgpu/version");
+  if (!file_contents.empty()) {
+    int ver, rel, mod;
+    sscanf(file_contents.c_str(), "%d.%d.%d\n", &ver, &rel, &mod);
+    if ((ver > 5) || ((ver == 5) && (rel > 9)) ||
+        ((ver == 5) && (rel == 9) && (mod >= 15)))
+      amdgpu_capabilities.append("CodeObjVer4");
   }
-  fseek(fd, 0, SEEK_END);
-  size_t fSize = ftell(fd);
-  rewind(fd);
-  file_contents = (char *)malloc(sizeof(char) * fSize);
-  if (file_contents == NULL) {
-    fprintf(stderr, "Error: malloc fail for %ld bytes.\n", fSize);
-    exit(2);
-  }
-  bytes_read = fread(file_contents, 1, fSize, fd);
-  if (bytes_read > fSize) {
-    fprintf(stderr, "Error: Failed to read %s.\n", versionfname);
-    exit(3);
-  }
-  int ver, rel, mod;
-  sscanf(file_contents, "%d.%d.%d\n", &ver, &rel, &mod);
-  if ((ver > 5) || ((ver == 5) && (rel > 9)) ||
-      ((ver == 5) && (rel == 9) && (mod >= 15)))
-    amdgpu_capabilities = std::string("CodeObjVer4");
-  free(file_contents);
-  fclose(fd);
   return amdgpu_capabilities;
 }
 
@@ -261,7 +229,6 @@ int main(int argc, char **argv) {
   bool print_codename = false;
   bool print_numeric = false;
   bool print_capabilities_for_runtime_requirements = false;
-  bool print_long_codename = false;
   bool amdgpu_arch = false;
   bool nvidia_arch = false;
   AOT_get_all_active_devices = false;
@@ -280,8 +247,6 @@ int main(int argc, char **argv) {
         print_numeric = true;
       } else if (a == "-c") {
         print_codename = true;
-      } else if (a == "-l") {
-        print_long_codename = true;
       } else if (a == "-r") {
         print_capabilities_for_runtime_requirements = true;
       } else if (a == "-h") {
@@ -345,51 +310,28 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::vector<uint16_t> VendorIDs;
-  std::vector<uint16_t> DeviceIDs;
-  // Convert string to two uint16_t hex values
-  for (auto PCI_ID : PCI_IDS) {
-    unsigned vid, devid;
-    sscanf(PCI_ID.c_str(), "%x:%x", &vid, &devid);
-    VendorIDs.push_back(vid);
-    DeviceIDs.push_back(devid);
-  }
-
-  struct pci_ids pacc;
-  char namebuf[MAXPATHSIZE];
-  if (print_long_codename)
-    pacc = pci_ids_create();
-
-  int i = 0;
   int rc = 0;
-  for (auto vid : VendorIDs) {
-    std::string target = _aot_get_target(vid, DeviceIDs[i]);
-    if (target.empty()) {
-      fprintf(stderr, "Error: Could not find offload-arch for pci id %x:%x.\n",
-              vid, DeviceIDs[i]);
+  for (auto PCI_ID : PCI_IDS) {
+    unsigned vid32, devid32;
+    sscanf(PCI_ID.c_str(), "%x:%x", &vid32, &devid32);
+    uint16_t vid = vid32;
+    uint16_t devid = devid32;
+    std::string offload_arch = _aot_get_offload_arch(vid, devid);
+    if (offload_arch.empty()) {
+      fprintf(stderr, "Error: offload-arch not found for %x:%x.\n", vid, devid);
       rc = 1;
     } else {
       std::string xinfo;
       if (print_codename)
-        xinfo.append(" ").append(_aot_get_codename(vid, DeviceIDs[i]));
+        xinfo.append(" ").append(_aot_get_codename(vid, devid));
       if (print_numeric)
-        xinfo.append(" ").append(PCI_IDS[i]);
+        xinfo.append(" ").append(PCI_ID);
       if (print_triple)
-        xinfo.append(" ").append(_aot_get_triple(vid, DeviceIDs[i]));
+        xinfo.append(" ").append(_aot_get_triple(vid, devid));
       if (print_capabilities_for_runtime_requirements)
         xinfo.append(" ").append(_aot_get_capabilities(vid));
-      if (print_long_codename) {
-        // Use Jonathan's parsing code to find long name from pci.ids
-        std::string long_code_name(
-            pci_ids_lookup(pacc, namebuf, sizeof(namebuf), vid, DeviceIDs[i]));
-        xinfo.append(" : ").append(long_code_name);
-      }
-      printf("%s%s\n", target.c_str(), xinfo.c_str());
+      printf("%s%s\n", offload_arch.c_str(), xinfo.c_str());
     }
-    i++;
   }
-
-  if (print_long_codename)
-    pci_ids_destroy(pacc);
   return rc;
 }

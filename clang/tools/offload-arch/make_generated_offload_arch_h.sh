@@ -54,26 +54,26 @@ AOT_CODENAME2OFFLOADARCH="$INPUTDIR/amdgpu/codename2offloadarch.txt $INPUTDIR/nv
 # This is the output file which is always written to current dir
 AOT_DOTH_FILE="$PWD/generated_offload_arch.h"
 
-function get_targetid_from_codename
+function get_offloadarch_id_from_codename
 {
    _codename=$1
    _entry=`grep -m1 "^$_codename" $AOT_CODENAME2OFFLOADARCH`
    if [ $? == 0 ] ; then 
-      _targetid=`echo $_entry | awk '{print $2}'`
+      _offloadarchid=`echo $_entry | awk '{print $2}'`
    else
-      _targetid="$_codename"
+      _offloadarchid="$_codename"
    fi
-   echo $_targetid
+   echo $_offloadarchid
 }
 
-function write_AOT_TARGET() 
+function write_AOT_OFFLOADARCH() 
 {
   echo "typedef enum {" >> $AOT_DOTH_FILE
   cat $AOT_CODENAME2OFFLOADARCH | cut -d" " -f2 | sort -u > $aot_tmpfile
   while read -r line ; do
     echo "  AOT_${line^^}," >> $AOT_DOTH_FILE
   done < $aot_tmpfile
-  echo "} AOT_TARGET;" >> $AOT_DOTH_FILE
+  echo "} AOT_OFFLOADARCH;" >> $AOT_DOTH_FILE
 }
 
 function write_AOT_CODENAME() 
@@ -94,9 +94,9 @@ function write_AOT_CODENAMEID_TO_STRING()
   done 
   echo "};" >> $AOT_DOTH_FILE
 }
-function write_AOT_TARGETID_TO_STRING() 
+function write_AOT_OFFLOADARCH_TO_STRING() 
 {
-  echo "AOT_TARGET_ID_TO_STRING AOT_TARGETS[] =  {" >>$AOT_DOTH_FILE
+  echo "AOT_OFFLOADARCH_TO_STRING AOT_OFFLOADARCHS[] =  {" >>$AOT_DOTH_FILE
   cat $AOT_CODENAME2OFFLOADARCH | cut -d" " -f2 | sort -u > $aot_tmpfile
   while read -r line ; do
     echo "  {AOT_${line^^}, \"${line}\"}," >> $AOT_DOTH_FILE
@@ -123,16 +123,16 @@ struct AOT_CODENAME_ID_TO_STRING{
   const char* codename;
 };
 
-struct AOT_TARGET_ID_TO_STRING{
-  AOT_TARGET target_id;
-  const char* target;
+struct AOT_OFFLOADARCH_TO_STRING{
+  AOT_OFFLOADARCH offloadarch_id;
+  const char* offloadarch;
 };
 
 struct AOT_TABLE_ENTRY{
     uint16_t vendorid;
     uint16_t devid;
     AOT_CODENAME codename_id;
-    AOT_TARGET target_id;
+    AOT_OFFLOADARCH offloadarch_id;
 };
 EOF
 cat $aot_tmpfile >> $AOT_DOTH_FILE
@@ -149,8 +149,8 @@ function write_AOT_TABLE()
     if [ $? == 0 ] ; then 
        vid=`echo $line | cut -d":" -f1`
        devid=`echo $line | cut -d" " -f1 | cut -d":" -f2`
-       targetid=$(get_targetid_from_codename $codename)
-       echo "{ 0x${vid}, 0x${devid}, AOT_CN_${codename^^}, AOT_${targetid^^} }," >>$AOT_DOTH_FILE
+       offloadarchid=$(get_offloadarch_id_from_codename $codename)
+       echo "{ 0x${vid}, 0x${devid}, AOT_CN_${codename^^}, AOT_${offloadarchid^^} }," >>$AOT_DOTH_FILE
     fi
   done < $aot_tmpfile
   echo "};" >> $AOT_DOTH_FILE
@@ -165,11 +165,11 @@ touch $AOT_DOTH_FILE
 aot_tmpfile="/tmp/zz$$"
 
 write_AOT_PROLOG
-write_AOT_TARGET
+write_AOT_OFFLOADARCH
 write_AOT_CODENAME
 write_AOT_STRUCTS
 write_AOT_CODENAMEID_TO_STRING
-write_AOT_TARGETID_TO_STRING
+write_AOT_OFFLOADARCH_TO_STRING
 write_AOT_TABLE
 
 rm $aot_tmpfile
