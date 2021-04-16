@@ -1,10 +1,15 @@
 
-project(offload-arch)
 
 cmake_policy(SET CMP0002 NEW)
 cmake_minimum_required(VERSION 3.5)
 
-add_clang_tool(offload-arch OffloadArch.cpp)
+if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
+  # Build standalone, not part of clang
+  project(offload-arch)
+  add_executable(offload-arch OffloadArch.cpp)
+else()
+  add_clang_tool(offload-arch OffloadArch.cpp)
+endif()
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
@@ -42,4 +47,11 @@ install(PROGRAMS
     ${CMAKE_CURRENT_BINARY_DIR}/nvidia-arch
      DESTINATION bin
      COMPONENT offload-arch)
+
+if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
+  install(PROGRAMS
+    ${CMAKE_CURRENT_BINARY_DIR}/offload-arch
+    DESTINATION bin
+    COMPONENT offload-arch)
+endif()
 

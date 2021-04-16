@@ -39,7 +39,7 @@ void aot_usage() {
      For example, to compile for openmp offloading on current current system\n\
      one could invoke clang with the following command:\n\
 \n\
-     clang -fopenmp -openmp-targets=`offload-arch` foo.c\n\
+     clang -fopenmp -fopenmp-targets=`offload-arch` foo.c\n\
 \n\
      If an optional lookup-value is specified, offload-arch will\n\
      check if the value is either a valid offload-arch or a codename\n\
