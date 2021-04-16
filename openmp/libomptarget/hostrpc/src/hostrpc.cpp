@@ -187,6 +187,6 @@ EXTERN uint32_t __strlen_max(char *instr, uint32_t maxstrlen) {
 #else
 // ---------------------------------------------------
 // This stub is needed to satisfy omp pragma syntax.
-static int stub(){};
+static int stub(){return 0;};
 #endif
 #pragma omp end declare target
