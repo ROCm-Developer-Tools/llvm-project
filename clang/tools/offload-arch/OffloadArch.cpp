@@ -14,7 +14,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "generated_offload_arch.h"
+#define __OFFLOAD_ARCH_MAIN__
+#include "OffloadArch.h"
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
@@ -187,28 +188,15 @@ std::string _aot_get_offload_arch(uint16_t VendorID, uint16_t DeviceID) {
   return nullptr;
 }
 
-std::string _aot_get_amdgpu_capabilities() {
-  std::string amdgpu_capabilities;
-  std::string file_contents =
-      _aot_get_file_contents(std::string("/sys/module/amdgpu/version"));
-  if (!file_contents.empty()) {
-    int ver, rel, mod;
-    sscanf(file_contents.c_str(), "%d.%d.%d\n", &ver, &rel, &mod);
-    if ((ver > 5) || ((ver == 5) && (rel > 9)) ||
-        ((ver == 5) && (rel == 9) && (mod >= 15)))
-      amdgpu_capabilities.append("CodeObjVer4");
-  }
-  return amdgpu_capabilities;
-}
-
-std::string _aot_get_capabilities(uint16_t vid) {
+std::string _aot_get_capabilities(uint16_t vid, uint16_t devid,
+                                  std::string oa) {
   std::string capabilities(" ");
   switch (vid) {
   case 0x1002:
-    capabilities.append(_aot_get_amdgpu_capabilities());
+    capabilities.append(_aot_amdgpu_capabilities(vid, devid, oa));
     break;
   case 0x10de:
-    // FIXME return version of cuda here
+    capabilities.append(_aot_nvidia_capabilities(vid, devid, oa));
     break;
   }
   return capabilities;
@@ -330,7 +318,8 @@ int main(int argc, char **argv) {
       if (print_triple)
         xinfo.append(" ").append(_aot_get_triple(vid, devid));
       if (print_capabilities_for_runtime_requirements)
-        xinfo.append(" ").append(_aot_get_capabilities(vid));
+        xinfo.append(" ").append(
+            _aot_get_capabilities(vid, devid, offload_arch));
       printf("%s%s\n", offload_arch.c_str(), xinfo.c_str());
     }
   }

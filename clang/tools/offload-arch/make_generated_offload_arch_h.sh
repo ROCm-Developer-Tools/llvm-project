@@ -87,7 +87,7 @@ function write_AOT_CODENAME()
 }
 function write_AOT_CODENAMEID_TO_STRING() 
 {
-  echo "AOT_CODENAME_ID_TO_STRING AOT_CODENAMES[] =  {" >>$AOT_DOTH_FILE
+  echo "extern const AOT_CODENAME_ID_TO_STRING AOT_CODENAMES[] =  {" >>$AOT_DOTH_FILE
   cat $AOT_CODENAME2OFFLOADARCH | while read -r line ; do
     codename=`echo $line | cut -d" " -f1`
     echo "  {AOT_CN_${codename^^}, \"${codename}\"}," >> $AOT_DOTH_FILE
@@ -96,7 +96,7 @@ function write_AOT_CODENAMEID_TO_STRING()
 }
 function write_AOT_OFFLOADARCH_TO_STRING() 
 {
-  echo "AOT_OFFLOADARCH_TO_STRING AOT_OFFLOADARCHS[] =  {" >>$AOT_DOTH_FILE
+  echo "extern const AOT_OFFLOADARCH_TO_STRING AOT_OFFLOADARCHS[] =  {" >>$AOT_DOTH_FILE
   cat $AOT_CODENAME2OFFLOADARCH | cut -d" " -f2 | sort -u > $aot_tmpfile
   while read -r line ; do
     echo "  {AOT_${line^^}, \"${line}\"}," >> $AOT_DOTH_FILE
@@ -134,13 +134,18 @@ struct AOT_TABLE_ENTRY{
     AOT_CODENAME codename_id;
     AOT_OFFLOADARCH offloadarch_id;
 };
+#ifndef __OFFLOAD_ARCH_MAIN__
+extern const AOT_CODENAME_ID_TO_STRING AOT_CODENAMES[];
+extern const AOT_OFFLOADARCH_TO_STRING AOT_OFFLOADARCHS[];
+extern const AOT_TABLE_ENTRY AOT_TABLE[];
+#else
 EOF
 cat $aot_tmpfile >> $AOT_DOTH_FILE
 }
 
 function write_AOT_TABLE() 
 {
-  echo "AOT_TABLE_ENTRY AOT_TABLE[] = {" >>$AOT_DOTH_FILE
+  echo "extern const AOT_TABLE_ENTRY AOT_TABLE[] = {" >>$AOT_DOTH_FILE
   cat $AOT_PCIID2CODENAME | sort -u -t" " -k1 > $aot_tmpfile
   while read -r line ; do
     codename=`echo $line | cut -d" " -f4`
@@ -154,6 +159,7 @@ function write_AOT_TABLE()
     fi
   done < $aot_tmpfile
   echo "};" >> $AOT_DOTH_FILE
+  echo "#endif" >>$AOT_DOTH_FILE
 }
 
 #  ===========  Main code starts here ======================
