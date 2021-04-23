@@ -146,7 +146,7 @@ void *_aot_dynload_hsa_runtime() {
   const char *hsa_runtime_locations[] = {
       "/usr/lib/aomp/lib/libhsa-runtime64.so",
       "/opt/rocm/hsa/lib/libhsa-runtime64.so",
-      "/opt/rocm-r.1.0/hsa/lib/libhsa-runtime64.so",
+      "/opt/rocm-4.1.0/hsa/lib/libhsa-runtime64.so",
   };
 
   void *dlhandle = nullptr;
