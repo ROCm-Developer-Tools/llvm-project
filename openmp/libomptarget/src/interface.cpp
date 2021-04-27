@@ -43,6 +43,30 @@ EXTERN void __tgt_register_lib(__tgt_bin_desc *desc) {
   PM->RTLs.RegisterLib(desc);
 }
 
+static __tgt_image_info **__tgt_AllImageInfos;
+static int __tgt_num_registered_images = 0;
+EXTERN void __tgt_register_image_info(__tgt_image_info *imageInfo) {
+
+  DP(" register_image_info image %d of %d  requirements:%s VERSION:%d\n",
+     imageInfo->image_number, imageInfo->number_images, imageInfo->requirements,
+     imageInfo->version);
+
+  if (!__tgt_AllImageInfos)
+    __tgt_AllImageInfos = (__tgt_image_info **)malloc(
+        sizeof(__tgt_image_info *) * imageInfo->number_images);
+  __tgt_AllImageInfos[imageInfo->image_number] = imageInfo;
+  __tgt_num_registered_images = imageInfo->number_images;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// Return pointer to image information if it was registered
+EXTERN __tgt_image_info *__tgt_get_image_info(unsigned image_number) {
+  if (__tgt_num_registered_images)
+    return __tgt_AllImageInfos[image_number];
+  else
+    return nullptr;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// unloads a target shared library
 EXTERN void __tgt_unregister_lib(__tgt_bin_desc *desc) {
@@ -54,6 +78,10 @@ EXTERN void __tgt_unregister_lib(__tgt_bin_desc *desc) {
         DP("Could not register library with %s", RTL->RTLName.c_str());
       }
     }
+  }
+  if (__tgt_num_registered_images) {
+    free(__tgt_AllImageInfos);
+    __tgt_num_registered_images = 0;
   }
 }
 
