@@ -26,6 +26,11 @@
 
 #define MAXPATHSIZE 512
 
+// These search phrases in /sys/bus/pci/devices/*/uevent are found even if
+// the device driver is not running.
+#define AMDGPU_SEARCH_PHRASE "PCI_ID=1002:"
+#define NVIDIA_SEARCH_PHRASE "PCI_ID=10DE:"
+
 void aot_usage() {
   printf("\n\
    offload-arch: Print offload architecture(s) for the current active system.\n\
@@ -106,11 +111,8 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
           _aot_get_file_contents(std::string(uevent_filename));
       if (!file_contents.empty()) {
         std::size_t driver_found_loc = file_contents.find(driver_search_phrase);
-        if (driver_found_loc == 0) {
-          std::size_t pcipos = file_contents.find("PCI_ID") + 7;
-          std::string remainder = file_contents.substr(pcipos);
-          std::size_t nextval = remainder.find("PCI") - 1;
-          PCI_IDS.push_back(remainder.substr(0, nextval));
+        if (driver_found_loc != std::string::npos) {
+          PCI_IDS.push_back(file_contents.substr(driver_found_loc + 7, 9));
           if (!AOT_get_all_active_devices)
             return PCI_IDS;
         }
@@ -261,21 +263,21 @@ int main(int argc, char **argv) {
     // No lookup_value so get the current pci ids.
     // First check if invocation was arch specific.
     if (amdgpu_arch) {
-      PCI_IDS = _aot_get_pci_ids("DRIVER=amdgpu");
+      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE);
     } else if (nvidia_arch) {
-      PCI_IDS = _aot_get_pci_ids("DRIVER=nvidia");
+      PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE);
     } else {
       // Search for all supported offload archs;
-      PCI_IDS = _aot_get_pci_ids("DRIVER=amdgpu");
+      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE);
       if (AOT_get_all_active_devices) {
         std::vector<std::string> PCI_IDs_next_arch;
-        PCI_IDs_next_arch = _aot_get_pci_ids("DRIVER=nvidia");
+        PCI_IDs_next_arch = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE);
         for (auto PCI_ID : PCI_IDs_next_arch)
           PCI_IDS.push_back(PCI_ID);
       } else {
         // stop offload-arch at first device found`
         if (PCI_IDS.empty())
-          PCI_IDS = _aot_get_pci_ids("DRIVER=nvidia");
+          PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE);
       }
     }
   } else {
