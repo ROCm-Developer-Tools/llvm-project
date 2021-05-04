@@ -28,8 +28,10 @@
 
 // These search phrases in /sys/bus/pci/devices/*/uevent are found even if
 // the device driver is not running.
-#define AMDGPU_SEARCH_PHRASE "PCI_ID=1002:"
-#define NVIDIA_SEARCH_PHRASE "PCI_ID=10DE:"
+#define AMDGPU_SEARCH_PHRASE "DRIVER=amdgpu"
+#define AMDGPU_PCIID_PHRASE  "PCI_ID=1002:"
+#define NVIDIA_SEARCH_PHRASE "DRIVER=nvidia"
+#define NVIDIA_PCIID_PHRASE  "PCI_ID=10DE:"
 
 void aot_usage() {
   printf("\n\
@@ -92,7 +94,10 @@ std::string _aot_get_file_contents(std::string fname) {
   return file_contents;
 }
 
-std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
+std::vector<std::string> _aot_get_pci_ids(
+		const char *driver_search_phrase,
+		const char *pci_id_search_phrase
+		) {
   std::vector<std::string> PCI_IDS;
   char uevent_filename[MAXPATHSIZE];
   const char *sys_bus_pci_devices_dir = "/sys/bus/pci/devices";
@@ -110,11 +115,14 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase) {
       std::string file_contents =
           _aot_get_file_contents(std::string(uevent_filename));
       if (!file_contents.empty()) {
-        std::size_t driver_found_loc = file_contents.find(driver_search_phrase);
-        if (driver_found_loc != std::string::npos) {
-          PCI_IDS.push_back(file_contents.substr(driver_found_loc + 7, 9));
-          if (!AOT_get_all_active_devices)
-            return PCI_IDS;
+        std::size_t found_loc = file_contents.find(driver_search_phrase);
+        if (found_loc != std::string::npos) {
+          found_loc = file_contents.find(pci_id_search_phrase);
+          if (found_loc != std::string::npos) {
+            PCI_IDS.push_back(file_contents.substr(found_loc + 7, 9));
+            if (!AOT_get_all_active_devices)
+              return PCI_IDS;
+          }
         }
       }
     } // end of foreach subdir
@@ -169,6 +177,7 @@ _aot_lookup_offload_arch(std::string lookup_offload_arch) {
 }
 
 std::string _aot_get_codename(uint16_t VendorID, uint16_t DeviceID) {
+  std::string retval ;
   for (auto aot_table_entry : AOT_TABLE) {
     if ((VendorID == aot_table_entry.vendorid) &&
         (DeviceID == aot_table_entry.devid))
@@ -176,10 +185,11 @@ std::string _aot_get_codename(uint16_t VendorID, uint16_t DeviceID) {
         if (id2str.codename_id == aot_table_entry.codename_id)
           return std::string(id2str.codename);
   }
-  return nullptr;
+  return retval;
 }
 
 std::string _aot_get_offload_arch(uint16_t VendorID, uint16_t DeviceID) {
+  std::string retval ;
   for (auto aot_table_entry : AOT_TABLE) {
     if ((VendorID == aot_table_entry.vendorid) &&
         (DeviceID == aot_table_entry.devid))
@@ -187,7 +197,7 @@ std::string _aot_get_offload_arch(uint16_t VendorID, uint16_t DeviceID) {
         if (id2str.offloadarch_id == aot_table_entry.offloadarch_id)
           return std::string(id2str.offloadarch);
   }
-  return nullptr;
+  return retval;
 }
 
 std::string _aot_get_capabilities(uint16_t vid, uint16_t devid,
@@ -205,6 +215,7 @@ std::string _aot_get_capabilities(uint16_t vid, uint16_t devid,
 }
 
 std::string _aot_get_triple(uint16_t VendorID, uint16_t DeviceID) {
+  std::string retval ;
   switch (VendorID) {
   case 0x1002:
     return (std::string("amdgcn-amd-amdhsa"));
@@ -213,7 +224,7 @@ std::string _aot_get_triple(uint16_t VendorID, uint16_t DeviceID) {
     return (std::string("nvptx64-nvidia-cuda"));
     break;
   }
-  return nullptr;
+  return retval;
 }
 
 int main(int argc, char **argv) {
@@ -225,7 +236,6 @@ int main(int argc, char **argv) {
   AOT_get_all_active_devices = false;
   bool print_triple = false;
   std::string lookup_value;
-
   std::string a;
   for (int argi = 0; argi < argc; argi++) {
     a = std::string(argv[argi]);
@@ -263,21 +273,21 @@ int main(int argc, char **argv) {
     // No lookup_value so get the current pci ids.
     // First check if invocation was arch specific.
     if (amdgpu_arch) {
-      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE);
+      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE,AMDGPU_PCIID_PHRASE);
     } else if (nvidia_arch) {
-      PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE);
+      PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE,NVIDIA_PCIID_PHRASE);
     } else {
       // Search for all supported offload archs;
-      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE);
+      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE,AMDGPU_PCIID_PHRASE);
       if (AOT_get_all_active_devices) {
         std::vector<std::string> PCI_IDs_next_arch;
-        PCI_IDs_next_arch = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE);
+        PCI_IDs_next_arch = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE,NVIDIA_PCIID_PHRASE);
         for (auto PCI_ID : PCI_IDs_next_arch)
           PCI_IDS.push_back(PCI_ID);
       } else {
         // stop offload-arch at first device found`
         if (PCI_IDS.empty())
-          PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE);
+          PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE,NVIDIA_PCIID_PHRASE);
       }
     }
   } else {
