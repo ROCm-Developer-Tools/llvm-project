@@ -152,13 +152,25 @@ void *_aot_dynload_hsa_runtime() {
   void *dlhandle = nullptr;
   // FIXME: before going through possible hsa locations try
   //        <directory-of-binary>/../lib/libhsa-runtime64.so
+
   struct stat stat_buffer;
-  for (auto *rt_loc : hsa_runtime_locations) {
-    if (stat(rt_loc, &stat_buffer) == 0) {
-      dlhandle = dlopen(rt_loc, RTLD_NOW);
-      break;
+  
+  // First search in system library paths. Allows user to dynamically
+  // load desired version of hsa runtime.
+  dlhandle = dlopen("libhsa-runtime64.so", RTLD_NOW);
+
+  // In case of failure, search in known absolute locations.
+  if(!dlhandle) {
+    for (auto *rt_loc : hsa_runtime_locations) {
+      if (stat(rt_loc, &stat_buffer) == 0) {
+        dlhandle = dlopen(rt_loc, RTLD_NOW);
+        break;
+      }
     }
   }
+
+  // Return null if hsa runtime is not found in system paths and in
+  // absolute locations.
   if (!dlhandle)
     return nullptr;
 
@@ -189,25 +201,25 @@ std::string _aot_amdgpu_capabilities(uint16_t vid, uint16_t devid,
 
   void *dlhandle = _aot_dynload_hsa_runtime();
   if (!dlhandle) {
-    amdgpu_capabilities.append(" HSAERROR");
+    amdgpu_capabilities.append(" HSAERROR-LOADING");
     return amdgpu_capabilities;
   }
   hsa_status_t Status = _dl_hsa_init();
   if (Status != HSA_STATUS_SUCCESS) {
-    amdgpu_capabilities.append(" HSAERROR");
+    amdgpu_capabilities.append(" HSAERROR-INITIALIZATION");
     return amdgpu_capabilities;
   }
   std::vector<std::string> GPUs;
   Status = _dl_hsa_iterate_agents(iterateAgentsCallback, &GPUs);
   if (Status != HSA_STATUS_SUCCESS) {
-    amdgpu_capabilities.append(" HSAERROR");
+    amdgpu_capabilities.append(" HSAERROR-AGENT_ITERATION");
     return amdgpu_capabilities;
   }
   int isa_number = 0;
   hsa_agent_t *agent_ptr = HSA_AGENTs[isa_number];
   Status = _dl_hsa_agent_iterate_isas(*agent_ptr, get_isa_info, &isa_number);
   if (Status == HSA_STATUS_ERROR_INVALID_AGENT) {
-    amdgpu_capabilities.append(" HSAERROR");
+    amdgpu_capabilities.append(" HSAERROR-INVALID_AGENT");
     return amdgpu_capabilities;
   }
 
