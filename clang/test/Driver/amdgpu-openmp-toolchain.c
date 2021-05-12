@@ -7,7 +7,7 @@
 // verify the tools invocations
 // CHECK: clang{{.*}}"-cc1" "-triple" "x86_64-unknown-linux-gnu"{{.*}}"-x" "c"{{.*}}
 // CHECK: clang{{.*}}"-cc1" "-triple" "x86_64-unknown-linux-gnu"{{.*}}"-x" "ir"{{.*}}
-// CHECK: clang{{.*}}"-cc1"{{.*}}"-triple" "amdgcn-amd-amdhsa"{{.*}}"-target-cpu" "gfx906" "-fcuda-is-device" "-mlink-builtin-bitcode"{{.*}}libomptarget-amdgcn-gfx906.bc"{{.*}}
+// CHECK: clang{{.*}}"-cc1"{{.*}}"-triple" "amdgcn-amd-amdhsa"{{.*}}"-emit-llvm-bc"{{.*}}"-target-cpu" "gfx906" "-fcuda-is-device"{{.*}}"-mlink-builtin-bitcode"{{.*}}libomptarget-amdgcn-gfx906.bc"{{.*}}
 // CHECK: llvm-link{{.*}}"-o" "{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906-linked-{{.*}}.bc"
 // CHECK: llc{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906-linked-{{.*}}.bc" "-mtriple=amdgcn-amd-amdhsa" "-mcpu=gfx906" "-filetype=obj" "-o"{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906-{{.*}}.o"
 // CHECK: lld{{.*}}"-flavor" "gnu" "--no-undefined" "-shared" "-o"{{.*}}amdgpu-openmp-toolchain-{{.*}}.out" "{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906-{{.*}}.o"
@@ -59,3 +59,17 @@
 // RUN:   | FileCheck %s --check-prefix=CHECK-SAVE-ASM
 // CHECK-SAVE-ASM: llc{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906-linked.bc" "-mtriple=amdgcn-amd-amdhsa" "-mcpu=gfx906" "-filetype=asm" "-o"{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906.s"
 // CHECK-SAVE-ASM: llc{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906-linked.bc" "-mtriple=amdgcn-amd-amdhsa" "-mcpu=gfx906" "-filetype=obj" "-o"{{.*}}amdgpu-openmp-toolchain-{{.*}}-gfx906.o"
+
+// check the handling of -c
+// RUN:   env LIBRARY_PATH=%S/Inputs/hip_dev_lib %clang -ccc-print-bindings -c --target=x86_64-unknown-linux-gnu -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx906 -save-temps %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=CHECK-C
+// CHECK-C: "x86_64-unknown-linux-gnu" - "clang",
+// CHECK-C: "x86_64-unknown-linux-gnu" - "clang",{{.*}}output: "[[HOST_BC:.*]]"
+// CHECK-C: "amdgcn-amd-amdhsa" - "clang",{{.*}}output: "[[DEVICE_I:.*]]"
+// CHECK-C: "amdgcn-amd-amdhsa" - "clang", inputs: ["[[DEVICE_I]]", "[[HOST_BC]]"]
+// CHECK-C: "x86_64-unknown-linux-gnu" - "clang"
+// CHECK-C: "x86_64-unknown-linux-gnu" - "clang::as"
+// CHECK-C: "x86_64-unknown-linux-gnu" - "offload bundler"
+
+// RUN:   %clang -### --target=x86_64-unknown-linux-gnu -emit-llvm -S -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx803 -nogpulib %s 2>&1 | FileCheck %s --check-prefix=CHECK-EMIT-LLVM-IR
+// CHECK-EMIT-LLVM-IR: clang{{.*}}"-cc1"{{.*}}"-triple" "amdgcn-amd-amdhsa"{{.*}}"-emit-llvm"
