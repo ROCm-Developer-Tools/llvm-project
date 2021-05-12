@@ -29,25 +29,26 @@
 // These search phrases in /sys/bus/pci/devices/*/uevent are found even if
 // the device driver is not running.
 #define AMDGPU_SEARCH_PHRASE "DRIVER=amdgpu"
-#define AMDGPU_PCIID_PHRASE  "PCI_ID=1002:"
+#define AMDGPU_PCIID_PHRASE "PCI_ID=1002:"
 #define NVIDIA_SEARCH_PHRASE "DRIVER=nvidia"
-#define NVIDIA_PCIID_PHRASE  "PCI_ID=10DE:"
+#define NVIDIA_PCIID_PHRASE "PCI_ID=10DE:"
 
 void aot_usage() {
   printf("\n\
-   offload-arch: Print offload architecture(s) for the current active system.\n\
-                 or lookup information about offload architectures\n\
+   offload-arch: Print offload architecture(s) for current system, or\n\
+                 print offload runtime capabilities of current system,\n\
+                 or lookup information about offload architectures,\n\
+                 or print offload requirements for an application binary\n\
 \n\
-   Usage:\
+   Usage:\n\
 \n\
      offload-arch [ Options ] [ Optional lookup-value ]\n\
 \n\
-     With no options, offload-arch prints a value for first offload architecture\n\
-     found in current system.  This value can be used by various clang frontends.\n\
-     For example, to compile for openmp offloading on current current system\n\
-     one could invoke clang with the following command:\n\
-\n\
-     clang -fopenmp -fopenmp-targets=`offload-arch` foo.c\n\
+     With no options, offload-arch prints a value for the first offload arch\n\
+     found in the current active system. This can be used by various clang\n\
+     frontends. For example, to compile for openmp offloading on your current\n\
+     system, invoke clang with the following command:\n\
+        clang -fopenmp -fopenmp-targets=`offload-arch` foo.c\n\
 \n\
      If an optional lookup-value is specified, offload-arch will\n\
      check if the value is either a valid offload-arch or a codename\n\
@@ -59,21 +60,25 @@ void aot_usage() {
      Options:\n\
      -h  Print this help message\n\
      -a  Print values for all devices. Don't stop at first device found.\n\
-     -c  Print codename\n\
+     -m  Print device code name (often found in pci.ids file)\n\
      -n  Print numeric pci-id\n\
-     -t  Print recommended offload triple.\n\
-     -v  Verbose = -a -c -n -t \n\
-     -r  Print capabilities of current system to satisfy runtime requirements\n\
-         of compiled offload images.  This option is used by the runtime to\n\
-	 choose correct image when multiple compiled images are availble.\n\
+     -t  Print clang offload triple to use for the offload arch.\n\
+     -v  Verbose = -a -m -n -t  \n\
+         For all devices, print codename, numeric value and triple\n\
+     -f  <filename> Print offload requirements including offload-arch for\n\
+         each compiled offload image built into an application binary file.\n\
+     -c  Print offload capabilities of the current active system.\n\
+	 This option is used by the language runtime to select an image\n\
+	 when multiple images are availble.\n\
+	 A capability must exist for each requirement of the selected image.\n\
 \n\
-     The alias amdgpu-arch returns 1 if no amdgcn GPU is found.\n\
-     The alias nvidia-arch returns 1 if no cuda GPU is found.\n\
-     These aliases are useful to determine if architecture-specific tests\n\
-     should be run. Or these aliases could be used to conditionally load\n\
+     There are symbolic link aliases 'amdgpu-arch' and 'nvidia-arch' for\n\
+     offload-arch. These aliases return 1 if no amdgcn GPU or no cuda GPU\n\
+     is found, respectfully. These aliases are useful to determine if\n\
+     architecture-specific tests should be run, or to conditionally load\n\
      archecture-specific software.\n\
 \n\
-   Copyright (c) 2021 ADVANCED MICRO DEVICES, INC.\n\
+     Copyright (c) 2021 ADVANCED MICRO DEVICES, INC.\n\
 \n\
 ");
   exit(1);
@@ -94,10 +99,8 @@ std::string _aot_get_file_contents(std::string fname) {
   return file_contents;
 }
 
-std::vector<std::string> _aot_get_pci_ids(
-		const char *driver_search_phrase,
-		const char *pci_id_search_phrase
-		) {
+std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase,
+                                          const char *pci_id_search_phrase) {
   std::vector<std::string> PCI_IDS;
   char uevent_filename[MAXPATHSIZE];
   const char *sys_bus_pci_devices_dir = "/sys/bus/pci/devices";
@@ -128,7 +131,7 @@ std::vector<std::string> _aot_get_pci_ids(
     } // end of foreach subdir
     closedir(dirp);
   } else {
-    fprintf(stderr, "Error: failed to open directory %s.\n",
+    fprintf(stderr, "ERROR: failed to open directory %s.\n",
             sys_bus_pci_devices_dir);
     exit(1);
   }
@@ -177,7 +180,7 @@ _aot_lookup_offload_arch(std::string lookup_offload_arch) {
 }
 
 std::string _aot_get_codename(uint16_t VendorID, uint16_t DeviceID) {
-  std::string retval ;
+  std::string retval;
   for (auto aot_table_entry : AOT_TABLE) {
     if ((VendorID == aot_table_entry.vendorid) &&
         (DeviceID == aot_table_entry.devid))
@@ -189,7 +192,7 @@ std::string _aot_get_codename(uint16_t VendorID, uint16_t DeviceID) {
 }
 
 std::string _aot_get_offload_arch(uint16_t VendorID, uint16_t DeviceID) {
-  std::string retval ;
+  std::string retval;
   for (auto aot_table_entry : AOT_TABLE) {
     if ((VendorID == aot_table_entry.vendorid) &&
         (DeviceID == aot_table_entry.devid))
@@ -215,7 +218,7 @@ std::string _aot_get_capabilities(uint16_t vid, uint16_t devid,
 }
 
 std::string _aot_get_triple(uint16_t VendorID, uint16_t DeviceID) {
-  std::string retval ;
+  std::string retval;
   switch (VendorID) {
   case 0x1002:
     return (std::string("amdgcn-amd-amdhsa"));
@@ -236,7 +239,7 @@ int main(int argc, char **argv) {
   AOT_get_all_active_devices = false;
   bool print_triple = false;
   std::string lookup_value;
-  std::string a;
+  std::string a, input_filename;
   for (int argi = 0; argi < argc; argi++) {
     a = std::string(argv[argi]);
     if (argi == 0) {
@@ -246,9 +249,9 @@ int main(int argc, char **argv) {
     } else {
       if (a == "-n") {
         print_numeric = true;
-      } else if (a == "-c") {
+      } else if (a == "-m") {
         print_codename = true;
-      } else if (a == "-r") {
+      } else if (a == "-c") {
         print_capabilities_for_runtime_requirements = true;
       } else if (a == "-h") {
         aot_usage();
@@ -261,6 +264,13 @@ int main(int argc, char **argv) {
         print_codename = true;
         print_numeric = true;
         print_triple = true;
+      } else if (a == "-f") {
+        argi++;
+        if (argi == argc) {
+          fprintf(stderr, "ERROR: Missing filename for -f option\n");
+          return 1;
+        }
+        input_filename = std::string(argv[argi]);
       } else {
         lookup_value = a;
       }
@@ -269,38 +279,50 @@ int main(int argc, char **argv) {
 
   std::vector<std::string> PCI_IDS;
 
-  if (lookup_value.empty()) {
+  if (!input_filename.empty()) {
+
+    PCI_IDS = _aot_get_requirements_from_file(input_filename);
+    if (PCI_IDS.empty())
+      return 1;
+    for (auto PCI_ID : PCI_IDS)
+      printf("%s\n", PCI_ID.c_str());
+    return 0;
+
+  } else if (lookup_value.empty()) {
+
     // No lookup_value so get the current pci ids.
     // First check if invocation was arch specific.
     if (amdgpu_arch) {
-      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE,AMDGPU_PCIID_PHRASE);
+      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE, AMDGPU_PCIID_PHRASE);
     } else if (nvidia_arch) {
-      PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE,NVIDIA_PCIID_PHRASE);
+      PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
     } else {
       // Search for all supported offload archs;
-      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE,AMDGPU_PCIID_PHRASE);
+      PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE, AMDGPU_PCIID_PHRASE);
       if (AOT_get_all_active_devices) {
         std::vector<std::string> PCI_IDs_next_arch;
-        PCI_IDs_next_arch = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE,NVIDIA_PCIID_PHRASE);
+        PCI_IDs_next_arch =
+            _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
         for (auto PCI_ID : PCI_IDs_next_arch)
           PCI_IDS.push_back(PCI_ID);
       } else {
         // stop offload-arch at first device found`
         if (PCI_IDS.empty())
-          PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE,NVIDIA_PCIID_PHRASE);
+          PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
       }
     }
+
   } else {
     if (print_capabilities_for_runtime_requirements) {
-      fprintf(stderr, "Error: cannot lookup offload-arch/codename AND query\n");
-      fprintf(stderr, "       active runtime capabilities (-r).\n");
+      fprintf(stderr, "ERROR: cannot lookup offload-arch/codename AND query\n");
+      fprintf(stderr, "       active runtime capabilities (-c).\n");
       return 1;
     }
     PCI_IDS = _aot_lookup_offload_arch(lookup_value);
     if (PCI_IDS.empty())
       PCI_IDS = _aot_lookup_codename(lookup_value);
     if (PCI_IDS.empty()) {
-      fprintf(stderr, "Error: Could not find \"%s\" in offload-arch tables\n",
+      fprintf(stderr, "ERROR: Could not find \"%s\" in offload-arch tables\n",
               lookup_value.c_str());
       fprintf(stderr, "       as either an offload-arch or a codename.\n");
       return 1;
@@ -319,7 +341,7 @@ int main(int argc, char **argv) {
     uint16_t devid = devid32;
     std::string offload_arch = _aot_get_offload_arch(vid, devid);
     if (offload_arch.empty()) {
-      fprintf(stderr, "Error: offload-arch not found for %x:%x.\n", vid, devid);
+      fprintf(stderr, "ERROR: offload-arch not found for %x:%x.\n", vid, devid);
       rc = 1;
     } else {
       std::string xinfo;

@@ -345,7 +345,7 @@ void RTLsTy::RegisterRequires(int64_t flags) {
      flags, RequiresFlags);
 }
 
-/// Query runtime capabilities of this system by calling offload-arch -r
+/// Query runtime capabilities of this system by calling offload-arch -c
 /// offload_arch_output_buffer is persistant storage returned by this
 /// __tgt_get_active_offload_env.
 static void
@@ -364,8 +364,8 @@ __tgt_get_active_offload_env(__tgt_active_offload_env *active_env,
   if (stat(cmd_bin.c_str(), &stat_buffer)) {
     DP("Missing offload-arch command at %s \n", cmd_bin.c_str());
   } else {
-    // Add option to print runtime capabilities
-    cmd_bin.append(" -r");
+    // Add option to print capabilities of current system
+    cmd_bin.append(" -c");
     FILE *stream = popen(cmd_bin.c_str(), "r");
     while (fgets(offload_arch_output_buffer, offload_arch_output_buffer_size,
                  stream) != NULL)
@@ -406,7 +406,7 @@ static bool _ImageIsCompatibleWithEnv(__tgt_image_info *img_info,
 
   // Each runtime requirement for the compiled image is stored in
   // the img_info->requirements string and is separated by __ .
-  // Each runtime capability obtained from "offload-arch -r" is stored in
+  // Each runtime capability obtained from "offload-arch -c" is stored in
   // actvie_env->capabilities and is separated by spaces.
   // If every requirement has a matching capability, then the image
   // is compatible with active environment
@@ -434,7 +434,7 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
 
   // Get the current active offload environment
   __tgt_active_offload_env offload_env;
-  // Need a buffer to hold results of offload-arch -r command
+  // Need a buffer to hold results of offload-arch -c command
   size_t offload_arch_output_buffer_size = MAX_CAPS_STR_SIZE;
   char *offload_arch_output_buffer =
       (char *)malloc(offload_arch_output_buffer_size);
