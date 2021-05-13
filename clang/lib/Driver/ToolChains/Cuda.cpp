@@ -10,6 +10,7 @@
 #include "CommonArgs.h"
 #include "InputInfo.h"
 #include "clang/Basic/Cuda.h"
+#include "clang/Basic/TargetID.h"
 #include "clang/Config/config.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Distro.h"
@@ -403,7 +404,7 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   // from the -march=arch option. This option may come from -Xopenmp-target
   // flag or the default value.
   if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
-    GPUArchName = Args.getLastArgValue(options::OPT_march_EQ);
+    GPUArchName = getProcessorFromTargetID(TC.getTriple(), TC.getTargetID());
     assert(!GPUArchName.empty() && "Must have an architecture passed in.");
   } else
     GPUArchName = JA.getOffloadingArch();
@@ -663,6 +664,22 @@ CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
+}
+
+CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
+                             const ToolChain &HostTC, const ArgList &Args,
+                             const Action::OffloadKind OK,
+                             const std::string TargetID)
+    : ToolChain(D, Triple, Args), HostTC(HostTC),
+      CudaInstallation(D, HostTC.getTriple(), Args), OK(OK) {
+  if (CudaInstallation.isValid()) {
+    CudaInstallation.WarnIfUnsupportedVersion();
+    getProgramPaths().push_back(std::string(CudaInstallation.getBinPath()));
+  }
+  // Lookup binaries into the driver directory, this is used to
+  // discover the clang-offload-bundler executable.
+  getProgramPaths().push_back(getDriver().Dir);
+  setTargetID(TargetID);
 }
 
 std::string CudaToolChain::getInputFilename(const InputInfo &Input) const {

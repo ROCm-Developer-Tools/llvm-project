@@ -6502,20 +6502,19 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // For all the host OpenMP offloading compile jobs we need to pass the targets
-  // information using -fopenmp-targets= option.
+  // information using legacy -fopenmp-targets= option.
   if (JA.isHostOffloading(Action::OFK_OpenMP)) {
     SmallString<128> TargetInfo("-fopenmp-targets=");
 
-    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
-    assert(Tgts && Tgts->getNumValues() &&
-           "OpenMP offloading has to have targets specified.");
-    for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
-      if (i)
-        TargetInfo += ',';
-      // We need to get the string from the triple because it may be not exactly
-      // the same as the one we get directly from the arguments.
-      llvm::Triple T(Tgts->getValue(i));
-      TargetInfo += T.getTriple();
+    // Get list of device Toolchains
+    auto OpenMPTCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
+    assert(
+        (OpenMPTCRange.first != OpenMPTCRange.second) &&
+        "OpenMP offloading requires target devices , specify --offload-arch.");
+    for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
+         ++TI) {
+      auto *deviceTC = TI->second;
+      TargetInfo += deviceTC->getTriple().str();
     }
     CmdArgs.push_back(Args.MakeArgString(TargetInfo.str()));
   }
@@ -7476,6 +7475,7 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   //   -inputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
 
   ArgStringList CmdArgs;
+  StringRef TargetID;
 
   // Get the type.
   CmdArgs.push_back(TCArgs.MakeArgString(
@@ -7510,8 +7510,14 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
     if ((CurKind == Action::OFK_HIP || CurKind == Action::OFK_OpenMP ||
          CurKind == Action::OFK_Cuda) &&
         CurDep->getOffloadingArch()) {
-      Triples += '-';
+      // clang-offload-bundler requires all 4 components in bundle entry ID.
+      // Add an extra '-' to represent empty triple.environment.
+      Triples += "--";
       Triples += CurDep->getOffloadingArch();
+    }
+    if ((CurKind == Action::OFK_OpenMP || CurKind == Action::OFK_Cuda)) {
+      Triples += "--";
+      Triples += CurTC->getTargetID();
     }
   }
   CmdArgs.push_back(TCArgs.MakeArgString(Triples));
@@ -7709,9 +7715,40 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  // Add inputs.
+  // Get the Code Object Version used by all offload-archs in this compilation
+  unsigned CodeObjVer = 0;
+  auto TCs = C.getOffloadToolChains<Action::OFK_OpenMP>();
+  for (auto II = TCs.first, IE = TCs.second; II != IE; ++II) {
+    auto TC = II->second;
+    if (TC->getArch() == llvm::Triple::amdgcn)
+      CodeObjVer = getOrCheckAMDGPUCodeObjectVersion(C.getDriver(), Args);
+  }
+
+  // Add runtime requirements on each image which includes the offload-arch
+  auto II = TCs.first;
   for (const InputInfo &I : Inputs) {
     assert(I.isFilename() && "Invalid input.");
+    if (I.getAction()) {
+      auto TC = II->second;
+      II++;
+      std::string requirements("--requirements=");
+      requirements.append(TC->getTargetID());
+      // targetid could have user specified features such as :xnack-:sramecc+
+      // so replace ":" with "__" in requirements used for
+      // clang-offload-wrapper.
+      size_t start_pos = 0;
+      while ((start_pos = requirements.find(":", start_pos)) !=
+             std::string::npos) {
+        requirements.replace(start_pos, 1, "__");
+        start_pos += 2;
+      }
+      if (CodeObjVer > 3) // Add implied CodeObjVer feature.
+        requirements.append(
+            Args.MakeArgString(Twine("__CodeObjVer") + Twine(CodeObjVer)));
+
+      // FIXME: Add other architecture requirements here
+      CmdArgs.push_back(Args.MakeArgString(requirements.c_str()));
+    }
     CmdArgs.push_back(I.getFilename());
   }
 
