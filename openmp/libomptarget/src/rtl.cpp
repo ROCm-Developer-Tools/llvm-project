@@ -441,6 +441,14 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
   __tgt_get_active_offload_env(&offload_env, offload_arch_output_buffer,
                                offload_arch_output_buffer_size);
 
+  bool requires_usm = (bool)(RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY);
+  bool has_xnack = (std::string(offload_env.capabilities).find("xnack+") !=
+                    std::string::npos);
+  bool is_amd = (std::string(offload_env.capabilities).find("gfx") == 0);
+  if (is_amd && requires_usm && !has_xnack)
+    FATAL_MESSAGE0(1, "'#pragma omp requires unified_shared_memory' requires "
+                      "environment with xnack+ capability!");
+
   RTLInfoTy *FoundRTL = NULL;
   PM->RTLsMtx.lock();
   // Register the images with the RTLs that understand them, if any.
