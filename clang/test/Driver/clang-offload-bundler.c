@@ -103,6 +103,9 @@
 // RUN: not clang-offload-bundler -type=i -targets=host-%itanium_abi_triple,host-%itanium_abi_triple,openmp-x86_64-pc-linux-gnu -inputs=%t.i,%t.tgt1,%t.tgt2 -outputs=%t.bundle.i 2>&1 | FileCheck %s --check-prefix CK-ERR9B
 // CK-ERR9B: error: Duplicate targets are not allowed
 
+// RUN: not clang-offload-bundler -type=a -targets=hxst-powerpcxxle-ibm-linux-gnu,openxp-pxxerpc64le-ibm-linux-gnu,xpenmp-x86_xx-pc-linux-gnu -inputs=%t.i,%t.tgt1,%t.tgt2 -outputs=%t.bundle.i 2>&1 | FileCheck %s --check-prefix CK-ERR10A
+// CK-ERR10A: error: Archive files are only supported for unbundling
+
 //
 // Check text bundle. This is a readable format, so we check for the format we expect to find.
 //
@@ -361,6 +364,37 @@
 // CKLST2-NOT: host-
 // CKLST2-NOT: openmp-powerpc64le-ibm-linux-gnu
 // CKLST2-NOT: openmp-x86_64-pc-linux-gnu
+
+//
+// Check archive unbundling
+//
+// Create few code object bundles and archive them to create an input archive
+// RUN: clang-offload-bundler -type=o -targets=host-%itanium_abi_triple,openmp-amdgcn-amd-amdhsa--gfx906,openmp-amdgcn-amd-amdhsa--gfx908 -inputs=%t.o,%t.tgt1,%t.tgt2 -outputs=%t.simple.bundle
+// RUN: clang-offload-bundler -type=o -targets=host-%itanium_abi_triple,openmp-amdgcn-amd-amdhsa--gfx906:sramecc+:xnack+,openmp-amdgcn-amd-amdhsa--gfx908:sramecc+:xnack+ -inputs=%t.o,%t.tgt1,%t.tgt1 -outputs=%t.targetID1.bundle
+// RUN: clang-offload-bundler -type=o -targets=host-%itanium_abi_triple,openmp-amdgcn-amd-amdhsa--gfx906:sramecc+:xnack-,openmp-amdgcn-amd-amdhsa--gfx908:sramecc+:xnack- -inputs=%t.o,%t.tgt1,%t.tgt1 -outputs=%t.targetID2.bundle
+// RUN: clang-offload-bundler -type=o -targets=host-%itanium_abi_triple,openmp-amdgcn-amd-amdhsa--gfx906:xnack-,openmp-amdgcn-amd-amdhsa--gfx908:xnack- -inputs=%t.o,%t.tgt1,%t.tgt1 -outputs=%t.targetID3.bundle
+// RUN: llvm-ar cr %t.input-archive.a %t.simple.bundle %t.targetID1.bundle %t.targetID2.bundle %t.targetID3.bundle
+
+// RUN: clang-offload-bundler -unbundle -type=a -targets=openmp-amdgcn-amd-amdhsa--gfx906,openmp-amdgcn-amd-amdhsa--gfx908 -inputs=%t.input-archive.a -outputs=%t-archive-gfx906-simple.a,%t-archive-gfx908-simple.a
+// RUN: llvm-ar t %t-archive-gfx906-simple.a | FileCheck %s -check-prefix=GFX906
+// GFX906: simple-openmp-amdgcn-amd-amdhsa--gfx906
+// RUN: llvm-ar t %t-archive-gfx908-simple.a | FileCheck %s -check-prefix=GFX908
+// GFX908-NOT: {{gfx906|sramecc|xnack}}
+
+// RUN: clang-offload-bundler -unbundle -type=a -targets=openmp-amdgcn-amd-amdhsa--gfx906:sramecc+:xnack+ -inputs=%t.input-archive.a -outputs=%t-archive-gfx906-tid1.a
+// RUN: llvm-ar t %t-archive-gfx906-tid1.a | FileCheck %s -check-prefix=TEST1
+// TEST1: simple-openmp-amdgcn-amd-amdhsa--gfx906
+// TEST1: targetID1-openmp-amdgcn-amd-amdhsa--gfx906_sramecc+_xnack+
+
+// RUN: clang-offload-bundler -unbundle -type=a -targets=openmp-amdgcn-amd-amdhsa--gfx906:sramecc+:xnack- -inputs=%t.input-archive.a -outputs=%t-archive-gfx906-tid2.a
+// RUN: llvm-ar t %t-archive-gfx906-tid2.a | FileCheck %s -check-prefix=TEST2
+// TEST2-NOT: {{gfx908|sramecc\-|xnack\+}}
+
+// RUN: clang-offload-bundler -unbundle -type=a -targets=openmp-amdgcn-amd-amdhsa--gfx906:sramecc+:xnack- -inputs=%t.input-archive.a -outputs=%t-archive-gfx906-tid3.a
+// RUN: llvm-ar t %t-archive-gfx906-tid3.a | FileCheck %s -check-prefix=TEST3
+// TEST3: simple-openmp-amdgcn-amd-amdhsa--gfx906
+// TEST3: targetID2-openmp-amdgcn-amd-amdhsa--gfx906_sramecc+_xnack-
+// TEST3: targetID3-openmp-amdgcn-amd-amdhsa--gfx906_xnack-
 
 // Some code so that we can create a binary out of this file.
 int A = 0;
