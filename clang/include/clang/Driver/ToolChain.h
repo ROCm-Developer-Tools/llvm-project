@@ -174,6 +174,11 @@ private:
   mutable llvm::Optional<RuntimeLibType> runtimeLibType;
   mutable llvm::Optional<UnwindLibType> unwindLibType;
 
+  // OpenMP creates a toolchain for each target, which is uniquely
+  // defined as (Target Triple, TargetID).
+  // TargetID example "gfx908:sramecc+:xnack-".
+  std::string TargetID;
+
 protected:
   MultilibSet Multilibs;
   Multilib SelectedMultilib;
@@ -248,6 +253,12 @@ public:
   const llvm::Triple &getEffectiveTriple() const {
     assert(!EffectiveTriple.getTriple().empty() && "No effective triple");
     return EffectiveTriple;
+  }
+
+  const std::string getTargetID() const { return TargetID; }
+
+  void setTargetID(std::string TargetID) {
+    this->TargetID = std::move(TargetID);
   }
 
   path_list &getLibraryPaths() { return LibraryPaths; }
