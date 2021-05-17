@@ -4,6 +4,7 @@ cmake_policy(SET CMP0002 NEW)
 cmake_minimum_required(VERSION 3.5)
 
 set(AOT_sources OffloadArch.cpp
+   getRequirementsFromFile.cpp
    amdgpu/vendor_specific_capabilities.cpp
    nvidia/vendor_specific_capabilities.cpp)
 
@@ -11,10 +12,10 @@ if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   # Build standalone, not part of clang
   project(offload-arch)
   add_executable(offload-arch ${AOT_sources})
-  target_link_libraries(offload-arch PUBLIC -ldl)
+  target_link_libraries(offload-arch PUBLIC -ldl -lelf)
 else()
   add_clang_tool(offload-arch ${AOT_sources})
-  clang_target_link_libraries(offload-arch PUBLIC -ldl)
+  clang_target_link_libraries(offload-arch PUBLIC -ldl -lelf)
 endif()
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
