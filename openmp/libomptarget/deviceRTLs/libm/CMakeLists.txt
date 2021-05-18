@@ -40,7 +40,6 @@ set(OUTPUTDIR ${CMAKE_CURRENT_BINARY_DIR})
 
 macro(build_static_device_bc_lib)
 foreach(mcpu ${gpulist})
-message("------------------- DIR: ${CMAKE_CURRENT_BINARY_DIR}/../../../runtime/src")
   set(cpu_target x86_64-pc-linux-gnu)
   if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "ppc64le")
     set(cpu_target powerpc64le-linux-gnu)
