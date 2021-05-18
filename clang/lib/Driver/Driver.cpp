@@ -3172,11 +3172,6 @@ class OffloadingActionBuilder final {
       // If this is an input action replicate it for each OpenMP toolchain.
       if (auto *IA = dyn_cast<InputAction>(HostAction)) {
         OpenMPDeviceActions.clear();
-        // Only process input actions for files that have extensions
-        std::string FileName = IA->getInputArg().getAsString(Args);
-        if (!llvm::sys::path::has_extension(FileName)) {
-          return ABRT_Inactive;
-        }
         for (unsigned I = 0; I < ToolChains.size(); ++I)
           OpenMPDeviceActions.push_back(
               C.MakeAction<InputAction>(IA->getInputArg(), IA->getType()));
@@ -3202,11 +3197,8 @@ class OffloadingActionBuilder final {
             StringRef Extension =
                 llvm::sys::path::extension(FileName).drop_front();
             if ((types::lookupTypeForExtension(Extension) !=
-                 types::TY_Object)) {
-              // Do NOT register device actions for cmdline archive files.
-              // That is, only unbundle archives triggered with -l on cmdline
-              if (Extension == "a")
-                return ABRT_Success;
+                 types::TY_Object) &&
+                Extension != "a") {
               return ABRT_Inactive;
             }
           } else {
