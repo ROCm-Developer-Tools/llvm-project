@@ -18,6 +18,7 @@
 #endif
 #include <limits.h>
 #include <stdint.h>
+#include <omp.h>
 
 // __DEVICE__ is a helper macro with common set of attributes for the wrappers
 // we implement in this file. We need static in order to avoid emitting unused
