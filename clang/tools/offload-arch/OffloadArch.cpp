@@ -36,57 +36,6 @@
 #define INTELHD_SEARCH_PHRASE "DRIVER=i915"
 #define INTELHD_PCIID_PHRASE "PCI_ID=8086:"
 
-void aot_usage() {
-  printf("\n\
-   offload-arch: Print offload architecture(s) for current system, or\n\
-                 print offload runtime capabilities of current system,\n\
-                 or lookup information about offload architectures,\n\
-                 or print offload requirements for an application binary\n\
-\n\
-   Usage:\n\
-\n\
-     offload-arch [ Options ] [ Optional lookup-value ]\n\
-\n\
-     With no options, offload-arch prints a value for the first offload arch\n\
-     found in the current active system. This can be used by various clang\n\
-     frontends. For example, to compile for openmp offloading on your current\n\
-     system, invoke clang with the following command:\n\
-        clang -fopenmp -fopenmp-targets=`offload-arch` foo.c\n\
-\n\
-     If an optional lookup-value is specified, offload-arch will\n\
-     check if the value is either a valid offload-arch or a codename\n\
-     and lookup requested additional information. For example,\n\
-     this provides all information for offload-arch gfx906:\n\
-\n\
-     offload-arch gfx906 -v \n\
-\n\
-     Options:\n\
-     -h  Print this help message\n\
-     -a  Print values for all devices. Don't stop at first device found.\n\
-     -m  Print device code name (often found in pci.ids file)\n\
-     -n  Print numeric pci-id\n\
-     -t  Print clang offload triple to use for the offload arch.\n\
-     -v  Verbose = -a -m -n -t  \n\
-         For all devices, print codename, numeric value and triple\n\
-     -f  <filename> Print offload requirements including offload-arch for\n\
-         each compiled offload image built into an application binary file.\n\
-     -c  Print offload capabilities of the current active system.\n\
-	 This option is used by the language runtime to select an image\n\
-	 when multiple images are availble.\n\
-	 A capability must exist for each requirement of the selected image.\n\
-\n\
-     There are aliases 'amdgpu-arch', 'nvidia-arch', and 'intelhd-arch' made with\n\
-     symlinks to offload-arch. These aliases return 1 if no amdgcn GPU, no cuda GPU\n\
-     or no intel GPU is found, respectfully. These aliases are useful to determine if\n\
-     architecture-specific tests should be run, or to conditionally load\n\
-     archecture-specific software.\n\
-\n\
-     Copyright (c) 2021 ADVANCED MICRO DEVICES, INC.\n\
-\n\
-");
-  exit(1);
-}
-
 static bool AOT_get_all_active_devices;
 
 std::string _aot_get_file_contents(std::string fname) {

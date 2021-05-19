@@ -3,11 +3,14 @@
 cmake_policy(SET CMP0002 NEW)
 cmake_minimum_required(VERSION 3.5)
 
-set(AOT_sources OffloadArch.cpp
+set(AOT_sources
+   OffloadArch.cpp
+   OffloadArchHelp.cpp
    getRequirementsFromFile.cpp
    amdgpu/vendor_specific_capabilities.cpp
    nvidia/vendor_specific_capabilities.cpp
-   intelhd/vendor_specific_capabilities.cpp)
+   intelhd/vendor_specific_capabilities.cpp
+)
 
 if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   # Build standalone, not part of clang
