@@ -6,7 +6,8 @@ cmake_minimum_required(VERSION 3.5)
 set(AOT_sources OffloadArch.cpp
    getRequirementsFromFile.cpp
    amdgpu/vendor_specific_capabilities.cpp
-   nvidia/vendor_specific_capabilities.cpp)
+   nvidia/vendor_specific_capabilities.cpp
+   intelhd/vendor_specific_capabilities.cpp)
 
 if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   # Build standalone, not part of clang
@@ -32,7 +33,9 @@ add_custom_command(
      ${CMAKE_CURRENT_SOURCE_DIR}/amdgpu/pciid2codename.txt 
      ${CMAKE_CURRENT_SOURCE_DIR}/amdgpu/codename2offloadarch.txt 
      ${CMAKE_CURRENT_SOURCE_DIR}/nvidia/pciid2codename.txt 
-     ${CMAKE_CURRENT_SOURCE_DIR}/nvidia/codename2offloadarch.txt 
+     ${CMAKE_CURRENT_SOURCE_DIR}/nvidia/pciid2codename.txt
+     ${CMAKE_CURRENT_SOURCE_DIR}/intelhd/codename2offloadarch.txt
+     ${CMAKE_CURRENT_SOURCE_DIR}/intelhd/codename2offloadarch.txt
 )
 add_custom_target(
   generated-table
@@ -47,11 +50,17 @@ add_custom_target(
    COMMAND ln -sf offload-arch nvidia-arch
    DEPENDS offload-arch)
 
+add_custom_target(
+   intelhd-arch ALL
+   COMMAND ln -sf offload-arch intelhd-arch
+   DEPENDS offload-arch)
+
 add_dependencies(offload-arch generated-table)
 
 install(PROGRAMS
     ${CMAKE_CURRENT_BINARY_DIR}/amdgpu-arch
     ${CMAKE_CURRENT_BINARY_DIR}/nvidia-arch
+    ${CMAKE_CURRENT_BINARY_DIR}/intelhd-arch
      DESTINATION bin
      COMPONENT offload-arch)
 

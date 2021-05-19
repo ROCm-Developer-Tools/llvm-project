@@ -7,8 +7,9 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// Implementation of offload-arch tool and alias commands "amdgpu-arch" and
-/// "nvidia-arch". The alias commands are symbolic links to offload-arch.
+/// Implementation of offload-arch tool and alias commands "amdgpu-arch" ,
+/// "nvidia-arch" and "intelhd-arch". The alias commands are symbolic links
+/// to offload-arch.
 /// offload-arch prints the offload-arch for the current active system or
 /// looks up numeric pci ids and codenames for a given offload-arch.
 ///
@@ -32,6 +33,8 @@
 #define AMDGPU_PCIID_PHRASE "PCI_ID=1002:"
 #define NVIDIA_SEARCH_PHRASE "DRIVER=nvidia"
 #define NVIDIA_PCIID_PHRASE "PCI_ID=10DE:"
+#define INTELHD_SEARCH_PHRASE "DRIVER=i915"
+#define INTELHD_PCIID_PHRASE "PCI_ID=8086:"
 
 void aot_usage() {
   printf("\n\
@@ -72,9 +75,9 @@ void aot_usage() {
 	 when multiple images are availble.\n\
 	 A capability must exist for each requirement of the selected image.\n\
 \n\
-     There are symbolic link aliases 'amdgpu-arch' and 'nvidia-arch' for\n\
-     offload-arch. These aliases return 1 if no amdgcn GPU or no cuda GPU\n\
-     is found, respectfully. These aliases are useful to determine if\n\
+     There are aliases 'amdgpu-arch', 'nvidia-arch', and 'intelhd-arch' made with\n\
+     symlinks to offload-arch. These aliases return 1 if no amdgcn GPU, no cuda GPU\n\
+     or no intel GPU is found, respectfully. These aliases are useful to determine if\n\
      architecture-specific tests should be run, or to conditionally load\n\
      archecture-specific software.\n\
 \n\
@@ -213,6 +216,9 @@ std::string _aot_get_capabilities(uint16_t vid, uint16_t devid,
   case 0x10de:
     capabilities.append(_aot_nvidia_capabilities(vid, devid, oa));
     break;
+  case 0x8086:
+    capabilities.append(_aot_intelhd_capabilities(vid, devid, oa));
+    break;
   }
   return capabilities;
 }
@@ -226,6 +232,9 @@ std::string _aot_get_triple(uint16_t VendorID, uint16_t DeviceID) {
   case 0x10de:
     return (std::string("nvptx64-nvidia-cuda"));
     break;
+  case 0x8086:
+    return (std::string("spir64-intel-unknown"));
+    break;
   }
   return retval;
 }
@@ -236,6 +245,7 @@ int main(int argc, char **argv) {
   bool print_capabilities_for_runtime_requirements = false;
   bool amdgpu_arch = false;
   bool nvidia_arch = false;
+  bool intelhd_arch = false;
   AOT_get_all_active_devices = false;
   bool print_triple = false;
   std::string lookup_value;
@@ -246,6 +256,7 @@ int main(int argc, char **argv) {
       // look for arch-specific invocation with symlink
       amdgpu_arch = (a.find("amdgpu-arch") != std::string::npos);
       nvidia_arch = (a.find("nvidia-arch") != std::string::npos);
+      intelhd_arch = (a.find("intelhd-arch") != std::string::npos);
     } else {
       if (a == "-n") {
         print_numeric = true;
@@ -296,6 +307,8 @@ int main(int argc, char **argv) {
       PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE, AMDGPU_PCIID_PHRASE);
     } else if (nvidia_arch) {
       PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
+    } else if (intelhd_arch) {
+      PCI_IDS = _aot_get_pci_ids(INTELHD_SEARCH_PHRASE, INTELHD_PCIID_PHRASE);
     } else {
       // Search for all supported offload archs;
       PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE, AMDGPU_PCIID_PHRASE);
@@ -305,10 +318,18 @@ int main(int argc, char **argv) {
             _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
         for (auto PCI_ID : PCI_IDs_next_arch)
           PCI_IDS.push_back(PCI_ID);
+        std::vector<std::string> PCI_IDs_intelhd_arch;
+        PCI_IDs_intelhd_arch =
+            _aot_get_pci_ids(INTELHD_SEARCH_PHRASE, INTELHD_PCIID_PHRASE);
+        for (auto PCI_ID : PCI_IDs_intelhd_arch)
+          PCI_IDS.push_back(PCI_ID);
       } else {
         // stop offload-arch at first device found`
         if (PCI_IDS.empty())
           PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
+        if (PCI_IDS.empty())
+          PCI_IDS =
+              _aot_get_pci_ids(INTELHD_SEARCH_PHRASE, INTELHD_PCIID_PHRASE);
       }
     }
 

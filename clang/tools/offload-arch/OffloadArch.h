@@ -9,6 +9,8 @@ std::string _aot_amdgpu_capabilities(uint16_t vid, uint16_t devid,
                                      std::string oa);
 std::string _aot_nvidia_capabilities(uint16_t vid, uint16_t devid,
                                      std::string oa);
+std::string _aot_intelhd_capabilities(uint16_t vid, uint16_t devid,
+                                     std::string oa);
 std::vector<std::string> _aot_get_requirements_from_file(std::string filename);
 
 #endif

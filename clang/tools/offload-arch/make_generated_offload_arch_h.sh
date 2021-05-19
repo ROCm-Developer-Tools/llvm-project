@@ -48,8 +48,8 @@ if [ -z $INPUTDIR ] ; then
 fi
 
 # These are the input files
-AOT_PCIID2CODENAME="$INPUTDIR/amdgpu/pciid2codename.txt $INPUTDIR/nvidia/pciid2codename.txt"
-AOT_CODENAME2OFFLOADARCH="$INPUTDIR/amdgpu/codename2offloadarch.txt $INPUTDIR/nvidia/codename2offloadarch.txt"
+AOT_PCIID2CODENAME="$INPUTDIR/amdgpu/pciid2codename.txt $INPUTDIR/nvidia/pciid2codename.txt $INPUTDIR/intelhd/pciid2codename.txt"
+AOT_CODENAME2OFFLOADARCH="$INPUTDIR/amdgpu/codename2offloadarch.txt $INPUTDIR/nvidia/codename2offloadarch.txt $INPUTDIR/intelhd/codename2offloadarch.txt"
 
 # This is the output file which is always written to current dir
 AOT_DOTH_FILE="$PWD/generated_offload_arch.h"
