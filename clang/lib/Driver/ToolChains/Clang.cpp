@@ -7721,15 +7721,8 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  // Get the Code Object Version used by all offload-archs in this compilation
-  unsigned CodeObjVer = 0;
   auto TCs = C.getOffloadToolChains<Action::OFK_OpenMP>();
-  for (auto II = TCs.first, IE = TCs.second; II != IE; ++II) {
-    auto TC = II->second;
-    if (TC->getArch() == llvm::Triple::amdgcn)
-      CodeObjVer = getOrCheckAMDGPUCodeObjectVersion(C.getDriver(), Args);
-  }
-
+  
   // Add runtime requirements on each image which includes the offload-arch
   auto II = TCs.first;
   for (const InputInfo &I : Inputs) {
@@ -7748,9 +7741,6 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
         requirements.replace(start_pos, 1, "__");
         start_pos += 2;
       }
-      if (CodeObjVer > 3) // Add implied CodeObjVer feature.
-        requirements.append(
-            Args.MakeArgString(Twine("__CodeObjVer") + Twine(CodeObjVer)));
 
       // FIXME: Add other architecture requirements here
       CmdArgs.push_back(Args.MakeArgString(requirements.c_str()));

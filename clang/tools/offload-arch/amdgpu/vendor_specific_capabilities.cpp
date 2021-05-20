@@ -189,16 +189,7 @@ void *_aot_dynload_hsa_runtime() {
 std::string _aot_amdgpu_capabilities(uint16_t vid, uint16_t devid,
                                      std::string oa) {
   std::string amdgpu_capabilities;
-  std::string file_contents =
-      _aot_get_file_contents(std::string("/sys/module/amdgpu/version"));
-  if (!file_contents.empty()) {
-    int ver, rel, mod;
-    sscanf(file_contents.c_str(), "%d.%d.%d\n", &ver, &rel, &mod);
-    if ((ver > 5) || ((ver == 5) && (rel > 9)) ||
-        ((ver == 5) && (rel == 9) && (mod >= 15)))
-      amdgpu_capabilities.append("CodeObjVer4");
-  }
-
+  
   void *dlhandle = _aot_dynload_hsa_runtime();
   if (!dlhandle) {
     amdgpu_capabilities.append(" HSAERROR-LOADING");
