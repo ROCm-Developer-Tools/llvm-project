@@ -15,3 +15,4 @@ HD_Graphics_630 spirv
 HD_Graphics_620 spirv
 UHD_Graphics_620 spirv
 HD_Graphics_P630 spirv
+Integrated_HD_Graphics spirv
