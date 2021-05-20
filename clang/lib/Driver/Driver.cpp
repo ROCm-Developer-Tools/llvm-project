@@ -3317,7 +3317,7 @@ class OffloadingActionBuilder final {
         for (unsigned I = 0; I < ToolChains.size(); ++I) {
           OpenMPDeviceActions.push_back(UA);
           UA->registerDependentActionInfo(
-              ToolChains[I], /*BoundArch=*/StringRef(), Action::OFK_OpenMP);
+              ToolChains[I], /*BoundArch=*/GpuArchList[I].ID, Action::OFK_OpenMP);
         }
         return ABRT_Success;
       }
@@ -3354,11 +3354,12 @@ class OffloadingActionBuilder final {
       assert(OpenMPDeviceActions.size() == ToolChains.size() &&
              "Number of OpenMP actions and toolchains do not match.");
 
+      unsigned arch_count = 0;
       // Append all device actions followed by the proper offload action.
       auto TI = ToolChains.begin();
       for (auto *A : OpenMPDeviceActions) {
         OffloadAction::DeviceDependences Dep;
-        Dep.add(*A, **TI, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+        Dep.add(*A, **TI, /*BoundArch=*/GpuArchList[arch_count++].ID, Action::OFK_OpenMP);
         AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
         ++TI;
       }
@@ -4882,11 +4883,13 @@ InputInfo Driver::BuildJobsForActionNoCache(
       // Get the unique string identifier for this dependence and cache the
       // result.
       StringRef Arch;
-      if (TargetDeviceOffloadKind == Action::OFK_HIP) {
+      if (TargetDeviceOffloadKind == Action::OFK_HIP || TargetDeviceOffloadKind == Action::OFK_OpenMP) {
         if (UI.DependentOffloadKind == Action::OFK_Host)
           Arch = StringRef();
-        else
+        else if (TargetDeviceOffloadKind == Action::OFK_HIP)
           Arch = UI.DependentBoundArch;
+        else if (TargetDeviceOffloadKind == Action::OFK_OpenMP)
+          Arch = UI.DependentToolChain->getTargetID();
       } else
         Arch = BoundArch;
 

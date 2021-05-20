@@ -1788,8 +1788,8 @@ bool tools::GetSDLFromOffloadArchive(
 
       // Add this flag to not exit from clang-offload-bundler if no compatible
       // code object is found in heterogenous archive library.
-      // std::string AdditionalArgs("-allow-missing-bundles");
-      // UBArgs.push_back(C.getArgs().MakeArgString(AdditionalArgs.c_str()));
+      std::string AdditionalArgs("-allow-missing-bundles");
+      UBArgs.push_back(C.getArgs().MakeArgString(AdditionalArgs.c_str()));
 
       C.addCommand(std::make_unique<Command>(
           JA, T, ResponseFileSupport::AtFileCurCP(), UBProgram, UBArgs, Inputs,
