@@ -712,7 +712,6 @@ void GetTargetInfoFromMArch(Compilation &C,
 
 void GetTargetInfoFromOffloadArchOpts(Compilation &C,
                                       std::set<std::string> &OffloadArchs) {
-  bool Error = false;
   for (Arg *A : C.getInputArgs()) {
     if (!(A->getOption().matches(options::OPT_offload_arch_EQ) ||
           A->getOption().matches(options::OPT_no_offload_arch_EQ))) {
@@ -727,9 +726,9 @@ void GetTargetInfoFromOffloadArchOpts(Compilation &C,
       OffloadArchs.clear();
       continue;
     }
-    if (ArchStr.empty()) {
-      Error = true;
-    } else if (A->getOption().matches(options::OPT_offload_arch_EQ))
+    if (ArchStr.empty()) 
+      continue;
+    else if (A->getOption().matches(options::OPT_offload_arch_EQ))
       GetTargetInfoFromOpenMPTargets(C, ArchStr.str().c_str(), OffloadArchs);
     else if (A->getOption().matches(options::OPT_no_offload_arch_EQ))
       GetTargetInfoFromOpenMPTargets(C, ArchStr.str().c_str(), OffloadArchs,

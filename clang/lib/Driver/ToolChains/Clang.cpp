@@ -7673,7 +7673,7 @@ void OffloadBundler::ConstructJobMultipleOutputs(
          Dep.DependentOffloadKind == Action::OFK_OpenMP ||
          Dep.DependentOffloadKind == Action::OFK_Cuda) &&
         !Dep.DependentBoundArch.empty()) {
-      Triples += '-';
+      Triples += "--";
       Triples += Dep.DependentBoundArch;
     }
   }
