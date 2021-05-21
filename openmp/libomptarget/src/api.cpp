@@ -83,18 +83,18 @@ EXTERN void omp_target_free(void *device_ptr, int device_num) {
   DP("omp_target_free deallocated device ptr\n");
 }
 
-EXTERN int omp_target_is_present(void *ptr, int device_num) {
+EXTERN int omp_target_is_accessible(void *ptr, size_t size, int device_num) {
   TIMESCOPE();
-  DP("Call to omp_target_is_present for device %d and address " DPxMOD "\n",
+  DP("Call to omp_target_is_accessible/present for device %d and address " DPxMOD "\n",
      device_num, DPxPTR(ptr));
 
   if (!ptr) {
-    DP("Call to omp_target_is_present with NULL ptr, returning false\n");
+    DP("Call to omp_target_is_accessible/present with NULL ptr, returning false\n");
     return false;
   }
 
   if (device_num == omp_get_initial_device()) {
-    DP("Call to omp_target_is_present on host, returning true\n");
+    DP("Call to omp_target_is_accessible/present on host, returning true\n");
     return true;
   }
 
@@ -102,7 +102,7 @@ EXTERN int omp_target_is_present(void *ptr, int device_num) {
   size_t DevicesSize = PM->Devices.size();
   PM->RTLsMtx.unlock();
   if (DevicesSize <= (size_t)device_num) {
-    DP("Call to omp_target_is_present with invalid device ID, returning "
+    DP("Call to omp_target_is_accessible/present with invalid device ID, returning "
        "false\n");
     return false;
   }
@@ -110,7 +110,7 @@ EXTERN int omp_target_is_present(void *ptr, int device_num) {
   DeviceTy &Device = PM->Devices[device_num];
   bool IsLast; // not used
   bool IsHostPtr;
-  void *TgtPtr = Device.getTgtPtrBegin(ptr, 0, IsLast, false, IsHostPtr);
+  void *TgtPtr = Device.getTgtPtrBegin(ptr, size, IsLast, false, IsHostPtr);
   int rc = (TgtPtr != NULL);
   // Under unified memory the host pointer can be returned by the
   // getTgtPtrBegin() function which means that there is no device
@@ -120,6 +120,10 @@ EXTERN int omp_target_is_present(void *ptr, int device_num) {
     rc = !IsHostPtr;
   DP("Call to omp_target_is_present returns %d\n", rc);
   return rc;
+}
+
+EXTERN int omp_target_is_present(void *ptr, int device_num) {
+  return omp_target_is_accessible(ptr, /*size=*/0, device_num);
 }
 
 EXTERN int omp_target_memcpy(void *dst, void *src, size_t length,
