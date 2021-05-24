@@ -148,7 +148,6 @@ std::vector<std::map<std::string, atl_kernel_info_t>> KernelInfoTable;
 std::vector<std::map<std::string, atl_symbol_info_t>> SymbolInfoTable;
 
 bool g_atmi_initialized = false;
-bool g_atmi_hostcall_required = false;
 
 struct timespec context_init_time;
 int context_init_time_init = 0;
@@ -1021,8 +1020,6 @@ static hsa_status_t populate_InfoTables(hsa_executable_t executable,
     register_allocation(reinterpret_cast<void *>(info.addr), (size_t)info.size,
                         place);
     SymbolInfoTable[gpu][std::string(name)] = info;
-    if (strcmp(name, "needs_hostcall_buffer") == 0)
-      g_atmi_hostcall_required = true;
     free(name);
   } else {
     DEBUG_PRINT("Symbol is an indirect function\n");
