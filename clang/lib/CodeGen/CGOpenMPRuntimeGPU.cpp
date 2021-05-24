@@ -4610,7 +4610,7 @@ Address CGOpenMPRuntimeGPU::getAddressOfLocalVariable(CodeGenFunction &CGF,
       AS = LangAS::cuda_device;
       break;
     case OMPAllocateDeclAttr::OMPLargeCapMemAlloc:
-
+      break;
     }
     llvm::Type *VarTy = CGF.ConvertTypeForMem(VD->getType());
     auto *GV = new llvm::GlobalVariable(
