@@ -656,6 +656,88 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
   return RT;
 }
 
+void GetTargetInfoFromOpenMPTargets(Compilation &C, const char *OpenMPTarget,
+                                    std::set<std::string> &OffloadArchs,
+                                    bool erase = false) {
+  if (!std::strncmp(OpenMPTarget, "gfx", 3)) {
+    if (erase)
+      OffloadArchs.erase(
+          std::string("amdgcn-amd-amdhsa^").append(OpenMPTarget));
+    else
+      OffloadArchs.insert(
+          std::string("amdgcn-amd-amdhsa^").append(OpenMPTarget));
+  } else if (!std::strncmp(OpenMPTarget, "sm_", 3)) {
+    const ToolChain *HostTC = C.getSingleOffloadToolChain<Action::OFK_Host>();
+    const llvm::Triple &HostTriple = HostTC->getTriple();
+    StringRef DeviceTripleStr = HostTriple.isArch64Bit()
+                                    ? "nvptx64-nvidia-cuda^"
+                                    : "nvptx-nvidia-cuda^";
+    if (erase)
+      OffloadArchs.erase(DeviceTripleStr.str().append(OpenMPTarget));
+    else
+      OffloadArchs.insert(DeviceTripleStr.str().append(OpenMPTarget));
+  }
+}
+
+void GetTargetInfoFromMArch(Compilation &C,
+                            std::set<std::string> &OffloadArchs) {
+  StringRef IdStr;
+  for (Arg *A : C.getInputArgs()) {
+    if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
+      for (auto *V : A->getValues()) {
+        StringRef VStr = StringRef(V);
+        if (VStr.startswith("-march=")) {
+          IdStr = VStr.split('=').second;
+          StringRef ArchProc = IdStr.split(":").first;
+          if (ArchProc.empty()) {
+            C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << VStr;
+            C.setContainsError();
+            return;
+          }
+          CudaArch Arch = StringToCudaArch(ArchProc);
+          if (Arch == CudaArch::UNKNOWN) {
+            C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << VStr;
+            C.setContainsError();
+            return;
+          }
+          auto Triple = StringRef(A->getValue(0));
+          if (!Triple.empty() && !IdStr.empty())
+            OffloadArchs.insert(Triple.str().append("^").append(IdStr.str()));
+        }
+        A->claim();
+      }
+    }
+  }
+}
+
+void GetTargetInfoFromOffloadArchOpts(Compilation &C,
+                                      std::set<std::string> &OffloadArchs) {
+  for (Arg *A : C.getInputArgs()) {
+    if (!(A->getOption().matches(options::OPT_offload_arch_EQ) ||
+          A->getOption().matches(options::OPT_no_offload_arch_EQ))) {
+      continue;
+    }
+    A->claim();
+
+    StringRef ArchStr = A->getValue();
+
+    if (A->getOption().matches(options::OPT_no_offload_arch_EQ) &&
+        ArchStr == "all") {
+      OffloadArchs.clear();
+      continue;
+    }
+    if (ArchStr.empty()) 
+      continue;
+    else if (A->getOption().matches(options::OPT_offload_arch_EQ))
+      GetTargetInfoFromOpenMPTargets(C, ArchStr.str().c_str(), OffloadArchs);
+    else if (A->getOption().matches(options::OPT_no_offload_arch_EQ))
+      GetTargetInfoFromOpenMPTargets(C, ArchStr.str().c_str(), OffloadArchs,
+                                     /* erase */ true);
+    else
+      llvm_unreachable("Unexpected option.");
+  }
+}
+
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                                               InputList &Inputs) {
 
@@ -707,40 +789,48 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
           *this, HIPTriple, *HostTC, C.getInputArgs());
     }
     C.addOffloadDeviceToolChain(HIPTC.get(), OFK);
-  }
+  } else {
 
-  //
-  // OpenMP
-  //
-  // We need to generate an OpenMP toolchain if the user specified targets with
-  // the -fopenmp-targets option.
-  if (Arg *OpenMPTargets =
-          C.getInputArgs().getLastArg(options::OPT_fopenmp_targets_EQ)) {
-    bool is_host_offloading =
-        (OpenMPTargets->getNumValues() == 1) &&
-        StringRef(OpenMPTargets->getValue())
-            .startswith_lower(C.getSingleOffloadToolChain<Action::OFK_Host>()
-                                  ->getTriple()
-                                  .getArchName());
-    if (!is_host_offloading) {
-      // Ensure at least one -Xopenm-target exists with a gpu -march
-      if (Arg *XOpenMPTargets =
-              C.getInputArgs().getLastArg(options::OPT_Xopenmp_target_EQ)) {
-        bool has_valid_march = false;
-        for (auto *V : XOpenMPTargets->getValues())
-          if (StringRef(V).startswith("-march="))
-            has_valid_march = true;
-        if (!has_valid_march) {
-          Diag(diag::err_drv_missing_Xopenmptarget_or_march);
-          return;
-        }
-      } else {
-        Diag(diag::err_drv_missing_Xopenmptarget_or_march);
+    //
+    // OpenMP
+    //
+    // OpenMP Offloading is active when -offload-arch, -offload-archs, or
+    // legacy options -fopenmp-targets= are specified. We first build a list
+    // of OffloadArchs from command line options.
+    //
+    // Generate an instance of toolchain for each user specified target
+    // from the -fopenmp-targets option. The march value
+    // may now contain targetid value. This value
+    // may include features that would result in different and potentially
+    // multiple offload images.
+
+    std::set<std::string> OffloadArchs;
+
+    // Process legacy options -fopenmp-targets ...
+    if (Arg *OpenMPTargets =
+            C.getInputArgs().getLastArg(options::OPT_fopenmp_targets_EQ)) {
+      // First, handle errors in command line for OpenMP target offload
+      if (!OpenMPTargets->getNumValues()) {
+        Diag(clang::diag::warn_drv_empty_joined_argument)
+            << OpenMPTargets->getAsString(C.getInputArgs());
         return;
       }
+
+      // extract all arch shorthands given in -fopenmp-targets
+      // triple will be automatically populated if shorthand starts
+      // with "gfx" or "sm_"
+      for (const char *CmdLineVal : OpenMPTargets->getValues())
+        GetTargetInfoFromOpenMPTargets(C, CmdLineVal, OffloadArchs);
+
+      // process legacy args -fopenmp-targets -Xopenmp-target and -march
+      GetTargetInfoFromMArch(C, OffloadArchs);
     }
-    if (OpenMPTargets->getNumValues()) {
-      // We expect that -fopenmp-targets is always used in conjunction with the
+
+    GetTargetInfoFromOffloadArchOpts(C, OffloadArchs);
+
+    if (!OffloadArchs.empty()) {
+
+      // We expect that an offload target is always used in conjunction with
       // option -fopenmp specifying a valid runtime with offloading support,
       // i.e. libomp or libiomp.
       bool HasValidOpenMPRuntime = C.getInputArgs().hasFlag(
@@ -751,62 +841,80 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
         HasValidOpenMPRuntime =
             OpenMPKind == OMPRT_OMP || OpenMPKind == OMPRT_IOMP5;
       }
-
-      if (HasValidOpenMPRuntime) {
-        llvm::StringMap<const char *> FoundNormalizedTriples;
-        for (const char *Val : OpenMPTargets->getValues()) {
-          llvm::Triple TT(Val);
-          std::string NormalizedName = TT.normalize();
-
-          // Make sure we don't have a duplicate triple.
-          auto Duplicate = FoundNormalizedTriples.find(NormalizedName);
-          if (Duplicate != FoundNormalizedTriples.end()) {
-            Diag(clang::diag::warn_drv_omp_offload_target_duplicate)
-                << Val << Duplicate->second;
-            continue;
-          }
-
-          // Store the current triple so that we can check for duplicates in the
-          // following iterations.
-          FoundNormalizedTriples[NormalizedName] = Val;
-
-          // If the specified target is invalid, emit a diagnostic.
-          if (TT.getArch() == llvm::Triple::UnknownArch)
-            Diag(clang::diag::err_drv_invalid_omp_target) << Val;
-          else {
-            const ToolChain *TC;
-            // Device toolchains have to be selected differently. They pair host
-            // and device in their implementation.
-            if (TT.isNVPTX() || TT.isAMDGCN()) {
-              const ToolChain *HostTC =
-                  C.getSingleOffloadToolChain<Action::OFK_Host>();
-              assert(HostTC && "Host toolchain should be always defined.");
-              auto &DeviceTC =
-                  ToolChains[TT.str() + "/" + HostTC->getTriple().normalize()];
-              if (!DeviceTC) {
-                if (TT.isNVPTX())
-                  DeviceTC = std::make_unique<toolchains::CudaToolChain>(
-                      *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP);
-                else if (TT.isAMDGCN())
-                  DeviceTC =
-                      std::make_unique<toolchains::AMDGPUOpenMPToolChain>(
-                          *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP);
-                else
-                  assert(DeviceTC && "Device toolchain not defined.");
-              }
-
-              TC = DeviceTC.get();
-            } else {
-              TC = &getToolChain(C.getInputArgs(), TT);
-            }
-            C.addOffloadDeviceToolChain(TC, Action::OFK_OpenMP);
-          }
-        }
-      } else
+      if (!HasValidOpenMPRuntime) {
         Diag(clang::diag::err_drv_expecting_fopenmp_with_fopenmp_targets);
-    } else
-      Diag(clang::diag::warn_drv_empty_joined_argument)
-          << OpenMPTargets->getAsString(C.getInputArgs());
+        return;
+      }
+
+      llvm::StringMap<const char *> FoundNormalizedTriples;
+      for (auto &Target : OffloadArchs) {
+        size_t find_loc = Target.find('^');
+        std::string TriplePart = Target.substr(0, find_loc);
+        std::string TargetID = Target.substr(find_loc + 1);
+        llvm::Triple TT(TriplePart.c_str());
+        llvm::StringMap<bool> Features;
+        StringRef IdStr(TargetID);
+        auto ArchStr = parseTargetID(TT, IdStr, &Features);
+        if (!ArchStr) {
+          C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
+          C.setContainsError();
+        } else
+          TargetID = getCanonicalTargetID(ArchStr.getValue(), Features);
+
+        std::string NormalizedName;
+        if (TT.hasEnvironment())
+          NormalizedName = Twine(TT.normalize() + "-" + TargetID).str();
+        else
+          NormalizedName = Twine(TT.normalize() + "--" + TargetID).str();
+
+        // Make sure we don't have a duplicate triple.
+        auto Duplicate = FoundNormalizedTriples.find(NormalizedName);
+        if (Duplicate != FoundNormalizedTriples.end()) {
+          Diag(clang::diag::warn_drv_omp_offload_target_duplicate)
+              << NormalizedName << Duplicate->second;
+          continue;
+        }
+
+        // Store the current triple so that we can check for duplicates in the
+        // following iterations.
+        FoundNormalizedTriples[NormalizedName] = NormalizedName.c_str();
+
+        // If the specified target is invalid, emit a diagnostic.
+        if (TT.getArch() == llvm::Triple::UnknownArch) {
+          Diag(clang::diag::err_drv_invalid_omp_target) << NormalizedName;
+          return;
+        }
+
+        const ToolChain *TC;
+        // Device toolchains have to be selected differently. They pair host
+        // and device in their implementation.
+        if (TT.isNVPTX() || TT.isAMDGCN()) {
+          const ToolChain *HostTC =
+              C.getSingleOffloadToolChain<Action::OFK_Host>();
+          assert(HostTC && "Host toolchain should be always defined.");
+          auto &DeviceTC = ToolChains[NormalizedName + "/" +
+                                      HostTC->getTriple().normalize()];
+          if (!DeviceTC) {
+            if (TT.isNVPTX())
+              DeviceTC = std::make_unique<toolchains::CudaToolChain>(
+                  *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP,
+                  TargetID);
+            else if (TT.isAMDGCN())
+              DeviceTC = std::make_unique<toolchains::AMDGPUOpenMPToolChain>(
+                  *this, TT, *HostTC, C.getInputArgs(), Action::OFK_OpenMP,
+                  TargetID);
+            else
+              assert(DeviceTC && "Device toolchain not defined.");
+          }
+          TC = DeviceTC.get();
+        } else {
+          TC = &getToolChain(C.getInputArgs(), TT);
+        }
+        // Each value of -fopenmp-targets gets instance of offload toolchain
+        C.addOffloadDeviceToolChain(TC, Action::OFK_OpenMP);
+      } // end foreach openmp target
+
+    } // end has openmp offload targets
   }
 
   //
@@ -2409,6 +2517,19 @@ class OffloadingActionBuilder final {
       ABRT_Ignore_Host,
     };
 
+    /// ID to identify each device compilation. For CUDA it is simply the
+    /// GPU arch string. For HIP it is either the GPU arch string or GPU
+    /// arch string plus feature strings delimited by a plus sign, e.g.
+    /// gfx906+xnack.
+    struct TargetID {
+      /// Target ID string which is persistent throughout the compilation.
+      const char *ID;
+      TargetID(CudaArch Arch) { ID = CudaArchToString(Arch); }
+      TargetID(const char *ID) : ID(ID) {}
+      operator const char *() { return ID; }
+      operator StringRef() { return StringRef(ID); }
+    };
+
   protected:
     /// Compilation associated with this builder.
     Compilation &C;
@@ -2490,18 +2611,6 @@ class OffloadingActionBuilder final {
     bool EmitLLVM = false;
     bool EmitAsm = false;
 
-    /// ID to identify each device compilation. For CUDA it is simply the
-    /// GPU arch string. For HIP it is either the GPU arch string or GPU
-    /// arch string plus feature strings delimited by a plus sign, e.g.
-    /// gfx906+xnack.
-    struct TargetID {
-      /// Target ID string which is persistent throughout the compilation.
-      const char *ID;
-      TargetID(CudaArch Arch) { ID = CudaArchToString(Arch); }
-      TargetID(const char *ID) : ID(ID) {}
-      operator const char *() { return ID; }
-      operator StringRef() { return StringRef(ID); }
-    };
     /// List of GPU architectures to use in this compilation.
     SmallVector<TargetID, 4> GpuArchList;
 
@@ -3045,10 +3154,9 @@ class OffloadingActionBuilder final {
       }
 
       // By default, we produce an action for each device arch.
-      for (Action *&A : CudaDeviceActions) {
+      for (Action *&A : CudaDeviceActions)
         A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A,
                                                AssociatedOffloadKind);
-      }
 
       return (CompileDeviceOnly && CurPhase == FinalPhase) ? ABRT_Ignore_Host
                                                            : ABRT_Success;
@@ -3070,8 +3178,8 @@ class OffloadingActionBuilder final {
         // Linking all inputs for the current GPU arch.
         // LI contains all the inputs for the linker.
         OffloadAction::DeviceDependences DeviceLinkDeps;
-        DeviceLinkDeps.add(*DeviceLinkAction, *ToolChains[0],
-            GpuArchList[I], AssociatedOffloadKind);
+        DeviceLinkDeps.add(*DeviceLinkAction, *ToolChains[0], GpuArchList[I].ID,
+                           AssociatedOffloadKind);
         AL.push_back(C.MakeAction<OffloadAction>(DeviceLinkDeps,
             DeviceLinkAction->getType()));
         ++I;
@@ -3101,11 +3209,10 @@ class OffloadingActionBuilder final {
     /// The OpenMP actions for the current input.
     ActionList OpenMPDeviceActions;
 
-    bool CompileHostOnly = false;
     bool CompileDeviceOnly = false;
 
     /// List of GPU architectures to use in this compilation.
-    SmallVector<CudaArch, 4> GpuArchList;
+    SmallVector<TargetID, 4> GpuArchList;
 
     /// The linker inputs obtained for each toolchain.
     SmallVector<ActionList, 8> DeviceLinkerInputs;
@@ -3126,20 +3233,12 @@ class OffloadingActionBuilder final {
       assert(OpenMPDeviceActions.size() == ToolChains.size() &&
              "Number of OpenMP actions and toolchains do not match.");
 
-      const ToolChain *OpenMPTC =
-          C.getSingleOffloadToolChain<Action::OFK_OpenMP>();
-
-      // amdgcn does not support linking of object files, therefore we skip
-      // backend and assemble phases to output LLVM IR.
-      if (OpenMPTC->getTriple().isAMDGCN() &&
-          (CurPhase == phases::Backend || CurPhase == phases::Assemble))
-        return CompileDeviceOnly ? ABRT_Ignore_Host : ABRT_Success;
-
       // The host only depends on device action in the linking phase, when all
       // the device images have to be embedded in the host image.
       if (CurPhase == phases::Link) {
         assert(ToolChains.size() == DeviceLinkerInputs.size() &&
                "Toolchains and linker inputs sizes do not match.");
+
         auto LI = DeviceLinkerInputs.begin();
         for (auto *A : OpenMPDeviceActions) {
           LI->push_back(A);
@@ -3149,9 +3248,10 @@ class OffloadingActionBuilder final {
         // We passed the device action as a host dependence, so we don't need to
         // do anything else with them.
         OpenMPDeviceActions.clear();
-        return ABRT_Success;
+        return CompileDeviceOnly ? ABRT_Ignore_Host : ABRT_Success;
       }
 
+      bool LastActionIsCompile = false;
       // By default, we produce an action for each device arch.
       for (unsigned I = 0; I < ToolChains.size(); ++I) {
         Action *&A = OpenMPDeviceActions[I];
@@ -3160,11 +3260,13 @@ class OffloadingActionBuilder final {
         if (ToolChains[I]->getTriple().isAMDGCN() &&
             (CurPhase == phases::Assemble || CurPhase == phases::Backend))
           continue;
-
-        A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A);
+        A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A,
+                                               Action::OFK_OpenMP);
+        LastActionIsCompile =
+            (A->getKind() == Action::ActionClass::CompileJobClass);
       }
-
-      return ABRT_Success;
+      return (CompileDeviceOnly && LastActionIsCompile) ? ABRT_Ignore_Host
+                                                        : ABRT_Success;
     }
 
     ActionBuilderReturnCode addDeviceDepences(Action *HostAction) override {
@@ -3172,9 +3274,15 @@ class OffloadingActionBuilder final {
       // If this is an input action replicate it for each OpenMP toolchain.
       if (auto *IA = dyn_cast<InputAction>(HostAction)) {
         OpenMPDeviceActions.clear();
-        for (unsigned I = 0; I < ToolChains.size(); ++I)
-          OpenMPDeviceActions.push_back(
-              C.MakeAction<InputAction>(IA->getInputArg(), IA->getType()));
+        // Only process input actions for files that have extensions
+        std::string FileName = IA->getInputArg().getAsString(Args);
+        if (!llvm::sys::path::has_extension(FileName)) {
+          return ABRT_Inactive;
+        }
+        for (unsigned I = 0; I < ToolChains.size(); ++I) {
+          OpenMPDeviceActions.push_back(C.MakeAction<InputAction>(
+              IA->getInputArg(), IA->getType(), GpuArchList[I].ID));
+        }
         return ABRT_Success;
       }
 
@@ -3208,15 +3316,8 @@ class OffloadingActionBuilder final {
 
         for (unsigned I = 0; I < ToolChains.size(); ++I) {
           OpenMPDeviceActions.push_back(UA);
-          if (GpuArchList.size())
-            for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
-              UA->registerDependentActionInfo(ToolChains[I],
-                                              CudaArchToString(GpuArchList[I]),
-                                              Action::OFK_OpenMP);
-            }
-          else
-            UA->registerDependentActionInfo(
-                ToolChains[I], /*BoundArch=*/StringRef(), Action::OFK_OpenMP);
+          UA->registerDependentActionInfo(
+              ToolChains[I], /*BoundArch=*/GpuArchList[I].ID, Action::OFK_OpenMP);
         }
         return ABRT_Success;
       }
@@ -3233,15 +3334,11 @@ class OffloadingActionBuilder final {
             *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
             /*BoundArch=*/nullptr, Action::OFK_OpenMP);
         auto TC = ToolChains.begin();
+        unsigned arch_count = 0;
         for (Action *&A : OpenMPDeviceActions) {
           assert(isa<CompileJobAction>(A));
           OffloadAction::DeviceDependences DDep;
-          if (GpuArchList.size())
-            for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
-              DDep.add(*A, **TC, CudaArchToString(GpuArchList[I]),
-                       Action::OFK_OpenMP);
-          else
-            DDep.add(*A, **TC, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+          DDep.add(*A, **TC, GpuArchList[arch_count++].ID, Action::OFK_OpenMP);
           A = C.MakeAction<OffloadAction>(HDep, DDep);
           ++TC;
         }
@@ -3257,50 +3354,34 @@ class OffloadingActionBuilder final {
       assert(OpenMPDeviceActions.size() == ToolChains.size() &&
              "Number of OpenMP actions and toolchains do not match.");
 
+      unsigned arch_count = 0;
       // Append all device actions followed by the proper offload action.
       auto TI = ToolChains.begin();
       for (auto *A : OpenMPDeviceActions) {
         OffloadAction::DeviceDependences Dep;
-        if (GpuArchList.size())
-          for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
-            Dep.add(*A, **TI, CudaArchToString(GpuArchList[I]),
-                    Action::OFK_OpenMP);
-        else
-          Dep.add(*A, **TI, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+        Dep.add(*A, **TI, /*BoundArch=*/GpuArchList[arch_count++].ID, Action::OFK_OpenMP);
         AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
         ++TI;
       }
       // We no longer need the action stored in this builder.
       OpenMPDeviceActions.clear();
+      return;
     }
 
     void appendLinkDeviceActions(ActionList &AL) override {
       assert(ToolChains.size() == DeviceLinkerInputs.size() &&
              "Toolchains and linker inputs sizes do not match.");
-
       // Append a new link action for each device.
       auto TC = ToolChains.begin();
+      unsigned arch_count = 0;
       for (auto &LI : DeviceLinkerInputs) {
-        if (GpuArchList.size()) {
-          for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
-            auto *DeviceLinkAction =
-                C.MakeAction<LinkJobAction>(LI, types::TY_Image);
-            OffloadAction::DeviceDependences DeviceLinkDeps;
-            DeviceLinkDeps.add(*DeviceLinkAction, **TC,
-                               CudaArchToString(GpuArchList[I]),
-                               Action::OFK_OpenMP);
-            AL.push_back(C.MakeAction<OffloadAction>(
-                DeviceLinkDeps, DeviceLinkAction->getType()));
-          }
-        } else {
-          auto *DeviceLinkAction =
-              C.MakeAction<LinkJobAction>(LI, types::TY_Image);
-          OffloadAction::DeviceDependences DeviceLinkDeps;
-          DeviceLinkDeps.add(*DeviceLinkAction, **TC, /*BoundArch=*/nullptr,
-                             Action::OFK_OpenMP);
-          AL.push_back(C.MakeAction<OffloadAction>(
-              DeviceLinkDeps, DeviceLinkAction->getType()));
-        }
+        auto *DeviceLinkAction =
+            C.MakeAction<LinkJobAction>(LI, types::TY_Image);
+        OffloadAction::DeviceDependences DeviceLinkDeps;
+        DeviceLinkDeps.add(*DeviceLinkAction, **TC,
+                           GpuArchList[arch_count++].ID, Action::OFK_OpenMP);
+        AL.push_back(C.MakeAction<OffloadAction>(DeviceLinkDeps,
+                                                 DeviceLinkAction->getType()));
         ++TC;
       }
       DeviceLinkerInputs.clear();
@@ -3317,82 +3398,24 @@ class OffloadingActionBuilder final {
     void appendLinkDependences(OffloadAction::DeviceDependences &DA) override {}
 
     bool initialize() override {
+      if (Arg *cu_dev_only =
+              C.getInputArgs().getLastArg(options::OPT_cuda_device_only)) {
+        cu_dev_only->claim();
+        CompileDeviceOnly = true;
+        // TODO: Check emitting IR for OpenMP when cuda-device-only is set
+      }
       // Get the OpenMP toolchains. If we don't get any, the action builder will
       // know there is nothing to do related to OpenMP offloading.
       auto OpenMPTCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
       for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
-           ++TI)
+           ++TI) {
+        GpuArchList.push_back(
+            TI->second->getTriple().getEnvironmentName().data());
         ToolChains.push_back(TI->second);
+      }
 
       DeviceLinkerInputs.resize(ToolChains.size());
-
-      // Collect all cuda_gpu_arch parameters, removing duplicates.
-      std::set<CudaArch> GpuArchs;
-      bool Error = false;
-
-      Arg *PartialCompilationArg = Args.getLastArg(
-          options::OPT_cuda_host_only, options::OPT_cuda_device_only,
-          options::OPT_cuda_compile_host_device);
-      CompileHostOnly =
-          PartialCompilationArg && PartialCompilationArg->getOption().matches(
-                                       options::OPT_cuda_host_only);
-      CompileDeviceOnly =
-          PartialCompilationArg && PartialCompilationArg->getOption().matches(
-                                       options::OPT_cuda_device_only);
-
-      // Add each -march from -Xopenmp before processing offload-arch flags
-      for (Arg *A : Args) {
-        if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
-          for (auto *V : A->getValues()) {
-            StringRef VStr = StringRef(V);
-            if (VStr.startswith("-march=")) {
-              CudaArch Arch = StringToCudaArch(StringRef(VStr.str().substr(7)));
-              if (Arch == CudaArch::UNKNOWN) {
-                C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch)
-                    << VStr;
-                Error = true;
-              }
-              GpuArchs.insert(Arch);
-            }
-          }
-          A->claim();
-        }
-      }
-
-      for (Arg *A : Args) {
-        if (!(A->getOption().matches(options::OPT_cuda_gpu_arch_EQ) ||
-              A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ)))
-          continue;
-        A->claim();
-
-        const StringRef ArchStr = A->getValue();
-        if (A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ) &&
-            ArchStr == "all") {
-          GpuArchs.clear();
-          continue;
-        }
-        CudaArch Arch = StringToCudaArch(ArchStr);
-        if (Arch == CudaArch::UNKNOWN) {
-          C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << ArchStr;
-          Error = true;
-        } else if (A->getOption().matches(options::OPT_cuda_gpu_arch_EQ))
-          GpuArchs.insert(Arch);
-        else if (A->getOption().matches(options::OPT_no_cuda_gpu_arch_EQ))
-          GpuArchs.erase(Arch);
-        else
-          llvm_unreachable("Unexpected option.");
-      }
-
-      // Collect list of GPUs remaining in the set.
-      for (CudaArch Arch : GpuArchs)
-        GpuArchList.push_back(Arch);
-
-      // Default to sm_20 which is the lowest common denominator for
-      // supported GPUs.  sm_20 code should work correctly, if
-      // suboptimally, on all newer GPUs.
-      if (GpuArchList.empty())
-        GpuArchList.push_back(CudaArch::SM_20);
-      return Error;
+      return false;
     }
 
     bool canUseBundlerUnbundler() const override {
@@ -3400,7 +3423,6 @@ class OffloadingActionBuilder final {
       return true;
     }
   };
-
   ///
   /// TODO: Add the implementation for other specialized builders here.
   ///
@@ -4715,6 +4737,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     OA->doOnEachDependence(
         /*IsHostDependence=*/BuildingForOffloadDevice,
         [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
+
           OffloadDependencesInputInfo.push_back(BuildJobsForAction(
               C, DepA, DepTC, DepBoundArch, /*AtTopLevel=*/false,
               /*MultipleArchs*/ !!DepBoundArch, LinkingOutput, CachedResults,
@@ -4843,29 +4866,30 @@ InputInfo Driver::BuildJobsForActionNoCache(
           UI.DependentOffloadKind,
           UI.DependentToolChain->getTriple().normalize(),
           /*CreatePrefixForHost=*/true);
-      auto CurI =
-	(UI.DependentOffloadKind == Action::OFK_Host &&
-	 llvm::sys::path::extension(InputInfos[0].getFilename()) == ".a")
-              ? InputInfos[0]
-              : InputInfo(UA,
-                          GetNamedOutputPath(
-                              C, *UA, BaseInput, UI.DependentBoundArch,
-                              /*AtTopLevel=*/false,
-                              MultipleArchs ||
-                                  UI.DependentOffloadKind == Action::OFK_HIP,
-                              OffloadingPrefix),
-                          BaseInput);
+      auto CurI = InputInfo(
+          UA,
+          GetNamedOutputPath(C, *UA, BaseInput, UI.DependentBoundArch,
+                             /*AtTopLevel=*/false,
+                             MultipleArchs ||
+                                 UI.DependentOffloadKind == Action::OFK_HIP,
+                             OffloadingPrefix),
+          BaseInput);
+      if (UI.DependentOffloadKind == Action::OFK_Host &&
+          llvm::sys::path::extension(InputInfos[0].getFilename()) == ".a")
+        CurI = InputInfos[0];
       // Save the unbundling result.
       UnbundlingResults.push_back(CurI);
 
       // Get the unique string identifier for this dependence and cache the
       // result.
       StringRef Arch;
-      if (TargetDeviceOffloadKind == Action::OFK_HIP) {
+      if (TargetDeviceOffloadKind == Action::OFK_HIP || TargetDeviceOffloadKind == Action::OFK_OpenMP) {
         if (UI.DependentOffloadKind == Action::OFK_Host)
           Arch = StringRef();
-        else
+        else if (TargetDeviceOffloadKind == Action::OFK_HIP)
           Arch = UI.DependentBoundArch;
+        else if (TargetDeviceOffloadKind == Action::OFK_OpenMP)
+          Arch = UI.DependentToolChain->getTargetID();
       } else
         Arch = BoundArch;
 
@@ -4891,21 +4915,12 @@ InputInfo Driver::BuildJobsForActionNoCache(
         /*CreatePrefixForHost=*/!!A->getOffloadingHostActiveKinds() &&
             !AtTopLevel);
     if (isa<OffloadWrapperJobAction>(JA)) {
-      // Openmp offloading needs a name prepended for -save-temps.
-      // See examples/hip-openmp/aomp_hip_launch_test and smoke flags.
-      OffloadingPrefix += "-wrapper";
-      if (Args.getLastArg(options::OPT_fopenmp_targets_EQ)) {
-        if (Arg *FinalOutput = C.getArgs().getLastArg(options::OPT_o))
-          NewBI += FinalOutput->getValue();
-        else
-          NewBI += getDefaultImageName();
-        BaseInput = C.getArgs().MakeArgString(NewBI.c_str());
-      } else {
-        if (Arg *FinalOutput = C.getArgs().getLastArg(options::OPT_o))
-          BaseInput = FinalOutput->getValue();
-        else
-          BaseInput = getDefaultImageName();
-      }
+      if (Arg *FinalOutput = C.getArgs().getLastArg(options::OPT_o))
+        BaseInput = FinalOutput->getValue();
+      else
+        BaseInput = getDefaultImageName();
+      BaseInput =
+          C.getArgs().MakeArgString(std::string(BaseInput) + "-wrapper");
     }
     Result = InputInfo(A, GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
                                              AtTopLevel, MultipleArchs,
