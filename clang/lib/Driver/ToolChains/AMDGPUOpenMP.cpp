@@ -394,7 +394,8 @@ void AMDGCN::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
 
   assert(getToolChain().getTriple().isAMDGCN() && "Unsupported target");
 
-  StringRef GPUArch = Args.getLastArgValue(options::OPT_march_EQ);
+  StringRef GPUArch = getProcessorFromTargetID(getToolChain().getTriple(),
+                                               getToolChain().getTargetID());
   assert(GPUArch.startswith("gfx") && "Unsupported sub arch");
 
   // Prefix for temporary file name.
@@ -431,12 +432,26 @@ AMDGPUOpenMPToolChain::AMDGPUOpenMPToolChain(const Driver &D, const llvm::Triple
   getProgramPaths().push_back(getDriver().Dir);
 }
 
+AMDGPUOpenMPToolChain::AMDGPUOpenMPToolChain(const Driver &D,
+                                             const llvm::Triple &Triple,
+                                             const ToolChain &HostTC,
+                                             const ArgList &Args,
+                                             const Action::OffloadKind OK,
+                                             const std::string TargetID)
+    : ROCMToolChain(D, Triple, Args), HostTC(HostTC), OK(OK) {
+  // Lookup binaries into the driver directory, this is used to
+  // discover the clang-offload-bundler executable.
+  getProgramPaths().push_back(getDriver().Dir);
+  setTargetID(TargetID);
+}
+
 void AMDGPUOpenMPToolChain::addClangTargetOptions(
     const llvm::opt::ArgList &DriverArgs, llvm::opt::ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadingKind) const {
   HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
-  StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
+  StringRef GpuArch =
+      getProcessorFromTargetID(this->getTriple(), this->getTargetID());
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
   (void) GpuArch;
   assert((DeviceOffloadingKind == Action::OFK_HIP ||
