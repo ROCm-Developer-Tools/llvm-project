@@ -47,7 +47,6 @@ static bool hasLlvmAoccOption(const ArgList &Args) {
   Flags.insert(std::make_pair("-enable-branch-combine", true));
   Flags.insert(std::make_pair("-simplifycfg-no-storesink", true));
   Flags.insert(std::make_pair("-inline-aggressive", true));
-  Flags.insert(std::make_pair("-global-vectorize-slp", true));
 
   for (Arg *A : Args) {
     if (!A->getNumValues()) continue;
@@ -92,7 +91,7 @@ static bool checkForPropOpts(const ToolChain &TC, const Driver &D,
   // Enable -loop-unswitch-aggressive opt flag, only when
   // 1) -Ofast
   // 2) -floop-unswitch-aggressive
-  if (((OFastEnabled &&
+  if (((ClosedToolChainNeeded && OFastEnabled &&
         !Args.hasArg(options::OPT_fno_loop_unswitch_aggressive)) ||
        Args.hasArg(options::OPT_floop_unswitch_aggressive)) &&
       !hasOption(Args, Args.MakeArgString("-aggressive-loop-unswitch"))) {
@@ -117,25 +116,26 @@ static bool checkForPropOpts(const ToolChain &TC, const Driver &D,
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_fveclib)) {
-    if (isLLD) {
-      StringRef Name = A->getValue();
-      if ((Name == "Accelerate") || (Name == "none") ||
-         (Name == "MASSV") || (Name == "SVML") ||
-          (Name == "AMDLIBM"))
+    StringRef Name = A->getValue();
+    if ((Name == "Accelerate") || (Name == "none") ||
+       (Name == "MASSV") || (Name == "SVML") ||
+        (Name == "AMDLIBM"))
+      addCmdArgs(Args, CmdArgs, isLLD, checkOnly,
+                 Args.MakeArgString("-vector-library=" + Name));
+    else if (( Name == "libmvec")) {
+      switch(TC.getTriple().getArch()) {
+      default:
+        break;
+      case llvm::Triple::x86_64:
         addCmdArgs(Args, CmdArgs, isLLD, checkOnly,
-                   Args.MakeArgString("-vector-library=" + Name));
-      else if (( Name == "libmvec")) {
-        switch(TC.getTriple().getArch()) {
-        default:
-          break;
-        case llvm::Triple::x86_64:
-          addCmdArgs(Args, CmdArgs, isLLD, checkOnly,
-                     Args.MakeArgString("-vector-library=LIBMVEC-X86"));
-          break;
-        }
+                   Args.MakeArgString("-vector-library=LIBMVEC-X86"));
+        break;
       }
     }
-    ClosedToolChainNeeded = true;
+    // fveclib supported prior to amd-opt, if its AMDLIBM then
+    // we want to trigger closed compiler, otherwise not.
+    if (Name == "AMDLIBM")
+      ClosedToolChainNeeded = true;
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_fstruct_layout_EQ)) {
@@ -176,21 +176,21 @@ static bool checkForPropOpts(const ToolChain &TC, const Driver &D,
     StringRef Val = A->getValue();
     addCmdArgs(Args, CmdArgs, isLLD, checkOnly,
                Args.MakeArgString("-pass-remarks=" + Val));
-    ClosedToolChainNeeded = true;
+    // RPass supported prior to famd-opt, so not a trigger.
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_Rpass_missed_EQ)) {
     StringRef Val = A->getValue();
     addCmdArgs(Args, CmdArgs, isLLD, checkOnly,
                Args.MakeArgString("-pass-remarks-missed=" + Val));
-    ClosedToolChainNeeded = true;
+    // RPass_missed supported prior to famd-opt, so not a trigger.
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_Rpass_analysis_EQ)) {
     StringRef Val = A->getValue();
     addCmdArgs(Args, CmdArgs, isLLD, checkOnly,
                Args.MakeArgString("-pass-remarks-analysis=" + Val));
-    ClosedToolChainNeeded = true;
+    // RPass_analysis supported prior to famd-opt, so not a trigger.
   }
 
   if (Args.hasFlag(options::OPT_fsimplify_pow, options::OPT_fno_simplify_pow,
