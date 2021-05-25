@@ -116,7 +116,7 @@ macro(add_openmp_library libname archname dir)
     # Extract the bitcode file to make aarch specific bitcode archive
     add_custom_command(
       OUTPUT ${bc_filename}
-      COMMAND ${LLVM_INSTALL_PREFIX}/bin/clang-offload-bundler -type=o -targets=openmp-${triple}-${GPU} -inputs=${obj_filename} -outputs=${bc_filename} -unbundle
+      COMMAND ${LLVM_INSTALL_PREFIX}/bin/clang-offload-bundler -type=o -targets=openmp-${triple}--${GPU} -inputs=${obj_filename} -outputs=${bc_filename} -unbundle
       DEPENDS ${obj_filename} )
 
     list(APPEND obj_files ${obj_filename})
