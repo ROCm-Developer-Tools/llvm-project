@@ -338,7 +338,12 @@ void tools::AddTargetFeature(const ArgList &Args,
 /// Get the (LLVM) name of the AMDGPU gpu we are targeting.
 static std::string getAMDGPUTargetGPU(const llvm::Triple &T,
                                       const ArgList &Args) {
-  if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ)) {
+  Arg *A = Args.getLastArg(options::OPT_mcpu_EQ);
+  if (!A)
+    A = Args.getLastArg(options::OPT_march_EQ);
+  if (!A)
+    A = Args.getLastArg(options::OPT_offload_arch_EQ);
+  if (A) {
     auto GPUName = getProcessorFromTargetID(T, A->getValue());
     return llvm::StringSwitch<std::string>(GPUName)
         .Cases("rv630", "rv635", "r600")
@@ -1717,17 +1722,15 @@ bool tools::SDLSearch(const Driver &D, const llvm::opt::ArgList &DriverArgs,
   return FoundSDL;
 }
 
-bool tools::GetSDLFromOffloadArchive(Compilation &C, const Driver &D,
-                                     const Tool &T, const JobAction &JA,
-                                     const InputInfoList &Inputs,
-                                     const llvm::opt::ArgList &DriverArgs,
-                                     llvm::opt::ArgStringList &CC1Args,
-                                     SmallVector<std::string, 8> LibraryPaths,
-                                     std::string libname, StringRef ArchName,
-                                     StringRef GpuArch, bool isBitCodeSDL,
-                                     bool postClangLink) {
+bool tools::GetSDLFromOffloadArchive(
+    Compilation &C, const Driver &D, const Tool &T, const JobAction &JA,
+    const InputInfoList &Inputs, const llvm::opt::ArgList &DriverArgs,
+    llvm::opt::ArgStringList &CC1Args, SmallVector<std::string, 8> LibraryPaths,
+    std::string libname, StringRef ArchName, StringRef TargetID,
+    bool isBitCodeSDL, bool postClangLink) {
   std::string archname = ArchName.str();
-  std::string gpuname = GpuArch.str();
+  std::string gpuname =
+      getProcessorFromTargetID(T.getToolChain().getTriple(), TargetID).str();
 
   // We don't support bitcode archive bundles for nvptx
   if (isBitCodeSDL && archname == "nvptx")
@@ -1762,10 +1765,10 @@ bool tools::GetSDLFromOffloadArchive(Compilation &C, const Driver &D,
       ArgStringList CmdArgs;
       SmallString<128> DeviceTriple;
       DeviceTriple += Action::GetOffloadKindName(JA.getOffloadingDeviceKind());
-      DeviceTriple += '-';
+      DeviceTriple += "-";
       DeviceTriple += T.getToolChain().getTriple().normalize();
-      DeviceTriple += '-';
-      DeviceTriple += gpuname;
+      DeviceTriple += "--";
+      DeviceTriple += TargetID;
 
       std::string UnbundleArg("-unbundle");
       std::string TypeArg("-type=a");
@@ -1782,6 +1785,12 @@ bool tools::GetSDLFromOffloadArchive(Compilation &C, const Driver &D,
       UBArgs.push_back(C.getArgs().MakeArgString(InputArg.c_str()));
       UBArgs.push_back(C.getArgs().MakeArgString(OffloadArg.c_str()));
       UBArgs.push_back(C.getArgs().MakeArgString(OutputArg.c_str()));
+
+      // Add this flag to not exit from clang-offload-bundler if no compatible
+      // code object is found in heterogenous archive library.
+      std::string AdditionalArgs("-allow-missing-bundles");
+      UBArgs.push_back(C.getArgs().MakeArgString(AdditionalArgs.c_str()));
+
       C.addCommand(std::make_unique<Command>(
           JA, T, ResponseFileSupport::AtFileCurCP(), UBProgram, UBArgs, Inputs,
           InputInfo(&JA, C.getArgs().MakeArgString(OutputLib.c_str()))));
@@ -1801,19 +1810,19 @@ void tools::AddStaticDeviceLibs(Compilation &C, const Tool &T,
                                 const InputInfoList &Inputs,
                                 const llvm::opt::ArgList &DriverArgs,
                                 llvm::opt::ArgStringList &CC1Args,
-                                StringRef ArchName, StringRef GpuArch,
+                                StringRef ArchName, StringRef TargetID,
                                 bool isBitCodeSDL, bool postClangLink) {
   AddStaticDeviceLibs(&C, &T, &JA, &Inputs, C.getDriver(), DriverArgs, CC1Args,
-                      ArchName, GpuArch, isBitCodeSDL, postClangLink);
+                      ArchName, TargetID, isBitCodeSDL, postClangLink);
 }
 
 void tools::AddStaticDeviceLibs(const Driver &D,
                                 const llvm::opt::ArgList &DriverArgs,
                                 llvm::opt::ArgStringList &CC1Args,
-                                StringRef ArchName, StringRef GpuArch,
+                                StringRef ArchName, StringRef TargetID,
                                 bool isBitCodeSDL, bool postClangLink) {
   AddStaticDeviceLibs(nullptr, nullptr, nullptr, nullptr, D, DriverArgs,
-                      CC1Args, ArchName, GpuArch, isBitCodeSDL, postClangLink);
+                      CC1Args, ArchName, TargetID, isBitCodeSDL, postClangLink);
 }
 
 void tools::AddStaticDeviceLibs(Compilation *C, const Tool *T,
@@ -1821,7 +1830,7 @@ void tools::AddStaticDeviceLibs(Compilation *C, const Tool *T,
                                 const InputInfoList *Inputs, const Driver &D,
                                 const llvm::opt::ArgList &DriverArgs,
                                 llvm::opt::ArgStringList &CC1Args,
-                                StringRef ArchName, StringRef GpuArch,
+                                StringRef ArchName, StringRef TargetID,
                                 bool isBitCodeSDL, bool postClangLink) {
 
   SmallVector<std::string, 8> LibraryPaths;
@@ -1862,12 +1871,16 @@ void tools::AddStaticDeviceLibs(Compilation *C, const Tool *T,
     }
   }
 
+  // SDL name only contains the processor name, while TargetID is required
+  // to extract compatible code objects.
+  StringRef GpuArch =
+      getProcessorFromTargetID(T->getToolChain().getTriple(), TargetID);
   for (std::string SDL_Name : SDL_Names) {
     //  THIS IS THE ONLY CALL TO SDLSearch
     if (!(SDLSearch(D, DriverArgs, CC1Args, LibraryPaths, SDL_Name, ArchName,
                     GpuArch, isBitCodeSDL, postClangLink))) {
       GetSDLFromOffloadArchive(*C, D, *T, *JA, *Inputs, DriverArgs, CC1Args,
-                               LibraryPaths, SDL_Name, ArchName, GpuArch,
+                               LibraryPaths, SDL_Name, ArchName, TargetID,
                                isBitCodeSDL, postClangLink);
     }
   }

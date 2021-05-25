@@ -43,14 +43,14 @@ private:
   const char *constructOmpExtraCmds(Compilation &C, const JobAction &JA,
                                     const InputInfoList &Inputs,
                                     const llvm::opt::ArgList &Args,
-                                    llvm::StringRef SubArchName,
+                                    llvm::StringRef TargetID,
                                     llvm::StringRef OutputFilePrefix) const;
 
   /// \return llvm-link output file name.
   const char *constructLLVMLinkCommand(Compilation &C, const JobAction &JA,
                                        const InputInfoList &Inputs,
                                        const llvm::opt::ArgList &Args,
-                                       llvm::StringRef SubArchName,
+                                       llvm::StringRef TargetID,
                                        llvm::StringRef OutputFilePrefix) const;
 
   /// \return opt output file name.
@@ -87,6 +87,11 @@ public:
                         const ToolChain &HostTC,
                         const llvm::opt::ArgList &Args,
                         const Action::OffloadKind OK);
+
+  AMDGPUOpenMPToolChain(const Driver &D, const llvm::Triple &Triple,
+                        const ToolChain &HostTC, const llvm::opt::ArgList &Args,
+                        const Action::OffloadKind OK,
+                        const std::string TargetID);
 
   const llvm::Triple *getAuxTriple() const override {
     return &HostTC.getTriple();
