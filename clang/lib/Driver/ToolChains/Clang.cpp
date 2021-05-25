@@ -7513,15 +7513,14 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
     Triples += Action::GetOffloadKindName(CurKind);
     Triples += '-';
     Triples += CurTC->getTriple().normalize();
-    if ((CurKind == Action::OFK_HIP || CurKind == Action::OFK_OpenMP ||
-         CurKind == Action::OFK_Cuda) &&
+    if ((CurKind == Action::OFK_HIP || CurKind == Action::OFK_Cuda) &&
         CurDep->getOffloadingArch()) {
       // clang-offload-bundler requires all 4 components in bundle entry ID.
       // Add an extra '-' to represent empty triple.environment.
       Triples += "--";
       Triples += CurDep->getOffloadingArch();
     }
-    if ((CurKind == Action::OFK_OpenMP || CurKind == Action::OFK_Cuda)) {
+    if (CurKind == Action::OFK_OpenMP && !CurTC->getTargetID().empty()) {
       Triples += "--";
       Triples += CurTC->getTargetID();
     }
@@ -7564,7 +7563,6 @@ static bool isArchiveOfBundlesFileName(StringRef FilePath) {
   if (!FileName.endswith(".a"))
     return false;
 
-
   if (FileName.startswith("lib")) {
     if (FileName.contains("amdgcn") && FileName.contains("gfx"))
       return false;
@@ -7602,11 +7600,20 @@ static void createUnbundleArchiveCommand(Compilation &C,
       ArgStringList CmdArgs;
 
       SmallString<128> DeviceTriple;
-      DeviceTriple += Action::GetOffloadKindName(Dep.DependentOffloadKind);
+      auto OffloadKind = Dep.DependentOffloadKind;
+      DeviceTriple += Action::GetOffloadKindName(OffloadKind);
       DeviceTriple += '-';
       DeviceTriple += Triple.normalize();
-      DeviceTriple += '-';
-      DeviceTriple += Dep.DependentBoundArch;
+
+      if ((OffloadKind == Action::OFK_HIP || OffloadKind == Action::OFK_Cuda) &&
+          !Dep.DependentBoundArch.empty()) {
+        DeviceTriple += "--";
+        DeviceTriple += Dep.DependentBoundArch;
+      }
+      if (OffloadKind == Action::OFK_OpenMP && !Dep.DependentToolChain->getTargetID().empty()) {
+        DeviceTriple += "--";
+        DeviceTriple += Dep.DependentToolChain->getTargetID();
+      }
 
       std::string UnbundleArg("-unbundle");
       std::string TypeArg("-type=a");
@@ -7621,6 +7628,12 @@ static void createUnbundleArchiveCommand(Compilation &C,
       UBArgs.push_back(C.getArgs().MakeArgString(InputArg.c_str()));
       UBArgs.push_back(C.getArgs().MakeArgString(OffloadArg.c_str()));
       UBArgs.push_back(C.getArgs().MakeArgString(OutputArg.c_str()));
+      
+      // Add this flag to not exit from clang-offload-bundler if no compatible
+      // code object is found in heterogenous archive library.
+      std::string AdditionalArgs("-allow-missing-bundles");
+      UBArgs.push_back(C.getArgs().MakeArgString(AdditionalArgs.c_str()));
+
       C.addCommand(std::make_unique<Command>(
           UA, T, ResponseFileSupport::AtFileCurCP(), UBProgram, UBArgs, Inputs,
           InputInfo(&UA, C.getArgs().MakeArgString(OutputLib))));
@@ -7666,18 +7679,21 @@ void OffloadBundler::ConstructJobMultipleOutputs(
       Triples += ',';
 
     auto &Dep = DepInfo[I];
-    Triples += Action::GetOffloadKindName(Dep.DependentOffloadKind);
+    auto OffloadKind = Dep.DependentOffloadKind;
+    Triples += Action::GetOffloadKindName(OffloadKind);
     Triples += '-';
     Triples += Dep.DependentToolChain->getTriple().normalize();
-    if ((Dep.DependentOffloadKind == Action::OFK_HIP ||
-         Dep.DependentOffloadKind == Action::OFK_OpenMP ||
-         Dep.DependentOffloadKind == Action::OFK_Cuda) &&
+    if ((OffloadKind == Action::OFK_HIP || OffloadKind == Action::OFK_Cuda) &&
         !Dep.DependentBoundArch.empty()) {
-      Triples += '-';
+      Triples += "--";
       Triples += Dep.DependentBoundArch;
     }
+    if (OffloadKind == Action::OFK_OpenMP && !Dep.DependentToolChain->getTargetID().empty()) {
+      Triples += "--";
+      Triples += Dep.DependentToolChain->getTargetID();
+    }
   }
-
+  
   CmdArgs.push_back(TCArgs.MakeArgString(Triples));
 
   // Get bundled file command.
@@ -7721,15 +7737,8 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  // Get the Code Object Version used by all offload-archs in this compilation
-  unsigned CodeObjVer = 0;
   auto TCs = C.getOffloadToolChains<Action::OFK_OpenMP>();
-  for (auto II = TCs.first, IE = TCs.second; II != IE; ++II) {
-    auto TC = II->second;
-    if (TC->getArch() == llvm::Triple::amdgcn)
-      CodeObjVer = getOrCheckAMDGPUCodeObjectVersion(C.getDriver(), Args);
-  }
-
+  
   // Add runtime requirements on each image which includes the offload-arch
   auto II = TCs.first;
   for (const InputInfo &I : Inputs) {
@@ -7748,9 +7757,6 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
         requirements.replace(start_pos, 1, "__");
         start_pos += 2;
       }
-      if (CodeObjVer > 3) // Add implied CodeObjVer feature.
-        requirements.append(
-            Args.MakeArgString(Twine("__CodeObjVer") + Twine(CodeObjVer)));
 
       // FIXME: Add other architecture requirements here
       CmdArgs.push_back(Args.MakeArgString(requirements.c_str()));
