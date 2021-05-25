@@ -446,9 +446,8 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
                     std::string::npos);
   bool is_amd = (std::string(offload_env.capabilities).find("gfx") == 0);
   if (is_amd && requires_usm && !has_xnack)
-    printf("XNACK off but usm reqs: won't work as expected!\n");
-    //    FATAL_MESSAGE0(1, "'#pragma omp requires unified_shared_memory' requires "
-    //"environment with xnack+ capability!");
+    FATAL_MESSAGE0(1, "'#pragma omp requires unified_shared_memory' requires "
+                      "environment with xnack+ capability!");
 
   RTLInfoTy *FoundRTL = NULL;
   PM->RTLsMtx.lock();
