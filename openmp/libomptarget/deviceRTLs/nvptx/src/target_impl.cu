@@ -129,7 +129,22 @@ unsigned long long __kmpc_atomic_exchange(unsigned long long *Address,
 
 unsigned long long __kmpc_atomic_add(unsigned long long *Address,
                                      unsigned long long Val) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 350
   return __atomic_fetch_add(Address, Val, __ATOMIC_SEQ_CST);
+#else
+   #warning building CAS loop for long long atomic_add
+   unsigned long long old = *Address, assumed, newval;
+   if (Val) { // Don't CAS loop if adding nothing
+     do {
+       assumed = old;
+       newval = Val + assumed;
+       __atomic_exchange(
+         Address, &assumed, &newval, __ATOMIC_SEQ_CST
+       );
+     } while (assumed != old );
+   }
+   return assumed;
+#endif
 }
 
 #define __OMP_SPIN 1000
