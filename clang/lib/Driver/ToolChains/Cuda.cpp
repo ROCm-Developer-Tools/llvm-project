@@ -401,8 +401,7 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
   StringRef GPUArchName;
   // If this is an OpenMP action we need to extract the device architecture
-  // from the -march=arch option. This option may come from -Xopenmp-target
-  // flag or the default value.
+  // from the toolchain.
   if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
     GPUArchName = getProcessorFromTargetID(TC.getTriple(), TC.getTargetID());
     assert(!GPUArchName.empty() && "Must have an architecture passed in.");
@@ -454,9 +453,9 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     }
     CmdArgs.push_back(Args.MakeArgString(llvm::Twine("-O") + OOpt));
   } else {
-    // If no -O was passed, pass -O0 to ptxas -- no opt flag should correspond
+    // If no -O was passed, pass -O3 to ptxas -- no opt flag should correspond
     // to no optimizations, but ptxas's default is -O3.
-    CmdArgs.push_back("-O0");
+    CmdArgs.push_back("-O3");
   }
   if (DIKind == DebugDirectivesOnly)
     CmdArgs.push_back("-lineinfo");
@@ -599,8 +598,9 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_v))
     CmdArgs.push_back("-v");
 
-  StringRef GPUArch =
-      Args.getLastArgValue(options::OPT_march_EQ);
+  StringRef GPUArch = getProcessorFromTargetID(getToolChain().getTriple(),
+                                               getToolChain().getTargetID());
+
   assert(!GPUArch.empty() && "At least one GPU Arch required for ptxas.");
 
   CmdArgs.push_back("-arch");
@@ -702,7 +702,9 @@ void CudaToolChain::addClangTargetOptions(
     Action::OffloadKind DeviceOffloadingKind) const {
   HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
-  StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
+  StringRef GpuArch = getProcessorFromTargetID(this->getTriple(),
+                                               this->getTargetID());
+
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
   assert((DeviceOffloadingKind == Action::OFK_OpenMP ||
           DeviceOffloadingKind == Action::OFK_Cuda) &&

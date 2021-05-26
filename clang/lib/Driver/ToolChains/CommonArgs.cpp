@@ -1873,8 +1873,9 @@ void tools::AddStaticDeviceLibs(Compilation *C, const Tool *T,
 
   // SDL name only contains the processor name, while TargetID is required
   // to extract compatible code objects.
-  StringRef GpuArch =
-      getProcessorFromTargetID(T->getToolChain().getTriple(), TargetID);
+  StringRef GpuArch = !T ? TargetID :
+    getProcessorFromTargetID(T->getToolChain().getTriple(),TargetID);
+
   for (std::string SDL_Name : SDL_Names) {
     //  THIS IS THE ONLY CALL TO SDLSearch
     if (!(SDLSearch(D, DriverArgs, CC1Args, LibraryPaths, SDL_Name, ArchName,
