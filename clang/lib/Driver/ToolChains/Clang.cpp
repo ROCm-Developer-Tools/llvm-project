@@ -6512,15 +6512,29 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (JA.isHostOffloading(Action::OFK_OpenMP)) {
     SmallString<128> TargetInfo("-fopenmp-targets=");
 
+    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
+    
     // Get list of device Toolchains
     auto OpenMPTCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
-    assert(
-        (OpenMPTCRange.first != OpenMPTCRange.second) &&
-        "OpenMP offloading requires target devices , specify --offload-arch.");
-    for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
-         ++TI) {
-      auto *deviceTC = TI->second;
-      TargetInfo += deviceTC->getTriple().str();
+    
+    if (Tgts && Tgts->getNumValues()) {
+      for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
+        if (i)
+          TargetInfo += ',';
+        // We need to get the string from the triple because it may be not exactly
+        // the same as the one we get directly from the arguments.
+        llvm::Triple T(Tgts->getValue(i));
+        TargetInfo += T.getTriple();
+      }
+    } else if (OpenMPTCRange.first != OpenMPTCRange.second) {
+      for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
+          ++TI) {
+        auto *deviceTC = TI->second;
+        TargetInfo += deviceTC->getTriple().str();
+      }
+    } else {
+      assert ("OpenMP offloading requires target devices, use either \
+              `-fopenmp-targets=` format, or `--offload-arch=` flag");
     }
     CmdArgs.push_back(Args.MakeArgString(TargetInfo.str()));
   }
@@ -7604,16 +7618,12 @@ static void createUnbundleArchiveCommand(Compilation &C,
       DeviceTriple += Action::GetOffloadKindName(OffloadKind);
       DeviceTriple += '-';
       DeviceTriple += Triple.normalize();
+      DeviceTriple += "--";
 
-      if ((OffloadKind == Action::OFK_HIP || OffloadKind == Action::OFK_Cuda) &&
-          !Dep.DependentBoundArch.empty()) {
-        DeviceTriple += "--";
-        DeviceTriple += Dep.DependentBoundArch;
-      }
-      if (OffloadKind == Action::OFK_OpenMP && !Dep.DependentToolChain->getTargetID().empty()) {
-        DeviceTriple += "--";
+      if (OffloadKind == Action::OFK_OpenMP && !Dep.DependentToolChain->getTargetID().empty())
         DeviceTriple += Dep.DependentToolChain->getTargetID();
-      }
+      else
+        DeviceTriple += Dep.DependentBoundArch;
 
       std::string UnbundleArg("-unbundle");
       std::string TypeArg("-type=a");

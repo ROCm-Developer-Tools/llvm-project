@@ -393,8 +393,10 @@ void AMDGCN::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
     return constructHIPFatbinCommand(C, JA, Output.getFilename(), Inputs, Args, *this);
 
   assert(getToolChain().getTriple().isAMDGCN() && "Unsupported target");
-
-  StringRef GPUArch = getProcessorFromTargetID(getToolChain().getTriple(),
+  
+  StringRef GPUArch = Args.getLastArgValue(options::OPT_march_EQ);
+  if(GPUArch.empty())
+    GPUArch = getProcessorFromTargetID(getToolChain().getTriple(),
                                                getToolChain().getTargetID());
   assert(GPUArch.startswith("gfx") && "Unsupported sub arch");
 
@@ -450,8 +452,11 @@ void AMDGPUOpenMPToolChain::addClangTargetOptions(
     Action::OffloadKind DeviceOffloadingKind) const {
   HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
-  StringRef GpuArch =
+  StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
+  if(GpuArch.empty())
+    GpuArch =
       getProcessorFromTargetID(this->getTriple(), this->getTargetID());
+  
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
   (void) GpuArch;
   assert((DeviceOffloadingKind == Action::OFK_HIP ||

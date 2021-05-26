@@ -404,7 +404,9 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   // from the -march=arch option. This option may come from -Xopenmp-target
   // flag or the default value.
   if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
-    GPUArchName = getProcessorFromTargetID(TC.getTriple(), TC.getTargetID());
+    GPUArchName = Args.getLastArgValue(options::OPT_march_EQ);
+    if(GPUArchName.empty())
+      GPUArchName = getProcessorFromTargetID(TC.getTriple(), TC.getTargetID());
     assert(!GPUArchName.empty() && "Must have an architecture passed in.");
   } else
     GPUArchName = JA.getOffloadingArch();

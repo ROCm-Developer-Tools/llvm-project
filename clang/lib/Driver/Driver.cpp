@@ -676,6 +676,14 @@ void GetTargetInfoFromOpenMPTargets(Compilation &C, const char *OpenMPTarget,
       OffloadArchs.erase(DeviceTripleStr.str().append(OpenMPTarget));
     else
       OffloadArchs.insert(DeviceTripleStr.str().append(OpenMPTarget));
+  } else {
+    const ToolChain *HostTC = C.getSingleOffloadToolChain<Action::OFK_Host>();
+    const llvm::Triple &HostTriple = HostTC->getTriple();
+    StringRef HostTripleStr = HostTriple.str();
+    if (erase)
+      OffloadArchs.erase(HostTripleStr.str().append("^").append(OpenMPTarget));
+    else
+      OffloadArchs.insert(HostTripleStr.str().append("^").append(OpenMPTarget));
   }
 }
 
@@ -691,12 +699,6 @@ void GetTargetInfoFromMArch(Compilation &C,
           StringRef ArchProc = IdStr.split(":").first;
           if (ArchProc.empty()) {
             C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << VStr;
-            C.setContainsError();
-            return;
-          }
-          CudaArch Arch = StringToCudaArch(ArchProc);
-          if (Arch == CudaArch::UNKNOWN) {
-            C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << VStr;
             C.setContainsError();
             return;
           }
@@ -809,25 +811,43 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     // Process legacy options -fopenmp-targets ...
     if (Arg *OpenMPTargets =
             C.getInputArgs().getLastArg(options::OPT_fopenmp_targets_EQ)) {
-      // First, handle errors in command line for OpenMP target offload
+      
       if (!OpenMPTargets->getNumValues()) {
         Diag(clang::diag::warn_drv_empty_joined_argument)
             << OpenMPTargets->getAsString(C.getInputArgs());
         return;
       }
 
-      // extract all arch shorthands given in -fopenmp-targets
-      // triple will be automatically populated if shorthand starts
-      // with "gfx" or "sm_"
-      for (const char *CmdLineVal : OpenMPTargets->getValues())
-        GetTargetInfoFromOpenMPTargets(C, CmdLineVal, OffloadArchs);
+      // First, handle errors in command line for OpenMP target offload
+      bool is_host_offloading =
+        (OpenMPTargets->getNumValues() == 1) &&
+        StringRef(OpenMPTargets->getValue())
+            .startswith_lower(C.getSingleOffloadToolChain<Action::OFK_Host>()
+                                  ->getTriple()
+                                  .getArchName());
+      if (!is_host_offloading) {
+        // Ensure at least one -Xopenm-target exists with a gpu -march
+        if (Arg *XOpenMPTargets =
+                C.getInputArgs().getLastArg(options::OPT_Xopenmp_target_EQ)) {
+          bool has_valid_march = false;
+          for (auto *V : XOpenMPTargets->getValues())
+            if (StringRef(V).startswith("-march="))
+              has_valid_march = true;
+          if (!has_valid_march) {
+            Diag(diag::err_drv_missing_Xopenmptarget_or_march);
+            return;
+          }
+        } else {
+          Diag(diag::err_drv_missing_Xopenmptarget_or_march);
+          return;
+        }
+      }
 
       // process legacy args -fopenmp-targets -Xopenmp-target and -march
       GetTargetInfoFromMArch(C, OffloadArchs);
     }
 
     GetTargetInfoFromOffloadArchOpts(C, OffloadArchs);
-
     if (!OffloadArchs.empty()) {
 
       // We expect that an offload target is always used in conjunction with
