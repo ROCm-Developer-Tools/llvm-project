@@ -391,7 +391,7 @@ std::vector<std::string> _splitstrings(char *input, const char *sep) {
       split_strings.push_back(s.substr(0, pos));
     s.erase(0, pos + delimiter.length());
   }
-  if (s.length() != 0)
+  if (s.length() > 1)
     split_strings.push_back(s.substr(0, s.length()));
   return split_strings;
 }
@@ -445,9 +445,14 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
   bool has_xnack = (std::string(offload_env.capabilities).find("xnack+") !=
                     std::string::npos);
   bool is_amd = (std::string(offload_env.capabilities).find("gfx") == 0);
-  if (is_amd && requires_usm && !has_xnack)
+  if (is_amd && requires_usm && !has_xnack) {
+    fprintf(stderr, "WARNING: USM SET WITHOUT XNACK ENABLED.\n");
+    fprintf(stderr, "         THIS WILL BECOME FATAL ERROR IN FUTURE.\n");
+  }
+#if 0
     FATAL_MESSAGE0(1, "'#pragma omp requires unified_shared_memory' requires "
                       "environment with xnack+ capability!");
+#endif
 
   RTLInfoTy *FoundRTL = NULL;
   PM->RTLsMtx.lock();
@@ -464,9 +469,6 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
     // Scan the RTLs that have associated images until we find one that supports
     // the current image.
     for (auto &R : AllRTLs) {
-      // Skip RTL if it's a  host RTL and image is for device
-      if (!(R.init_requires) && img_info)
-        continue;
 
       if (!R.is_valid_binary(img)) {
         DP("Image " DPxMOD " is NOT compatible with RTL %s!\n",
