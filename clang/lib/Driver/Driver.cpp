@@ -694,7 +694,7 @@ void GetTargetInfoFromMArch(Compilation &C,
     if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
       for (auto *V : A->getValues()) {
         StringRef VStr = StringRef(V);
-        if (VStr.startswith("-march=")) {
+        if (VStr.startswith("-march=") || VStr.startswith("--march=")) {
           IdStr = VStr.split('=').second;
           StringRef ArchProc = IdStr.split(":").first;
           if (ArchProc.empty()) {
@@ -792,7 +792,6 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     }
     C.addOffloadDeviceToolChain(HIPTC.get(), OFK);
   } else {
-
     //
     // OpenMP
     //
@@ -831,7 +830,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                 C.getInputArgs().getLastArg(options::OPT_Xopenmp_target_EQ)) {
           bool has_valid_march = false;
           for (auto *V : XOpenMPTargets->getValues())
-            if (StringRef(V).startswith("-march="))
+            if (StringRef(V).startswith("-march=") ||
+                StringRef(V).startswith("--march="))
               has_valid_march = true;
           if (!has_valid_march) {
             Diag(diag::err_drv_missing_Xopenmptarget_or_march);
