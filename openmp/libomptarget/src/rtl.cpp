@@ -545,23 +545,27 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
 	and the OMP_TARGET_OFFLOAD policy is mandatory.  Terminating!\n\
 	Runtime capabilities : %s\n",
               offload_env.capabilities);
+    else if (PM->TargetOffloadPolicy == tgt_disabled)
+      fprintf(stderr, "WARNING: Offloading is disabled.\n");
     else
       fprintf(
           stderr,
           "WARNING: Runtime capabilities do NOT meet any image requirements.\n\
-	 So device offloading is disabled.\n\
+	 So device offloading is now disabled.\n\
 	Runtime capabilities : %s\n",
           offload_env.capabilities);
-    for (int32_t i = 0; i < desc->NumDeviceImages; ++i) {
-      __tgt_image_info *img_info = __tgt_get_image_info(i);
-      if (img_info)
-        fprintf(stderr, "\
-	Image %d requirements : %s\n",
-                i, img_info->requirements);
-      else
-        fprintf(stderr, "\
-	Image %d has no requirements. Could be from older compiler\n",
-                i);
+    if (PM->TargetOffloadPolicy != tgt_disabled) {
+      for (int32_t i = 0; i < desc->NumDeviceImages; ++i) {
+        __tgt_image_info *img_info = __tgt_get_image_info(i);
+        if (img_info)
+          fprintf(stderr, "\
+	  Image %d requirements : %s\n",
+                  i, img_info->requirements);
+        else
+          fprintf(stderr, "\
+	  Image %d has no requirements. Could be from older compiler\n",
+                  i);
+      }
     }
     if (PM->TargetOffloadPolicy == tgt_mandatory)
       exit(1);
