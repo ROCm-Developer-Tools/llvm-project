@@ -119,6 +119,7 @@
 #define FTN_TARGET_MEMCPY_RECT omp_target_memcpy_rect
 #define FTN_TARGET_ASSOCIATE_PTR omp_target_associate_ptr
 #define FTN_TARGET_DISASSOCIATE_PTR omp_target_disassociate_ptr
+#define FTN_TARGET_IS_HIGH_BW_MEMORY omp_target_is_high_bw_memory
 #endif
 
 #define FTN_GET_WARP_ID omp_ext_get_warp_id
@@ -252,6 +253,7 @@
 #define FTN_TARGET_MEMCPY_RECT omp_target_memcpy_rect_
 #define FTN_TARGET_ASSOCIATE_PTR omp_target_associate_ptr_
 #define FTN_TARGET_DISASSOCIATE_PTR omp_target_disassociate_ptr_
+#define FTN_TARGET_IS_HIGH_BW_MEMORY omp_target_is_high_bw_memory_
 #endif
 
 #define FTN_GET_WARP_ID omp_ext_get_warp_id_
@@ -386,6 +388,7 @@
 #define FTN_TARGET_MEMCPY_RECT OMP_TARGET_MEMCPY_RECT
 #define FTN_TARGET_ASSOCIATE_PTR OMP_TARGET_ASSOCIATE_PTR
 #define FTN_TARGET_DISASSOCIATE_PTR OMP_TARGET_DISASSOCIATE_PTR
+#define FTN_TARGET_IS_HIGH_BW_MEMORY OMP_TARGET_IS_HIGH_BW_MEMORY
 #endif
 
 #define FTN_GET_WARP_ID OMP_EXT_GET_WARP_ID
@@ -518,6 +521,7 @@
 #define FTN_TARGET_MEMCPY_RECT OMP_TARGET_MEMCPY_RECT_
 #define FTN_TARGET_ASSOCIATE_PTR OMP_TARGET_ASSOCIATE_PTR_
 #define FTN_TARGET_DISASSOCIATE_PTR OMP_TARGET_DISASSOCIATE_PTR_
+#define FTN_TARGET_IS_HIGH_BW_MEMORY OMP_TARGET_IS_HIGH_BW_MEMORY_
 #endif
 
 #define FTN_CONTROL_TOOL OMP_CONTROL_TOOL_

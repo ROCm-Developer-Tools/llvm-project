@@ -236,6 +236,7 @@ int omp_target_memcpy_rect(void *dst, void *src, size_t element_size,
 int omp_target_associate_ptr(void *host_ptr, void *device_ptr, size_t size,
                              size_t device_offset, int device_num);
 int omp_target_disassociate_ptr(void *host_ptr, int device_num);
+int omp_target_is_high_bw_memory(void *host_ptr, size_t size);
 
 /// Explicit target memory allocators
 /// Using the llvm_ prefix until they become part of the OpenMP standard.

@@ -1064,6 +1064,10 @@ int FTN_STDCALL FTN_TARGET_ASSOCIATE_PTR(void *host_ptr, void *device_ptr,
 int FTN_STDCALL FTN_TARGET_DISASSOCIATE_PTR(void *host_ptr, int device_num) {
   return -1;
 }
+
+int FTN_STDCALL FTN_TARGET_IS_HIGH_BW_MEMORY(void *host_ptr, size_t size) {
+  return -1;
+}
 #endif // defined(KMP_STUB)
 
 #ifdef KMP_STUB

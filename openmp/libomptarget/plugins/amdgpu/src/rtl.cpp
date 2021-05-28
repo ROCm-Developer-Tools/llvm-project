@@ -1503,7 +1503,7 @@ __tgt_target_table *__tgt_rtl_load_binary_locked(int32_t device_id,
   return DeviceInfo.getOffloadEntriesTable(device_id);
 }
 
-void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *, int32_t kind) {
+void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *host_ptr, int32_t kind) {
   void *ptr = NULL;
   assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
 
@@ -1513,10 +1513,52 @@ void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *, int32_t kind) {
     return NULL;
   }
 
-  atmi_status_t err = atmi_malloc(&ptr, size, get_gpu_mem_place(device_id));
-  DP("Tgt alloc data %ld bytes, (tgt:%016llx).\n", size,
-     (long long unsigned)(Elf64_Addr)ptr);
-  ptr = (err == ATMI_STATUS_SUCCESS) ? ptr : NULL;
+  // TODO: retrieve USM mode from libomptarget
+  if (/*isUSMmode*/ true) {
+    // record memory area as coarse grain in table
+    std::cout << "Host ptr = " << host_ptr << " size = " << size << "\n";
+    std::cout << "Host uintptr_t = " <<  (core::CoarseGrainHstPtr)host_ptr << "\n";
+
+    core::CoarseGrainHstPtr begin = core::CoarseGrainElemTy::pageAlignPrev(
+      (core::CoarseGrainHstPtr)host_ptr);
+    core::CoarseGrainHstPtr end = core::CoarseGrainElemTy::pageAlignNext(
+      (core::CoarseGrainHstPtr)host_ptr+(core::CoarseGrainHstPtr)size-1);
+    std::cout << "Adding base = " << begin << " end = " << end << "\n";
+    core::Runtime::getInstance().GetCoarseGrainMemTable().emplace(core::CoarseGrainElemTy(begin, end));
+    // TODO: tell the OS this is coarse grain memory
+
+    // some tests...
+    // check same
+    // if(core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)host_ptr, size))
+    //   std::cout << "1. USM ------------------------------- Same area is coarse grain\n";
+    
+    // // check extends before
+    // if(!core::Runtime::getInstance().IsCoarseGrain(begin-100, size))
+    //   std::cout << "2. USM ----------------------------------Extends before area is NOT coarse grain\n";
+
+    // // check extends after
+    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)+1, size+4096))
+    //   std::cout << "3. USM ----------------------------------Extends after area is NOT coarse grain\n";
+
+    // // check extends before and after
+    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)-4096-2, size+4096+2))
+    //   std::cout << "4. USM ----------------------------------Extends before and after area is NOT coarse grain\n";
+
+    // // check all before
+    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)-4096, 1))
+    //   std::cout << "5. USM ----------------------------------all before area is NOT coarse grain\n";
+    
+    // // check all after
+    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)+size+4096, 100))
+    //   std::cout << "6. USM ----------------------------------all after area is NOT coarse grain\n";   
+    
+    ptr = host_ptr;
+  } else {  
+    atmi_status_t err = atmi_malloc(&ptr, size, get_gpu_mem_place(device_id));
+    DP("Tgt alloc data %ld bytes, (tgt:%016llx).\n", size,
+       (long long unsigned)(Elf64_Addr)ptr);
+    ptr = (err == ATMI_STATUS_SUCCESS) ? ptr : NULL;
+  }
   return ptr;
 }
 
@@ -2025,4 +2067,8 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
   }
 
   return ATMI_STATUS_SUCCESS;
+}
+
+bool __tgt_rtl_is_coarse_grain(void *host_ptr, size_t size) {
+  return core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)host_ptr, size);
 }

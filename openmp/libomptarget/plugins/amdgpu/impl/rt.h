@@ -10,6 +10,11 @@
 #include "hsa.h"
 #include <cstdarg>
 #include <string>
+#include <set>
+
+#include <iostream>
+
+using namespace std;
 
 namespace core {
 
@@ -42,6 +47,45 @@ private:
   int debug_mode_;
 };
 
+// TODO: extract from memory pool
+static const uintptr_t pageSize = 4096;
+ 
+typedef uintptr_t CoarseGrainHstPtr;
+
+class CoarseGrainElemTy final {
+ public:
+   CoarseGrainElemTy(CoarseGrainHstPtr begin, CoarseGrainHstPtr end) :
+     begin_(begin), end_(end) {}
+
+   static int pageAlignPrev(CoarseGrainHstPtr ptr) {
+     return (ptr & ~(pageSize-1));
+   }
+   static int pageAlignNext(CoarseGrainHstPtr ptr) {
+     auto pad = (pageSize - (ptr%pageSize))%pageSize;
+     return (ptr + pad);
+   }
+   CoarseGrainHstPtr getBegin() const { return begin_; }
+   CoarseGrainHstPtr getEnd() const { return end_; }
+
+ private:
+   CoarseGrainHstPtr begin_;
+   CoarseGrainHstPtr end_;
+ };
+
+inline bool operator<(const CoarseGrainElemTy &lhs, const CoarseGrainElemTy &rhs) {
+  return lhs.getBegin() < rhs.getBegin();
+}
+
+inline bool operator<(const CoarseGrainElemTy &lhs, const CoarseGrainHstPtr &rhs) {
+  return lhs.getBegin() < rhs;
+}
+
+inline bool operator<(const CoarseGrainHstPtr &lhs, const CoarseGrainElemTy &rhs) {
+  return lhs < rhs.getBegin();
+}
+
+typedef std::set<CoarseGrainElemTy, std::less<>> CoarseGrainTableTy;
+ 
 class Runtime final {
 public:
   static Runtime &getInstance() {
@@ -69,6 +113,55 @@ public:
   int getMaxQueueSize() const { return env_.getMaxQueueSize(); }
   int getDebugMode() const { return env_.getDebugMode(); }
 
+  CoarseGrainTableTy &GetCoarseGrainMemTable() {
+    return CoarseGrainMemTable_;
+  }
+  bool IsCoarseGrain(CoarseGrainHstPtr begin, size_t size) {
+    if (CoarseGrainMemTable_.empty()) return false;
+
+    cout << "IsCoarseGrain: input begin = " << begin << " size = " << size << "\n";
+    auto upper = CoarseGrainMemTable_.upper_bound(begin);
+
+    if(upper == CoarseGrainMemTable_.end()) {
+      // begin is beyond start address of last entry, could be included in it
+      auto prev = std::prev(upper);
+      if (begin+(CoarseGrainHstPtr)size-1 < prev->getEnd())
+	return true;
+
+      // goes beyond last entry
+      return false;
+    }
+
+    // upper exists
+
+    // upper is only element in the set
+    if (upper == CoarseGrainMemTable_.begin()) {
+      if(begin == upper->getBegin() && ((begin+(CoarseGrainHstPtr)size-1 < upper->getEnd())))
+	return true;
+      // begin,begin+size-1 does not fit in first and only element in the table
+      return false;				       
+    }
+
+    // upper exists and it is not the first element
+    cout << "IsCoarseGrain: upper begin = " << upper->getBegin() << " end = " << upper->getEnd() << "\n";
+    if (begin < upper->getBegin()) {
+      // begin is before first mapped region: at least one element is outside
+      if (upper != CoarseGrainMemTable_.begin())
+	return false;
+      
+      // either begin falls in the previous area or in the middle between the previous and upper      
+      auto prev = std::prev(upper);
+      cout << "IsCoarseGrain: prev begin = " << prev->getBegin() << " end = " << prev->getEnd() << "\n";
+      if (begin+(CoarseGrainHstPtr)size-1 < prev->getEnd())
+	return true;
+      return false;
+    }
+    
+    // begin corresponds to begin of upper, check if it is inside or extends after
+    if (begin+(CoarseGrainHstPtr)size-1 < upper->getEnd())
+      return true;
+    return false;
+  }
 protected:
   Runtime() = default;
   ~Runtime() = default;
@@ -78,8 +171,11 @@ protected:
 protected:
   // variable to track environment variables
   Environment env_;
+  CoarseGrainTableTy CoarseGrainMemTable_;
 };
 
+
 } // namespace core
+
 
 #endif // SRC_RUNTIME_INCLUDE_RT_H_

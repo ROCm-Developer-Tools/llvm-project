@@ -319,3 +319,10 @@ EXTERN int omp_target_disassociate_ptr(void *host_ptr, int device_num) {
   DP("omp_target_disassociate_ptr returns %d\n", rc);
   return rc;
 }
+
+EXTERN int omp_target_is_high_bw_memory(void *host_ptr, size_t size) {
+  // any device will do, including host, as this is process-wide information
+  int device_num = omp_get_initial_device();
+  DeviceTy &Device = PM->Devices[device_num];
+  return Device.isCoarseGrainMemory(host_ptr, size);
+}

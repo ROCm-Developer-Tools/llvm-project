@@ -148,6 +148,7 @@
                                             const size_t *, const size_t *, const size_t *, const size_t *, int, int);
     extern int   __KAI_KMPC_CONVENTION  omp_target_associate_ptr(void *, void *, size_t, size_t, int);
     extern int   __KAI_KMPC_CONVENTION  omp_target_disassociate_ptr(void *, int);
+    extern int  __KAI_KMPC_CONVENTION  omp_target_is_high_bw_memory(void *, size_t);
 
     /* OpenMP 5.0 */
     extern int   __KAI_KMPC_CONVENTION  omp_get_device_num (void);
