@@ -186,7 +186,7 @@ void RTLsTy::LoadRTLs() {
               dlsym(dynlib_handle, "__tgt_rtl_run_target_team_region")))
       ValidPlugin = false;
     if (!(*((void **)&R.is_coarse_grain) =
-              dlsym(dynlib_handle, "__is_coarse_grain")))
+              dlsym(dynlib_handle, "__tgt_rtl_is_coarse_grain")))
       ValidPlugin = false;
 
     // Invalid plugin
@@ -238,7 +238,7 @@ void RTLsTy::LoadRTLs() {
     *((void **)&R.supports_empty_images) =
         dlsym(dynlib_handle, "__tgt_rtl_supports_empty_images");
     *((void **)&R.is_coarse_grain) =
-        dlsym(dynlib_handle, "__tgt_rtl_is_coarse_region");
+        dlsym(dynlib_handle, "__tgt_rtl_is_coarse_grain");
 
   }
   delete[] libomptarget_dir_name;

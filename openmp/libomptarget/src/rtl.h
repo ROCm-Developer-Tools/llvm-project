@@ -55,8 +55,8 @@ struct RTLInfoTy {
   typedef int64_t(synchronize_ty)(int32_t, __tgt_async_info *);
   typedef int32_t (*register_lib_ty)(__tgt_bin_desc *);
   typedef int32_t(supports_empty_images_ty)();
-  typedef bool(is_coarse_grain_ty(void *, size_t));
-  
+  typedef int(is_coarse_grain_ty(void *, size_t));
+
   int32_t Idx = -1;             // RTL index, index is the number of devices
                                 // of other RTLs that were registered before,
                                 // i.e. the OpenMP index of the first device

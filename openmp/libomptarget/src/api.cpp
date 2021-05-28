@@ -321,8 +321,8 @@ EXTERN int omp_target_disassociate_ptr(void *host_ptr, int device_num) {
 }
 
 EXTERN int omp_target_is_high_bw_memory(void *host_ptr, size_t size) {
-  // any device will do, including host, as this is process-wide information
-  int device_num = omp_get_initial_device();
-  DeviceTy &Device = PM->Devices[device_num];
+  //if(!PM->Devices.size()) return 0;
+  // use the first device, as any will do
+  DeviceTy &Device = PM->Devices[omp_get_default_device()];
   return Device.isCoarseGrainMemory(host_ptr, size);
 }

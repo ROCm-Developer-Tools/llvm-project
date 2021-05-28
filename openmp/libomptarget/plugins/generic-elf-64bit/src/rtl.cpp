@@ -332,6 +332,9 @@ int32_t __tgt_rtl_run_target_region(int32_t device_id, void *tgt_entry_ptr,
                                           tgt_offsets, arg_num, 1, 1, 0);
 }
 
+int __tgt_rtl_is_coarse_grain(void *host_ptr, size_t size) {
+  return 0;
+}
 #ifdef __cplusplus
 }
 #endif

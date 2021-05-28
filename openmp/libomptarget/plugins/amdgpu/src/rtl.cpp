@@ -1524,7 +1524,7 @@ void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *host_ptr, int32_t 
     core::CoarseGrainHstPtr end = core::CoarseGrainElemTy::pageAlignNext(
       (core::CoarseGrainHstPtr)host_ptr+(core::CoarseGrainHstPtr)size-1);
     std::cout << "Adding base = " << begin << " end = " << end << "\n";
-    core::Runtime::getInstance().GetCoarseGrainMemTable().emplace(core::CoarseGrainElemTy(begin, end));
+    core::CoarseGrainMemTable_.emplace(core::CoarseGrainElemTy(begin, end));
     // TODO: tell the OS this is coarse grain memory
 
     // some tests...
@@ -2069,6 +2069,6 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
   return ATMI_STATUS_SUCCESS;
 }
 
-bool __tgt_rtl_is_coarse_grain(void *host_ptr, size_t size) {
-  return core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)host_ptr, size);
+int __tgt_rtl_is_coarse_grain(void *host_ptr, size_t size) {
+  return core::IsCoarseGrain((core::CoarseGrainHstPtr)host_ptr, size);
 }

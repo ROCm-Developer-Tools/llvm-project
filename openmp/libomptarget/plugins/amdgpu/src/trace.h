@@ -364,6 +364,16 @@ int32_t __tgt_rtl_synchronize(int32_t device_id,
 }
 #define __tgt_rtl_synchronize(...) __tgt_rtl_synchronize_impl(__VA_ARGS__)
 
+static int32_t __tgt_rtl_is_coarse_grain_impl(void *host_ptr, size_t size);
+int32_t __tgt_rtl_is_coarse_grain(void *host_ptr, size_t size) {
+  auto t = detail::log<int32_t>(__func__, host_ptr, size);
+  int32_t r = __tgt_rtl_is_coarse_grain_impl(host_ptr, size);
+  t.res(r);
+  return r;
+}
+#define __tgt_rtl_is_coarse_grain(...)                                       \
+  __tgt_rtl_is_coarse_grain_impl(__VA_ARGS__)
+
 #ifdef __cplusplus
 }
 #endif

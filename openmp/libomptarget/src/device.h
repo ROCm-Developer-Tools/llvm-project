@@ -223,7 +223,7 @@ struct DeviceTy {
   int32_t synchronize(AsyncInfoTy &AsyncInfo);
 
   /// (only unified_shared_memory mode) checks if memory area is allocated in coarse grain memory
-  bool isCoarseGrainMemory(void *HostPtr, size_t size);
+  int isCoarseGrainMemory(void *HostPtr, size_t size);
 private:
   // Call to RTL
   void init(); // To be called only via DeviceTy::initOnce()

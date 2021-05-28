@@ -491,8 +491,8 @@ int32_t DeviceTy::synchronize(AsyncInfoTy &AsyncInfo) {
   return OFFLOAD_SUCCESS;
 }
 
-bool DeviceTy::isCoarseGrainMemory(void *HostPtr, size_t size) {
-  RTL->is_coarse_grain(HostPtr, size);
+int DeviceTy::isCoarseGrainMemory(void *HostPtr, size_t size) {
+  return RTL->is_coarse_grain(HostPtr, size);
 }
 
 /// Check whether a device has an associated RTL and initialize it if it's not
