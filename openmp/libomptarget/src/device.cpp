@@ -252,6 +252,7 @@ void *DeviceTy::getOrAllocTgtPtr(void *HstPtrBegin, void *HstPtrBase,
          (UpdateRefCount ? " updated" : ""));
       IsHostPtr = true;
       rc = HstPtrBegin;
+      uintptr_t tp = (uintptr_t)allocData(Size, HstPtrBegin);
     }
   } else if (HasPresentModifier) {
     DP("Mapping required by 'present' map type modifier does not exist for "

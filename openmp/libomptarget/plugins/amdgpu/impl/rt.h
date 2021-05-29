@@ -132,10 +132,8 @@ static CoarseGrainTableTy CoarseGrainMemTable_;
 
 static int IsCoarseGrain(CoarseGrainHstPtr begin, size_t size) {
   if (CoarseGrainMemTable_.empty()) return 0;
-
-  cout << "IsCoarseGrain: input begin = " << begin << " size = " << size << "\n";
+  
   auto upper = CoarseGrainMemTable_.upper_bound(begin);
-
   if(upper == CoarseGrainMemTable_.end()) {
     // begin is beyond start address of last entry, could be included in it
     auto prev = std::prev(upper);

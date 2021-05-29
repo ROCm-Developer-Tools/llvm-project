@@ -1513,45 +1513,21 @@ void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *host_ptr, int32_t 
     return NULL;
   }
 
-  // TODO: retrieve USM mode from libomptarget
-  if (/*isUSMmode*/ true) {
+  // In USM mode we record all pages used by a host memory area as coarse grain for
+  // subsequent queries and set the attribute in the device driver
+  if (DeviceInfo.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY) {
     // record memory area as coarse grain in table
-    std::cout << "Host ptr = " << host_ptr << " size = " << size << "\n";
-    std::cout << "Host uintptr_t = " <<  (core::CoarseGrainHstPtr)host_ptr << "\n";
-
+    DP("USM mode: adding all pages used by host pointer to coarse grain table."
+       "Host ptr = %016llx, size = %zu\n", host_ptr, size);
     core::CoarseGrainHstPtr begin = core::CoarseGrainElemTy::pageAlignPrev(
       (core::CoarseGrainHstPtr)host_ptr);
     core::CoarseGrainHstPtr end = core::CoarseGrainElemTy::pageAlignNext(
       (core::CoarseGrainHstPtr)host_ptr+(core::CoarseGrainHstPtr)size-1);
-    std::cout << "Adding base = " << begin << " end = " << end << "\n";
     core::CoarseGrainMemTable_.emplace(core::CoarseGrainElemTy(begin, end));
-    // TODO: tell the OS this is coarse grain memory
 
-    // some tests...
-    // check same
-    // if(core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)host_ptr, size))
-    //   std::cout << "1. USM ------------------------------- Same area is coarse grain\n";
-    
-    // // check extends before
-    // if(!core::Runtime::getInstance().IsCoarseGrain(begin-100, size))
-    //   std::cout << "2. USM ----------------------------------Extends before area is NOT coarse grain\n";
-
-    // // check extends after
-    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)+1, size+4096))
-    //   std::cout << "3. USM ----------------------------------Extends after area is NOT coarse grain\n";
-
-    // // check extends before and after
-    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)-4096-2, size+4096+2))
-    //   std::cout << "4. USM ----------------------------------Extends before and after area is NOT coarse grain\n";
-
-    // // check all before
-    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)-4096, 1))
-    //   std::cout << "5. USM ----------------------------------all before area is NOT coarse grain\n";
-    
-    // // check all after
-    // if(!core::Runtime::getInstance().IsCoarseGrain((core::CoarseGrainHstPtr)(host_ptr)+size+4096, 100))
-    //   std::cout << "6. USM ----------------------------------all after area is NOT coarse grain\n";   
-    
+    // TODO: tell the GPU driver this is coarse grain memory
+    //hsa_amd_svm_attributes_set()
+    // with attribute HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG and value HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED.
     ptr = host_ptr;
   } else {  
     atmi_status_t err = atmi_malloc(&ptr, size, get_gpu_mem_place(device_id));

@@ -185,9 +185,6 @@ void RTLsTy::LoadRTLs() {
     if (!(*((void **)&R.run_team_region) =
               dlsym(dynlib_handle, "__tgt_rtl_run_target_team_region")))
       ValidPlugin = false;
-    if (!(*((void **)&R.is_coarse_grain) =
-              dlsym(dynlib_handle, "__tgt_rtl_is_coarse_grain")))
-      ValidPlugin = false;
 
     // Invalid plugin
     if (!ValidPlugin) {

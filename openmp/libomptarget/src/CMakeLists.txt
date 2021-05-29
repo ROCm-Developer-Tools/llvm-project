@@ -55,4 +55,4 @@ install(TARGETS omptarget LIBRARY COMPONENT omptarget
 
 set_source_files_properties(api.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
 set_source_files_properties(device.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-#set_source_files_properties(rtl.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
+set_source_files_properties(rtl.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")

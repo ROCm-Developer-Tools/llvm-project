@@ -1273,9 +1273,6 @@ int32_t __tgt_rtl_synchronize(int32_t device_id,
   return DeviceRTL.synchronize(device_id, async_info_ptr);
 }
 
-int __tgt_rtl_is_coarse_grain(void *host_ptr, size_t size) {
-  return 0;
-}
 #ifdef __cplusplus
 }
 #endif
