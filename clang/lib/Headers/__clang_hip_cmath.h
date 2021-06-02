@@ -102,8 +102,6 @@ __DEVICE__ bool isunordered(float __x, float __y) {
 __DEVICE__ bool isunordered(double __x, double __y) {
   return __builtin_isunordered(__x, __y);
 }
-__DEVICE__ float log2(int __x) { return ::log2fi(__x); }
-__DEVICE__ double log2i(int __x) { return ::log2((double) __x); }
 __DEVICE__ float modf(float __x, float *__iptr) { return ::modff(__x, __iptr); }
 __DEVICE__ float pow(float __base, int __iexp) {
   return ::powif(__base, __iexp);
