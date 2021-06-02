@@ -497,6 +497,8 @@ public:
     NumThreads.resize(NumberOfDevices);
     deviceStateStore.resize(NumberOfDevices);
 
+    ompt_interface.prepare_devices(NumberOfDevices);
+
     for (int i = 0; i < NumberOfDevices; i++) {
       uint32_t queue_size = 0;
       {
@@ -540,6 +542,11 @@ public:
 
   ~RTLDeviceInfoTy() {
     DP("Finalizing the HSA-ATMI DeviceInfo.\n");
+
+    for (int i = 0; i < NumberOfDevices; i++) {
+      ompt_interface.ompt_callback_device_finalize(i);
+    }
+
     // Run destructors on types that use HSA before
     // atmi_finalize removes access to it
     deviceStateStore.clear();
@@ -547,6 +554,7 @@ public:
     // Terminate hostrpc before finalizing ATMI
     hostrpc_terminate();
     atmi_finalize();
+
   }
 };
 
@@ -846,9 +854,14 @@ int32_t __tgt_rtl_init_device(int device_id) {
      DeviceInfo.GroupsPerDevice[device_id] *
          DeviceInfo.ThreadsPerGroup[device_id]);
 
-  {
-    const char *type = nullptr;
-    ompt_interface.device_initialize(device_id, type);
+  if (ompt_interface.is_enabled()) {
+    hsa_queue_t *queue = DeviceInfo.HSAQueues[device_id];
+    hsa_amd_profiling_set_profiler_enabled(queue, 1);
+
+    std::string ompt_gpu_type("AMD "); 
+    ompt_gpu_type += GetInfoName;
+    const char *type = ompt_gpu_type.c_str();
+    ompt_interface.ompt_callback_device_initialize(device_id, type);
   }
 
   return OFFLOAD_SUCCESS;
@@ -1222,11 +1235,23 @@ __tgt_target_table *__tgt_rtl_load_binary_locked(int32_t device_id,
               get_elf_mach_gfx_name(elf_e_flags(image)));
       return NULL;
     }
-
     err = env.after_loading();
     if (err != ATMI_STATUS_SUCCESS) {
       return NULL;
     }
+  }
+
+  {
+    const char *filename = nullptr;
+    int64_t offset_in_file = 0;
+    void *vma_in_file = 0;
+    size_t bytes = img_size;
+    void *host_addr = image->ImageStart;
+    void *device_addr = 0;
+    uint64_t module_id = 0; // FIXME johnmc
+    ompt_interface.ompt_callback_device_load
+      (device_id, filename, offset_in_file, vma_in_file, bytes, host_addr,
+       device_addr, module_id); 
   }
 
   DP("ATMI module successfully loaded!\n");

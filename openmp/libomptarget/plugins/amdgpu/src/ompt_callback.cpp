@@ -2,6 +2,9 @@
 // global includes
 //****************************************************************************
 
+#include <atomic>
+#include <vector>
+
 #include <string.h>
 
 
@@ -62,13 +65,25 @@ const char *ompt_device_callbacks_t::documentation = 0;
 // private operations
 //****************************************************************************
 
-ompt_device_t *
+ompt_device *devices = 0;
+
+void
+ompt_device_callbacks_t::resize
+(
+ int number_of_devices
+ )
+{
+  devices = new ompt_device[number_of_devices];
+}
+
+
+ompt_device *
 ompt_device_callbacks_t::lookup_device
 (
  int device_num
  )
 {
-  return nullptr;
+  return &devices[device_num];
 }
 
 ompt_interface_fn_t 
@@ -143,6 +158,8 @@ ompt_init
   ompt_result.initialize       = ompt_device_rtl_init;
   ompt_result.finalize         = ompt_device_rtl_fini;
   ompt_result.tool_data.value  = 0;;
+
+  ompt_interface.init();
 
   libomptarget_connector.connect(&ompt_result);
   DP("OMPT: Exiting ompt_init\n");

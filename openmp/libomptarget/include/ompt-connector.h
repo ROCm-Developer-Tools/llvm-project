@@ -12,7 +12,7 @@
 //****************************************************************************
 
 #include <Debug.h>
-#include <ompt.h>
+#include <omp-tools.h>
 #include <omptarget.h>
 
 

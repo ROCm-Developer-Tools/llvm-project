@@ -22,7 +22,7 @@
 // local include files
 //****************************************************************************
 
-#include <ompt.h>
+#include <omp-tools.h>
 
 #include "ompt_callback.h"
 #include "private.h"
@@ -35,6 +35,7 @@
  * macros
  *******************************************************************************/
 
+#define OMPT_CALLBACK_AVAILABLE(fn) (ompt_enabled && fn) 
 #define OMPT_CALLBACK(fn, args) if (ompt_enabled && fn) fn args
 #define fnptr_to_ptr(x) ((void *) (uint64_t) x)
 
@@ -378,14 +379,29 @@ void OmptInterface::target_update_end(int64_t device_id) {
 
 void OmptInterface::target_begin(int64_t device_id) {
   target_region_begin();
-  OMPT_CALLBACK(ompt_callback_target_fn, 
-    (ompt_target, 
-     ompt_scope_begin,
-     device_id,
-     ompt_get_task_data_fn(), 
-     ompt_target_region_id, 
-     _codeptr_ra
+#if 0
+  if (OMPT_CALLBACK_AVAILABLE(ompt_callback_target_emi)){
+    OMPT_CALLBACK(ompt_callback_target_emi_fn, 
+		  (ompt_target, 
+		   ompt_scope_begin,
+		   device_id,
+		   ompt_get_task_data_fn(), 
+		   ompt_target_region_id, 
+		   _codeptr_ra
     )); 
+  }
+  else
+#endif
+    {
+    OMPT_CALLBACK(ompt_callback_target_fn, 
+		  (ompt_target, 
+		   ompt_scope_begin,
+		   device_id,
+		   ompt_get_task_data_fn(), 
+		   ompt_target_region_id, 
+		   _codeptr_ra
+    )); 
+  }
 }
 
 

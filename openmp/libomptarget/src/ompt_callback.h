@@ -25,7 +25,7 @@
 
 #define OMPT_GET_RETURN_ADDRESS(level) __builtin_return_address(level)
 
-#include <ompt.h>
+#include <omp-tools.h>
 
 class OmptInterface {
  public:

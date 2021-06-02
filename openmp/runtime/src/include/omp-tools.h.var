@@ -178,7 +178,11 @@
   macro(ompt_callback_target)               \
   macro(ompt_callback_target_map)           \
   macro(ompt_callback_target_data_op)       \
-  macro(ompt_callback_target_submit)
+  macro(ompt_callback_target_submit)        \
+  macro(ompt_callback_target_data_op_emi)   \
+  macro(ompt_callback_target_emi)           \
+  macro(ompt_callback_target_map_emi)       \
+  macro(ompt_callback_target_submit_emi)
 
 /*****************************************************************************
  * implementation specific types

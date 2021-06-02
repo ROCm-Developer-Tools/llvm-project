@@ -5,7 +5,9 @@
 // local includes
 //****************************************************************************
 
-#include <ompt.h>
+#include <atomic>
+
+#include <omp-tools.h>
 
 
 
@@ -21,18 +23,37 @@
 // types
 //****************************************************************************
 
+class ompt_device {
+public:
+  ompt_device() { atomic_store(&enabled, false); };
+  bool do_initialize() {
+    bool old = false;
+    return atomic_compare_exchange_strong(&enabled, &old, true);
+  };
+  bool do_finalize() {
+    bool old = true;
+    return atomic_compare_exchange_strong(&enabled, &old, false);
+  };
+private:
+  std::atomic<bool> enabled;
+};
+
+
 class ompt_device_callbacks_t { 
  public:
 
-  virtual void device_initialize
+  virtual void ompt_callback_device_initialize
   (
    int device_num,
    const char *type
    ) {
     if (ompt_callback_device_initialize_fn) {
-      ompt_callback_device_initialize_fn
-	(device_num, type, lookup_device(device_num),
-	 lookup, documentation);
+      ompt_device *device = lookup_device(device_num);
+      if (device->do_initialize()) {
+	ompt_callback_device_initialize_fn
+	  (device_num, type, (ompt_device_t *) device,
+	   lookup, documentation);
+      }
     }
   };
 
@@ -41,7 +62,10 @@ class ompt_device_callbacks_t {
      int device_num
      ) {
     if (ompt_callback_device_finalize_fn) {
-      ompt_callback_device_finalize_fn(device_num);
+      ompt_device *device = lookup_device(device_num);
+      if (device->do_finalize()) {
+	ompt_callback_device_finalize_fn(device_num);
+      }
     }
   };
 
@@ -220,16 +244,23 @@ class ompt_device_callbacks_t {
   };
 
 
-#if 0
-  ompt_device_callbacks_t () {
+  void init() {
+    enabled = false;
 #define init_name(name) name ## _fn = 0; 
   FOREACH_OMPT_TARGET_CALLBACK(init_name)
 #undef init_name
   };
-#endif
 
+  bool is_enabled() {
+    return enabled;
+  }
+
+  void prepare_devices(int number_of_devices) {
+    resize(number_of_devices);
+  };
   
   void register_callbacks(ompt_function_lookup_t lookup) {
+    enabled = true;
 #define ompt_bind_callback(fn)					\
     fn ## _fn = (fn ## _t ) lookup(#fn);			\
     DP("OMPT: class bound %s=%p\n", #fn, unwrap_fptr(fn ## _fn));
@@ -239,6 +270,7 @@ class ompt_device_callbacks_t {
 
   
  private:
+  bool enabled;
 
 
 #define declare_name(name) name ## _t name ## _fn;
@@ -246,7 +278,8 @@ class ompt_device_callbacks_t {
 #undef declare_name
 
   static ompt_interface_fn_t lookup(const char *interface_function_name);
-  static ompt_device_t *lookup_device(int device_num);
+  static void resize(int number_of_devices);
+  static ompt_device *lookup_device(int device_num);
   static const char *documentation;
 };
 
