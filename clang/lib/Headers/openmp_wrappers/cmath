@@ -13,7 +13,6 @@
 #ifndef _OPENMP
 #error "This file is for OpenMP compilation only."
 #endif
-#define __CORRECT_ISO_CPP11_MATH_H_PROTO_FP
 #include_next <cmath>
 
 // Make sure we include our new and math.h overlays, it probably happened already
