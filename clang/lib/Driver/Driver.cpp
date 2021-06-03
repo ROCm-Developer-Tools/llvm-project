@@ -4918,6 +4918,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
           CurI;
     }
 
+    // FIXME: Find where host offload sets BoundArch to "gnu"
+    if (BoundArch.equals("gnu"))
+      BoundArch = StringRef("");
     // Now that we have all the results generated, select the one that should be
     // returned for the current depending action.
     std::pair<const Action *, std::string> ActionTC = {
