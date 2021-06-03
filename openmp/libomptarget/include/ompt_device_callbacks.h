@@ -1,21 +1,27 @@
-#ifndef ompt_device_callback_h
-#define ompt_device_callback_h
+//=== ompt_device_callbacks.h - Target independent OpenMP target RTL -- C++ -===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// Interface used by both target-independent and device-dependent runtimes
+// to coordinate registration and invocation of OMPT callbacks
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef _OMPT_DEVICE_CALLBACKS_H
+#define _OMPT_DEVICE_CALLBACKS_H
 
 //****************************************************************************
 // local includes
 //****************************************************************************
 
 #include <atomic>
+#include <string.h>
 
 #include <omp-tools.h>
-
-
-
-//****************************************************************************
-// macros
-//****************************************************************************
-
-#define unwrap_fptr(x) ((void *) (uint64_t) x)
 
 
 
@@ -263,27 +269,38 @@ class ompt_device_callbacks_t {
     enabled = true;
 #define ompt_bind_callback(fn)					\
     fn ## _fn = (fn ## _t ) lookup(#fn);			\
-    DP("OMPT: class bound %s=%p\n", #fn, unwrap_fptr(fn ## _fn));
+    DP("OMPT: class bound %s=%p\n", #fn, ((void *) (uint64_t) fn ## _fn));
     FOREACH_OMPT_TARGET_CALLBACK(ompt_bind_callback)
 #undef ompt_bind_callback
   };
 
+  ompt_interface_fn_t
+  lookup_callback(const char *interface_function_name) {
+#define ompt_dolookup(fn)						\
+    if (strcmp(interface_function_name, #fn) == 0)			\
+      return (ompt_interface_fn_t) fn ##_fn;
+
+    FOREACH_OMPT_TARGET_CALLBACK(ompt_dolookup);
+#undef ompt_dolookup
+
+    return (ompt_interface_fn_t)0;
+  };
+
+  static ompt_interface_fn_t lookup(const char *interface_function_name);
   
  private:
   bool enabled;
-
 
 #define declare_name(name) name ## _t name ## _fn;
   FOREACH_OMPT_TARGET_CALLBACK(declare_name)
 #undef declare_name
 
-  static ompt_interface_fn_t lookup(const char *interface_function_name);
   static void resize(int number_of_devices);
   static ompt_device *lookup_device(int device_num);
   static const char *documentation;
 };
 
 
-extern ompt_device_callbacks_t ompt_interface;
+extern ompt_device_callbacks_t ompt_device_callbacks;
 
 #endif

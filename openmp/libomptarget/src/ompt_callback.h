@@ -95,5 +95,7 @@ class OmptInterface {
 
 extern thread_local OmptInterface ompt_interface; 
 
+extern bool ompt_enabled;
+
 
 #endif

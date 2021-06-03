@@ -67,6 +67,13 @@ if (LIBOMPTARGET_OMPD_SUPPORT)
   add_definitions(-DOMPD_SUPPORT=1)
 endif()
 
+
+# OMPT support for libomptarget
+set(LIBOMPTARGET_OMPT_SUPPORT FALSE CACHE BOOL "OMPT-support?")
+if (LIBOMPTARGET_OMPT_SUPPORT)
+  add_definitions(-DOMPT_SUPPORT=1)
+endif()
+
 include_directories(include)
 
 set(LIBOMPTARGET_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)

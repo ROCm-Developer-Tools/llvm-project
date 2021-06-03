@@ -48,7 +48,12 @@
 #endif
 #define DEBUG_PREFIX "Target " GETNAME(TARGET_NAME) " RTL"
 
+#ifndef OMPT_SUPPORT
 #include <ompt_device_callbacks.h>
+#define OMPT_IF_ENABLED(stmts) if (ompt_device_callbacks.if_enabled()) { stmts }
+#else
+#define OMPT_IF_ENABLED(stmts)
+#endif
 
 // hostrpc interface, FIXME: consider moving to its own include these are
 // statically linked into amdgpu/plugin if present from hostrpc_services.a,
@@ -497,7 +502,10 @@ public:
     NumThreads.resize(NumberOfDevices);
     deviceStateStore.resize(NumberOfDevices);
 
-    ompt_interface.prepare_devices(NumberOfDevices);
+    OMPT_IF_ENABLED
+      (
+       ompt_device_callbacks.prepare_devices(NumberOfDevices);
+      )
 
     for (int i = 0; i < NumberOfDevices; i++) {
       uint32_t queue_size = 0;
@@ -543,9 +551,12 @@ public:
   ~RTLDeviceInfoTy() {
     DP("Finalizing the HSA-ATMI DeviceInfo.\n");
 
-    for (int i = 0; i < NumberOfDevices; i++) {
-      ompt_interface.ompt_callback_device_finalize(i);
-    }
+    OMPT_IF_ENABLED
+      (
+       for (int i = 0; i < NumberOfDevices; i++) {
+	 ompt_device_callbacks.ompt_callback_device_finalize(i);
+       }
+      )
 
     // Run destructors on types that use HSA before
     // atmi_finalize removes access to it
@@ -854,15 +865,16 @@ int32_t __tgt_rtl_init_device(int device_id) {
      DeviceInfo.GroupsPerDevice[device_id] *
          DeviceInfo.ThreadsPerGroup[device_id]);
 
-  if (ompt_interface.is_enabled()) {
-    hsa_queue_t *queue = DeviceInfo.HSAQueues[device_id];
-    hsa_amd_profiling_set_profiler_enabled(queue, 1);
+    OMPT_IF_ENABLED
+      (
+       hsa_queue_t *queue = DeviceInfo.HSAQueues[device_id];
+       hsa_amd_profiling_set_profiler_enabled(queue, 1);
 
-    std::string ompt_gpu_type("AMD "); 
-    ompt_gpu_type += GetInfoName;
-    const char *type = ompt_gpu_type.c_str();
-    ompt_interface.ompt_callback_device_initialize(device_id, type);
-  }
+       std::string ompt_gpu_type("AMD ");
+       ompt_gpu_type += GetInfoName;
+       const char *type = ompt_gpu_type.c_str();
+       ompt_device_callbacks.ompt_callback_device_initialize(device_id, type);
+      )
 
   return OFFLOAD_SUCCESS;
 }
@@ -1241,18 +1253,19 @@ __tgt_target_table *__tgt_rtl_load_binary_locked(int32_t device_id,
     }
   }
 
-  {
-    const char *filename = nullptr;
-    int64_t offset_in_file = 0;
-    void *vma_in_file = 0;
-    size_t bytes = img_size;
-    void *host_addr = image->ImageStart;
-    void *device_addr = 0;
-    uint64_t module_id = 0; // FIXME johnmc
-    ompt_interface.ompt_callback_device_load
-      (device_id, filename, offset_in_file, vma_in_file, bytes, host_addr,
-       device_addr, module_id); 
-  }
+  OMPT_IF_ENABLED
+    (
+     const char *filename = nullptr;
+     int64_t offset_in_file = 0;
+     void *vma_in_file = 0;
+     size_t bytes = img_size;
+     void *host_addr = image->ImageStart;
+     void *device_addr = 0;
+     uint64_t module_id = 0; // FIXME johnmc
+     ompt_device_callbacks.ompt_callback_device_load
+     (device_id, filename, offset_in_file, vma_in_file, bytes, host_addr,
+      device_addr, module_id);
+    )
 
   DP("ATMI module successfully loaded!\n");
 

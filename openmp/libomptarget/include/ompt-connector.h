@@ -1,3 +1,20 @@
+//=== ompt-connector.h - Target independent OpenMP target RTL -- C++ ------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// Support used by OMPT implementation to establish communication between
+// various OpenMP runtime libraries: host openmp library, target-independent
+// runtime library, and device-dependent runtime libraries.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef _OMPT_CONNECTOR_H
+#define _OMPT_CONNECTOR_H
+
 //****************************************************************************
 // global includes
 //****************************************************************************
@@ -39,18 +56,18 @@ typedef void (*library_ompt_connect_t)(ompt_start_tool_result_t *result);
 //
 // establish connection between openmp runtime libraries
 //
-// NOTE: since this is used in attribute constructors, it should be declared
-// within the constructor function to ensure that the class is initialized
-// before it's methods are used
+// NOTE: This class is intended for use in attribute constructors. therefore,
+// it should be declared within the constructor function to ensure that
+// the class is initialized before it's methods are used
 //----------------------------------------------------------------------------
 
 class library_ompt_connector_t {
  public:
 
-  void connect (ompt_start_tool_result_t *ompt_rtl_result) {
+  void connect(ompt_start_tool_result_t *ompt_result) {
     initialize();
     if (library_ompt_connect) {
-      library_ompt_connect(ompt_rtl_result);
+      library_ompt_connect(ompt_result);
     }
   };
 
@@ -59,7 +76,7 @@ class library_ompt_connector_t {
     library_connect_routine.append("_ompt_connect");
     is_initialized = false;
   };
-  
+
  private:
 
   void initialize() {
@@ -76,7 +93,8 @@ class library_ompt_connector_t {
  private:
 
   bool is_initialized;
-  library_ompt_connect_t library_ompt_connect; 
+  library_ompt_connect_t library_ompt_connect;
   std::string library_connect_routine;
 };
 
+#endif

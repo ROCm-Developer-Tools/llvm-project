@@ -1,3 +1,15 @@
+//===------ ompt_callback.cpp - Target RTLs Implementation -------- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// OMPT support for AMDGPU
+//
+//===----------------------------------------------------------------------===//
+
 //****************************************************************************
 // global includes
 //****************************************************************************
@@ -46,7 +58,7 @@
 // global data
 //****************************************************************************
 
-ompt_device_callbacks_t ompt_interface;
+ompt_device_callbacks_t ompt_device_callbacks;
 
 
 
@@ -60,12 +72,13 @@ static ompt_get_target_info_t LIBOMPTARGET_GET_TARGET_OPID;
 
 const char *ompt_device_callbacks_t::documentation = 0; 
 
+static ompt_device *devices = 0;
+
+
 
 //****************************************************************************
 // private operations
 //****************************************************************************
-
-ompt_device *devices = 0;
 
 void
 ompt_device_callbacks_t::resize
@@ -86,6 +99,7 @@ ompt_device_callbacks_t::lookup_device
   return &devices[device_num];
 }
 
+
 ompt_interface_fn_t 
 ompt_device_callbacks_t::lookup
 (
@@ -104,14 +118,14 @@ ompt_device_callbacks_t::lookup
 
 
 static int
-ompt_device_rtl_init
+ompt_device_init
 (
  ompt_function_lookup_t lookup,
  int initial_device_num,
  ompt_data_t *tool_data
 )
 {
-  DP("OMPT: Enter ompt_device_rtl_init\n");
+  DP("OMPT: Enter ompt_device_init\n");
 
   ompt_enabled = true;
 
@@ -121,21 +135,21 @@ ompt_device_rtl_init
   DP("OMPT: libomptarget_get_target_info = %p\n",
      fnptr_to_ptr(LIBOMPTARGET_GET_TARGET_OPID));
 
-    ompt_interface.register_callbacks(lookup);
+  ompt_device_callbacks.register_callbacks(lookup);
   
-  DP("OMPT: Exit ompt_device_rtl_init\n");
+  DP("OMPT: Exit ompt_device_init\n");
 
   return 0;
 }
 
 
 static void
-ompt_device_rtl_fini
+ompt_device_fini
 (
  ompt_data_t *tool_data
 )
 {
-  DP("OMPT: executing amdgpu_ompt_device_rtl_fini\n");
+  DP("OMPT: executing amdgpu_ompt_device_fini\n");
 }
 
 
@@ -155,11 +169,11 @@ ompt_init
   static library_ompt_connector_t libomptarget_connector("libomptarget"); 
   static ompt_start_tool_result_t ompt_result;
 
-  ompt_result.initialize       = ompt_device_rtl_init;
-  ompt_result.finalize         = ompt_device_rtl_fini;
+  ompt_result.initialize       = ompt_device_init;
+  ompt_result.finalize         = ompt_device_fini;
   ompt_result.tool_data.value  = 0;;
 
-  ompt_interface.init();
+  ompt_device_callbacks.init();
 
   libomptarget_connector.connect(&ompt_result);
   DP("OMPT: Exiting ompt_init\n");
