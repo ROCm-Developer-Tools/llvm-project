@@ -57,8 +57,6 @@ __DEVICE__ float frexp(float __arg, int *__exp) {
   return ::frexpf(__arg, __exp);
 }
 
-#if !defined(_MSC_VER) || defined(__OPENMP_AMDGCN__)
-
 // For OpenMP we work around some old system headers that have non-conforming
 // `isinf(float)` and `isnan(float)` implementations that return an `int`. We do
 // this by providing two versions of these functions, differing only in the
@@ -86,7 +84,7 @@ __DEVICE__ int isnan(double __x) { return ::__isnan(__x); }
 
 #pragma omp end declare variant
 
-#endif
+#endif // defined(__OPENMP_AMDGCN__)
 
 __DEVICE__ bool isinf(float __x) { return ::__isinff(__x); }
 __DEVICE__ bool isinf(double __x) { return ::__isinf(__x); }
@@ -97,10 +95,7 @@ __DEVICE__ bool isnan(double __x) { return ::__isnan(__x); }
 
 #if defined(__OPENMP_AMDGCN__)
 #pragma omp end declare variant
-#endif
-
-#endif
-
+#endif // defined(__OPENMP_AMDGCN__)
 
 __DEVICE__ bool isgreater(float __x, float __y) {
   return __builtin_isgreater(__x, __y);
