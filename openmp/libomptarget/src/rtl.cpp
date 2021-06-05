@@ -234,6 +234,10 @@ void RTLsTy::LoadRTLs() {
         dlsym(dynlib_handle, "__tgt_rtl_unregister_lib");
     *((void **)&R.supports_empty_images) =
         dlsym(dynlib_handle, "__tgt_rtl_supports_empty_images");
+    *((void **)&R.set_coarse_grain_mem_region) =
+        dlsym(dynlib_handle, "__tgt_rtl_set_coarse_grain_mem_region");
+    *((void **)&R.query_coarse_grain_mem_region) =
+        dlsym(dynlib_handle, "__tgt_rtl_query_coarse_grain_mem_region");
   }
   delete[] libomptarget_dir_name;
   DP("RTLs loaded!\n");

@@ -40,6 +40,7 @@
 #include "omptargetplugin.h"
 #include "print_tracing.h"
 #include "trace.h"
+#include "memspace.h"
 
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
 
@@ -81,6 +82,9 @@ int print_kernel_trace;
 
 // Size of the target call stack struture
 uint32_t TgtStackItemSize = 0;
+
+// Data structure used to keep track of coarse grain memory regions
+MemSpaceLinear_t *coarse_grain_mem_tab = nullptr;
 
 #undef check // Drop definition from internal.h
 #ifdef OMPTARGET_DEBUG
@@ -823,6 +827,19 @@ int32_t __tgt_rtl_init_device(int device_id) {
        DeviceInfo.ThreadsPerGroup[device_id]);
   }
 
+  // Initialize memspace table to keep track of coarse grain memory regions
+  // TODO: this is only used in USM mode, and we should push the allocation
+  // of the underlying page table to when USM mode is registered with the RTL
+  // FIXME: obtain memory and page size from device driver!
+  {
+    uint64_t KB = 1024;
+    uint64_t MB = 1024*KB;
+    uint64_t GB = 1024*MB;
+    uint64_t mem_size = 125*GB;
+    uint64_t page_size = 4*KB;
+    coarse_grain_mem_tab = new MemSpaceLinear_t(mem_size, page_size);
+  }
+
   DP("Device %d: default limit for groupsPerDevice %d & threadsPerGroup %d\n",
      device_id, DeviceInfo.GroupsPerDevice[device_id],
      DeviceInfo.ThreadsPerGroup[device_id]);
@@ -1507,6 +1524,13 @@ void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *, int32_t kind) {
   void *ptr = NULL;
   assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
 
+  // used in case of omp_target_alloc with unified_shared_memory requirement
+  if (kind == TARGET_ALLOC_SHARED) {
+    void *ptr = malloc(size);
+    __tgt_rtl_set_coarse_grain_mem_region(ptr, size);
+    return ptr;
+  }
+
   if (kind != TARGET_ALLOC_DEFAULT) {
     REPORT("Invalid target data allocation kind or requested allocator not "
            "implemented yet\n");
@@ -2025,4 +2049,22 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
   }
 
   return ATMI_STATUS_SUCCESS;
+}
+
+// Register mapped or allocated memory (with omp_target_alloc or omp_alloc)
+// as coarse grain
+// \arg ptr is the base pointer of the region to be registered as coarse grain
+// \arg size is the size of the memory region to be registered as coarse grain
+int __tgt_rtl_set_coarse_grain_mem_region(const void *ptr, int64_t size) {
+  coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
+
+  // TODO: call hipMemAdvise to set region as coarse grain 
+
+  return 0;
+}
+
+// Query if [ptr, ptr+size] belongs to coarse grain memory region
+int32_t __tgt_rtl_query_coarse_grain_mem_region(const void *ptr, int64_t size) {
+  if (!coarse_grain_mem_tab) return 0;
+  return coarse_grain_mem_tab->contains((const uintptr_t) ptr, size);
 }

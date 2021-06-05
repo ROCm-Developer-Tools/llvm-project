@@ -58,6 +58,7 @@ VERS1.0 {
     llvm_omp_target_alloc_host;
     llvm_omp_target_alloc_shared;
     llvm_omp_target_alloc_device;
+    omp_is_coarse_grain_mem_region;
   local:
     *;
 };
