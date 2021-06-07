@@ -899,7 +899,24 @@ void AMDFlang::ConstructJob(Compilation &C, const JobAction &JA,
   UpperCmdArgs.push_back("-output");
   UpperCmdArgs.push_back(ILMFile);
 
-if(Args.getAllArgValues(options::OPT_fopenmp_targets_EQ).size() > 0) {
+  if (Args.getAllArgValues(options::OPT_offload_arch_EQ).size() > 0) {
+    // assumption: gfx...
+    SmallString<128> TargetInfo;
+    Path = llvm::sys::path::parent_path(Output.getFilename());
+    Arg* Tgts = Args.getLastArg(options::OPT_offload_arch_EQ);
+    assert(Tgts && Tgts->getNumValues() &&
+           "OpenMP offloading has to have targets specified.");
+    for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
+      if (i)
+        TargetInfo += ',';
+      llvm::Triple T(Tgts->getValue(i));
+      TargetInfo += T.getTriple();
+    }
+    UpperCmdArgs.push_back("-fopenmp-targets");
+    UpperCmdArgs.push_back("amdgcn-amd-amdhsa");
+  }
+
+  if(Args.getAllArgValues(options::OPT_fopenmp_targets_EQ).size() > 0) {
     SmallString<128> TargetInfo;
     Path = llvm::sys::path::parent_path(Output.getFilename());
     Arg* Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
@@ -1025,8 +1042,47 @@ if(Args.getAllArgValues(options::OPT_fopenmp_targets_EQ).size() > 0) {
   LowerCmdArgs.push_back(STBFile);
 
 
+  if (Args.getAllArgValues(options::OPT_offload_arch_EQ).size() > 0) {
+    // assumption: gfx...
+    Arg* Tgts = Args.getLastArg(options::OPT_offload_arch_EQ);
+    SmallString<128> TargetInfo;//("-fopenmp-targets ");
+    SmallString<256> TargetInfoAsm;//("-fopenmp-targets-asm ");
+    Path = llvm::sys::path::parent_path(Output.getFilename());
+
+    assert(Tgts && Tgts->getNumValues() &&
+           "OpenMP offloading has to have targets specified.");
+    for (unsigned i = 0; i != Tgts->getNumValues(); ++i) {
+      if (i)
+        TargetInfo += ',';
+      // We need to get the string from the triple because it may not be exactly
+      // the same as the one we get directly from the arguments.
+      TargetInfo += "amdgcn-amd-amdhsa";
+      // We also need to give a output file
+      if (!Path.empty()) {
+        TargetInfoAsm += Path;
+        TargetInfoAsm += "/";
+      }
+      TargetInfoAsm += Stem;
+      TargetInfoAsm += "-";
+      TargetInfoAsm += "amdgcn-amd-amdhsa";
+      TargetInfoAsm += ".ll";
+    }
+    LowerCmdArgs.push_back("-fopenmp-targets");
+    LowerCmdArgs.push_back(Args.MakeArgString(TargetInfo.str()));
+    if(IsOpenMPDevice) {
+      LowerCmdArgs.push_back("-fopenmp-targets-asm");
+      LowerCmdArgs.push_back(Args.MakeArgString(OutFile));
+      LowerCmdArgs.push_back("-asm");
+      LowerCmdArgs.push_back(Args.MakeArgString(TargetInfoAsm.str()));
+    } else {
+      LowerCmdArgs.push_back("-fopenmp-targets-asm");
+      LowerCmdArgs.push_back(Args.MakeArgString(TargetInfoAsm.str()));
+      LowerCmdArgs.push_back("-asm");
+      LowerCmdArgs.push_back(Args.MakeArgString(OutFile));
+    }
+
   /* OpenMP GPU Offload */
-  if(Args.getAllArgValues(options::OPT_fopenmp_targets_EQ).size() > 0) {
+  } else if(Args.getAllArgValues(options::OPT_fopenmp_targets_EQ).size() > 0) {
     SmallString<128> TargetInfo;//("-fopenmp-targets ");
     SmallString<256> TargetInfoAsm;//("-fopenmp-targets-asm ");
     Path = llvm::sys::path::parent_path(Output.getFilename());
