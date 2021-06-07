@@ -258,6 +258,12 @@ void *DeviceTy::getOrAllocTgtPtr(void *HstPtrBegin, void *HstPtrBase,
 	  (PM->RTLs.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY))
 	RTL->set_coarse_grain_mem_region(HstPtrBegin, Size);
 
+      // even under unified_shared_memory need to check for correctness of
+      // use of map clauses. device pointer is same as host ptr in this case
+      HostDataToTargetMap.emplace(HostDataToTargetTy((uintptr_t)HstPtrBase,
+        (uintptr_t)HstPtrBegin, (uintptr_t)HstPtrBegin + Size, (uintptr_t) HstPtrBegin,
+        HstPtrName));
+
       IsHostPtr = true;
       rc = HstPtrBegin;
     }
