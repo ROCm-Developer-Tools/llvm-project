@@ -600,7 +600,9 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_v))
     CmdArgs.push_back("-v");
 
-  StringRef GPUArch = getProcessorFromTargetID(getToolChain().getTriple(),
+  StringRef GPUArch = Args.getLastArgValue(options::OPT_march_EQ);
+  if(GPUArch.empty())
+    GPUArch = getProcessorFromTargetID(getToolChain().getTriple(),
                                                getToolChain().getTargetID());
 
   assert(!GPUArch.empty() && "At least one GPU Arch required for ptxas.");
@@ -704,7 +706,9 @@ void CudaToolChain::addClangTargetOptions(
     Action::OffloadKind DeviceOffloadingKind) const {
   HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
-  StringRef GpuArch = getProcessorFromTargetID(this->getTriple(),
+  StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
+  if(GpuArch.empty())
+    GpuArch = getProcessorFromTargetID(this->getTriple(),
                                                this->getTargetID());
 
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");

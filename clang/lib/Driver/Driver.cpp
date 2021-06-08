@@ -656,22 +656,34 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
   return RT;
 }
 
-void GetTargetInfoFromOpenMPTargets(Compilation &C, const char *OpenMPTarget,
-                                    std::set<std::string> &OffloadArchs,
-                                    bool erase = false) {
+bool GetTargetInfoFromOffloadArch(Compilation &C, const char *OpenMPTarget,
+                                  std::set<std::string> &OffloadArchs,
+                                  bool erase = false) {
+  StringRef DeviceTripleStr;
   if (!std::strncmp(OpenMPTarget, "gfx", 3)) {
+    DeviceTripleStr = "amdgcn-amd-amdhsa";
+
     if (erase)
       OffloadArchs.erase(
-          std::string("amdgcn-amd-amdhsa^").append(OpenMPTarget));
-    else
+          DeviceTripleStr.str().append("^").append(OpenMPTarget));
+    else {
+      llvm::Triple TT(DeviceTripleStr);
+      llvm::StringMap<bool> Features;
+      StringRef IdStr(OpenMPTarget);
+      auto Arch = parseTargetID(TT, IdStr, &Features);
+      if (!Arch) {
+        C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
+        C.setContainsError();
+        return false;
+      }
       OffloadArchs.insert(
-          std::string("amdgcn-amd-amdhsa^").append(OpenMPTarget));
+          DeviceTripleStr.str().append("^").append(OpenMPTarget));
+    }
   } else if (!std::strncmp(OpenMPTarget, "sm_", 3)) {
     const ToolChain *HostTC = C.getSingleOffloadToolChain<Action::OFK_Host>();
     const llvm::Triple &HostTriple = HostTC->getTriple();
-    StringRef DeviceTripleStr = HostTriple.isArch64Bit()
-                                    ? "nvptx64-nvidia-cuda^"
-                                    : "nvptx-nvidia-cuda^";
+    DeviceTripleStr = HostTriple.isArch64Bit() ? "nvptx64-nvidia-cuda^"
+                                               : "nvptx-nvidia-cuda^";
     if (erase)
       OffloadArchs.erase(DeviceTripleStr.str().append(OpenMPTarget));
     else
@@ -685,9 +697,10 @@ void GetTargetInfoFromOpenMPTargets(Compilation &C, const char *OpenMPTarget,
     else
       OffloadArchs.insert(HostTripleStr.str().append("^").append(OpenMPTarget));
   }
+  return true;
 }
 
-void GetTargetInfoFromMArch(Compilation &C,
+bool GetTargetInfoFromMArch(Compilation &C,
                             std::set<std::string> &OffloadArchs) {
   StringRef IdStr;
   for (Arg *A : C.getInputArgs()) {
@@ -696,23 +709,33 @@ void GetTargetInfoFromMArch(Compilation &C,
         StringRef VStr = StringRef(V);
         if (VStr.startswith("-march=") || VStr.startswith("--march=")) {
           IdStr = VStr.split('=').second;
+          auto TripleT = StringRef(A->getValue(0));
+          llvm::Triple T(TripleT);
+          llvm::StringMap<bool> Features;
+          auto ArchStr = parseTargetID(T, IdStr, &Features);
+          if (T.isAMDGCN() && !ArchStr) {
+            C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
+
+            C.setContainsError();
+            return false;
+          }
           StringRef ArchProc = IdStr.split(":").first;
           if (ArchProc.empty()) {
-            C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << VStr;
+            C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << VStr;
             C.setContainsError();
-            return;
+            return false;
           }
-          auto Triple = StringRef(A->getValue(0));
-          if (!Triple.empty() && !IdStr.empty())
-            OffloadArchs.insert(Triple.str().append("^").append(IdStr.str()));
+          if (!TripleT.empty() && !IdStr.empty())
+            OffloadArchs.insert(TripleT.str().append("^").append(IdStr.str()));
         }
         A->claim();
       }
     }
   }
+  return true;
 }
 
-void GetTargetInfoFromOffloadArchOpts(Compilation &C,
+bool GetTargetInfoFromOffloadArchOpts(Compilation &C,
                                       std::set<std::string> &OffloadArchs) {
   for (Arg *A : C.getInputArgs()) {
     if (!(A->getOption().matches(options::OPT_offload_arch_EQ) ||
@@ -730,14 +753,18 @@ void GetTargetInfoFromOffloadArchOpts(Compilation &C,
     }
     if (ArchStr.empty()) 
       continue;
-    else if (A->getOption().matches(options::OPT_offload_arch_EQ))
-      GetTargetInfoFromOpenMPTargets(C, ArchStr.str().c_str(), OffloadArchs);
-    else if (A->getOption().matches(options::OPT_no_offload_arch_EQ))
-      GetTargetInfoFromOpenMPTargets(C, ArchStr.str().c_str(), OffloadArchs,
-                                     /* erase */ true);
+    else if (A->getOption().matches(options::OPT_offload_arch_EQ)) {
+      auto status =
+          GetTargetInfoFromOffloadArch(C, ArchStr.str().c_str(), OffloadArchs);
+      if (!status)
+        return false;
+    } else if (A->getOption().matches(options::OPT_no_offload_arch_EQ))
+      GetTargetInfoFromOffloadArch(C, ArchStr.str().c_str(), OffloadArchs,
+                                   /* erase */ true);
     else
       llvm_unreachable("Unexpected option.");
   }
+  return true;
 }
 
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
@@ -842,12 +869,16 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
           return;
         }
       }
-
-      // process legacy args -fopenmp-targets -Xopenmp-target and -march
-      GetTargetInfoFromMArch(C, OffloadArchs);
+      // auto &D = C.getDriver();
+      //  process legacy args -fopenmp-targets -Xopenmp-target and -march
+      auto status = GetTargetInfoFromMArch(C, OffloadArchs);
+      if (!status)
+        return;
     }
 
-    GetTargetInfoFromOffloadArchOpts(C, OffloadArchs);
+    auto status = GetTargetInfoFromOffloadArchOpts(C, OffloadArchs);
+    if (!status)
+      return;
 
     if (!OffloadArchs.empty()) {
 
@@ -901,7 +932,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
         StringRef IdStr(TargetID);
         auto ArchStr = parseTargetID(TT, IdStr, &Features);
         if (!ArchStr) {
-          C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
+          Diag(clang::diag::err_drv_bad_target_id) << IdStr;
           C.setContainsError();
           return;
         } else

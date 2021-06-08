@@ -57,7 +57,7 @@ private:
   const char *constructOptCommand(Compilation &C, const JobAction &JA,
                                   const InputInfoList &Inputs,
                                   const llvm::opt::ArgList &Args,
-                                  llvm::StringRef SubArchName,
+                                  llvm::StringRef TargetID,
                                   llvm::StringRef OutputFilePrefix,
                                   const char *InputFileName) const;
 
@@ -65,7 +65,7 @@ private:
   const char *constructLlcCommand(Compilation &C, const JobAction &JA,
                                   const InputInfoList &Inputs,
                                   const llvm::opt::ArgList &Args,
-                                  llvm::StringRef SubArchName,
+                                  llvm::StringRef TargetID,
                                   llvm::StringRef OutputFilePrefix,
                                   const char *InputFileName,
                                   bool OutputIsAsm = false) const;
