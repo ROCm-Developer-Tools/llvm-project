@@ -4968,8 +4968,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
         BaseInput = FinalOutput->getValue();
       else
         BaseInput = getDefaultImageName();
-      BaseInput =
-          C.getArgs().MakeArgString(std::string(BaseInput) + "-wrapper");
+      std::string BaseNm = std::string(BaseInput);
+      std::replace(BaseNm.begin(), BaseNm.end(), '.', '_');
+      BaseInput = C.getArgs().MakeArgString(BaseNm + "-wrapper");
     }
     Result = InputInfo(A, GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
                                              AtTopLevel, MultipleArchs,
