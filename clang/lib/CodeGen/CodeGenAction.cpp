@@ -920,6 +920,12 @@ CodeGenAction::CreateASTConsumer(CompilerInstance &CI, StringRef InFile) {
   if (LinkModules.empty())
     for (const CodeGenOptions::BitcodeFileToLink &F :
          CI.getCodeGenOpts().LinkBitcodeFiles) {
+      // Do not process zero length files
+      uint64_t fsize = 0;
+      llvm::sys::fs::file_size(F.Filename, fsize);
+      if (fsize == 0)
+        continue;
+
       auto BCBuf = CI.getFileManager().getBufferForFile(F.Filename);
       if (!BCBuf) {
         CI.getDiagnostics().Report(diag::err_cannot_open_file)
