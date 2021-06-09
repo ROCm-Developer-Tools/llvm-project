@@ -95,7 +95,7 @@ struct RTLInfoTy {
   supports_empty_images_ty *supports_empty_images = nullptr;
   set_coarse_grain_mem_region_ty *set_coarse_grain_mem_region = nullptr;
   query_coarse_grain_mem_region_ty *query_coarse_grain_mem_region = nullptr;
-  
+
   // Are there images associated with this RTL.
   bool isUsed = false;
 

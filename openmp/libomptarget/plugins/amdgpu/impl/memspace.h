@@ -93,12 +93,12 @@ class MemSpaceLinearSmall_t : public MemSpaceBase_ {
   // TODO: OpenMP will not remap same or subset region, only
   // completely separated regions. We can skip setting
   // table if the first element in the region is already set to 1
-  void insert(const uintptr_t base, size_t size) {
+  virtual void insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
     uint64_t page_end = calc_page_index(base+size-1);
     for(uint64_t i = page_start; i <= page_end; i++) {
       uint64_t blockId = i >> log2_pages_per_block;
-      uint64_t blockOffset = i % pages_per_block;
+      uint64_t blockOffset = i & (pages_per_block-1);
       set(tab[blockId], blockOffset);
     }
   }
@@ -126,7 +126,7 @@ class MemSpaceLinearSmall_t : public MemSpaceBase_ {
     return ((1UL << idx) == (tab_loc & (1UL << idx)));
   }
 
- private:
+ protected:
   // the actual table that given a page index
   // contains whether the page belongs to the tracked
   // memory space
@@ -135,6 +135,27 @@ class MemSpaceLinearSmall_t : public MemSpaceBase_ {
   // this must be the same as the number of bits of each tab element
   const int pages_per_block = 64;
   int log2_pages_per_block;
+};
+
+// Same as Linear and Small, but based on OpenMP map clause
+// restrictions: extension of mapped memory is not allowed,
+// if the first bit of a coarse grain mapped page is set
+// then all others will have been set as well. Cuts down
+// on remapping of memory
+class MemSpaceLinearSmallOMP_t : public MemSpaceLinearSmall_t {
+public:
+ MemSpaceLinearSmallOMP_t(uint64_t mem_size, uint64_t page_size) :
+  MemSpaceLinearSmall_t(mem_size, page_size) {}
+  void insert(const uintptr_t base, size_t size) {
+    uint64_t page_start = calc_page_index(base);
+    uint64_t page_end = calc_page_index(base+size-1);
+    for(uint64_t i = page_start; i <= page_end; i++) {
+      uint64_t blockId = i >> log2_pages_per_block;
+      uint64_t blockOffset = i & (pages_per_block-1);
+      if (isSet(tab[blockId], blockOffset)) return;
+      set(tab[blockId], blockOffset);
+    }
+  }
 };
 
 #endif // __MEMSPACE__H

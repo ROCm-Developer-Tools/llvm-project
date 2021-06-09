@@ -84,7 +84,7 @@ int print_kernel_trace;
 uint32_t TgtStackItemSize = 0;
 
 // Data structure used to keep track of coarse grain memory regions
-MemSpaceLinearSmall_t *coarse_grain_mem_tab = nullptr;
+MemSpaceLinearSmallOMP_t *coarse_grain_mem_tab = nullptr;
 
 #undef check // Drop definition from internal.h
 #ifdef OMPTARGET_DEBUG
@@ -837,7 +837,7 @@ int32_t __tgt_rtl_init_device(int device_id) {
     uint64_t GB = 1024*MB;
     uint64_t mem_size = 125*GB;
     uint64_t page_size = 4*KB;
-    coarse_grain_mem_tab = new MemSpaceLinearSmall_t(mem_size, page_size);
+    coarse_grain_mem_tab = new MemSpaceLinearSmallOMP_t(mem_size, page_size);
   }
 
   DP("Device %d: default limit for groupsPerDevice %d & threadsPerGroup %d\n",
@@ -2058,7 +2058,7 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
 int __tgt_rtl_set_coarse_grain_mem_region(const void *ptr, int64_t size) {
   coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
 
-  // TODO: call hipMemAdvise to set region as coarse grain 
+  // TODO: call hipMemAdvise to set region as coarse grain
 
   return 0;
 }
