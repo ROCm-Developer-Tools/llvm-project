@@ -694,7 +694,7 @@ void GetTargetInfoFromMArch(Compilation &C,
     if (A->getOption().matches(options::OPT_Xopenmp_target_EQ)) {
       for (auto *V : A->getValues()) {
         StringRef VStr = StringRef(V);
-        if (VStr.startswith("-march=")) {
+        if (VStr.startswith("-march=") || VStr.startswith("--march=")) {
           IdStr = VStr.split('=').second;
           StringRef ArchProc = IdStr.split(":").first;
           if (ArchProc.empty()) {
@@ -792,7 +792,6 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     }
     C.addOffloadDeviceToolChain(HIPTC.get(), OFK);
   } else {
-
     //
     // OpenMP
     //
@@ -831,7 +830,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                 C.getInputArgs().getLastArg(options::OPT_Xopenmp_target_EQ)) {
           bool has_valid_march = false;
           for (auto *V : XOpenMPTargets->getValues())
-            if (StringRef(V).startswith("-march="))
+            if (StringRef(V).startswith("-march=") ||
+                StringRef(V).startswith("--march="))
               has_valid_march = true;
           if (!has_valid_march) {
             Diag(diag::err_drv_missing_Xopenmptarget_or_march);
@@ -848,7 +848,32 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     }
 
     GetTargetInfoFromOffloadArchOpts(C, OffloadArchs);
+
     if (!OffloadArchs.empty()) {
+
+      // Extract targetIDs from all OffloadArchs and see if there
+      // is a conflict i.e. For a specific processor, a feature either shows
+      // up in all target IDs, or does not show up in any target IDs. Otherwise
+      // the target ID combination is invalid.
+      if (OffloadArchs.size() > 1) {
+        std::set<StringRef> OffloadArchsRef;
+        for (std::set<std::string>::iterator Arch = OffloadArchs.begin();
+             Arch != OffloadArchs.end(); Arch++) {
+          auto Loc = Arch->find('^') + 1;
+          OffloadArchsRef.insert(
+              StringRef(Arch->data() + Loc, Arch->size() - Loc));
+        }
+
+        auto &&ConflictingArchs =
+            getConflictTargetIDCombination(OffloadArchsRef);
+        if (ConflictingArchs) {
+          C.getDriver().Diag(clang::diag::err_drv_bad_offload_arch_combo)
+              << ConflictingArchs.getValue().first
+              << ConflictingArchs.getValue().second;
+          C.setContainsError();
+          return;
+        }
+      }
 
       // We expect that an offload target is always used in conjunction with
       // option -fopenmp specifying a valid runtime with offloading support,
@@ -878,6 +903,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
         if (!ArchStr) {
           C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
           C.setContainsError();
+          return;
         } else
           TargetID = getCanonicalTargetID(ArchStr.getValue(), Features);
 
@@ -4918,6 +4944,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
           CurI;
     }
 
+    // FIXME: Find where host offload sets BoundArch to "gnu"
+    if (BoundArch.equals("gnu"))
+      BoundArch = StringRef("");
     // Now that we have all the results generated, select the one that should be
     // returned for the current depending action.
     std::pair<const Action *, std::string> ActionTC = {
