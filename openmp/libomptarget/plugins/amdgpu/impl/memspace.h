@@ -19,7 +19,7 @@ class MemSpaceBase_  {
   }
 
   // give a \arg ptr calculates the table index of its containing page
-  inline uint64_t calc_index(uintptr_t ptr) const {    
+  inline uint64_t calc_page_index(uintptr_t ptr) const {
     return ptr >> log2page_size;
   }
 
@@ -44,11 +44,11 @@ class MemSpaceLinear_t : public MemSpaceBase_ {
   // completely separated regions. We can skip setting
   // table if the first element in the region is already set to 1
   void insert(const uintptr_t base, size_t size) {
-    uint64_t start = calc_index(base);
-    uint64_t end = calc_index(base+size-1);
-    assert(start < num_pages);
-    assert(end < num_pages);
-    for(uint64_t i = start; i <= end; i++)
+    uint64_t page_start = calc_page_index(base);
+    uint64_t page_end = calc_page_index(base+size-1);
+    assert(page_start < num_pages);
+    assert(page_end < num_pages);
+    for(uint64_t i = page_start; i <= page_end; i++)
       tab[i] = 1;
   }
 
@@ -56,9 +56,10 @@ class MemSpaceLinear_t : public MemSpaceBase_ {
   // avg case complexity: O(num_pages) with num_pages = average number
   // of pages used by any allocation
   bool contains(const uintptr_t base, size_t size) const {
-    uint64_t start = calc_index(base);
-    uint64_t end = calc_index(base+size-1);
-    for(uint64_t i = start; i <= end; i++)
+    uint64_t page_start = calc_page_index(base);
+    uint64_t page_end = calc_page_index(base+size-1);
+    printf("Using 8bit/page version\n");
+    for(uint64_t i = page_start; i <= page_end; i++)
       if(tab[i] == 0) return false;
     return true;
   }
@@ -77,55 +78,63 @@ class MemSpaceLinear_t : public MemSpaceBase_ {
   uint8_t *tab;
 };
 
+// Same search semantics as Linear version, but uses a bit field
 class MemSpaceLinearSmall_t : public MemSpaceBase_ {
  public:
  MemSpaceLinearSmall_t(uint64_t mem_size, uint64_t page_size) :
   MemSpaceBase_(mem_size, page_size) {
+    log2_pages_per_block = log2l(pages_per_block);
+    assert((num_pages % 2) == 0);
+    uint64_t tab_size = num_pages >> log2_pages_per_block;
     // init tab to zero
-    tab = (uint8_t *) calloc(num_pages, sizeof(uint8_t));
+    tab = (uint64_t *) calloc(tab_size, sizeof(uint64_t));
   }
 
   // TODO: OpenMP will not remap same or subset region, only
   // completely separated regions. We can skip setting
   // table if the first element in the region is already set to 1
   void insert(const uintptr_t base, size_t size) {
-    uint64_t start = calc_index(base);
-    uint64_t end = calc_index(base+size-1);
-    assert(start < num_pages);
-    assert(end < num_pages);
-    for(uint64_t i = start; i <= end; i++)
-      tab[i] = 1;
+    uint64_t page_start = calc_page_index(base);
+    uint64_t page_end = calc_page_index(base+size-1);
+    for(uint64_t i = page_start; i <= page_end; i++) {
+      uint64_t blockId = i >> log2_pages_per_block;
+      uint64_t blockOffset = i % pages_per_block;
+      set(tab[blockId], blockOffset);
+    }
   }
 
   // worst case complexity: O(n) with n = total number of pages
   // avg case complexity: O(num_pages) with num_pages = average number
   // of pages used by any allocation
   bool contains(const uintptr_t base, size_t size) const {
-    uint64_t start = calc_index(base);
-    uint64_t end = calc_index(base+size-1);
-    for(uint64_t i = start; i <= end; i++)
-      if(tab[i] == 0) return false;
+    uint64_t page_start = calc_page_index(base);
+    uint64_t page_end = calc_page_index(base+size-1);
+    for(uint64_t i = page_start; i <= page_end; i++) {
+      uint64_t blockId = i >> log2_pages_per_block;
+      uint64_t blockOffset = i & (pages_per_block-1);
+      if(!isSet(tab[blockId], blockOffset)) return false;
+    }
     return true;
-  }
-
-  void dump() const {
-    for(uint64_t i = 0; i < num_pages; i++)
-      if(tab[i] != 0)
-	printf("[%lu] = %d\n", i, tab[i]);
   }
 
   // set the idx-th bit in tab_loc
   inline void set(uint64_t &tab_loc, const uint64_t idx) {
-    // set idx-th bit in tab_loc
     tab_loc |= 1UL << idx;
   }
-  
+
+  inline bool isSet(const uint64_t tab_loc, const uint64_t idx) const {
+    return ((1UL << idx) == (tab_loc & (1UL << idx)));
+  }
+
  private:
   // the actual table that given a page index
   // contains whether the page belongs to the tracked
   // memory space
   // implemented as a bit field
   uint64_t *tab;
+  // this must be the same as the number of bits of each tab element
+  const int pages_per_block = 64;
+  int log2_pages_per_block;
 };
 
 #endif // __MEMSPACE__H
