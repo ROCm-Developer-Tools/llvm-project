@@ -225,6 +225,7 @@ int omp_get_initial_device(void);
 void *omp_target_alloc(size_t size, int device_num);
 void omp_target_free(void *device_ptr, int device_num);
 int omp_target_is_present(void *ptr, int device_num);
+int omp_target_is_accessible(void *ptr, size_t size, int device_num);
 int omp_target_memcpy(void *dst, void *src, size_t length, size_t dst_offset,
                       size_t src_offset, int dst_device, int src_device);
 int omp_target_memcpy_rect(void *dst, void *src, size_t element_size,
