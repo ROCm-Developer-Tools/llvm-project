@@ -791,6 +791,13 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
           *this, HIPTriple, *HostTC, C.getInputArgs());
     }
     C.addOffloadDeviceToolChain(HIPTC.get(), OFK);
+
+    // Try to process legacy -fopenmp-targets and warn you cannot do this.
+    if (C.getInputArgs().getLastArg(options::OPT_fopenmp_targets_EQ)) {
+      std::set<std::string> OffloadArchs;
+      GetTargetInfoFromMArch(C, OffloadArchs);
+      Diag(clang::diag::warn_drv_mix_hip_ompoffload);
+    }
   } else {
     //
     // OpenMP
