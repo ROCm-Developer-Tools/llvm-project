@@ -874,6 +874,9 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
 
     StringRef Arch = DAL->getLastArgValue(options::OPT_march_EQ);
     if (Arch.empty())
+      Arch = getProcessorFromTargetID(this->getTriple(), this->getTargetID());
+
+    if (Arch.empty())
       DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
                         CLANG_OPENMP_NVPTX_DEFAULT_ARCH);
 
