@@ -1662,18 +1662,18 @@ bool tools::SDLSearch(const Driver &D, const llvm::opt::ArgList &DriverArgs,
                       llvm::opt::ArgStringList &CC1Args,
                       SmallVector<std::string, 8> LibraryPaths,
                       std::string libname, StringRef ArchName,
-                      StringRef GpuArch, bool isBitCodeSDL,
+                      StringRef TargetID, bool isBitCodeSDL,
                       bool postClangLink) {
   std::string archname = ArchName.str();
-  std::string gpuname = GpuArch.str();
+  std::string Target = TargetID.str();
 
   SmallVector<std::string, 12> SDL_FileNames;
   if (isBitCodeSDL) {
     // For bitcode SDL, search for these 12 relative SDL filenames
     SDL_FileNames.push_back(std::string("/libdevice/libbc-" + libname + "-" +
-                                        archname + "-" + gpuname + ".a"));
+                                        archname + "-" + Target + ".a"));
     SDL_FileNames.push_back(std::string("/libbc-" + libname + "-" + archname +
-                                        "-" + gpuname + ".a"));
+                                        "-" + Target + ".a"));
     SDL_FileNames.push_back(
         std::string("/libdevice/libbc-" + libname + "-" + archname + ".a"));
     SDL_FileNames.push_back(
@@ -1681,9 +1681,9 @@ bool tools::SDLSearch(const Driver &D, const llvm::opt::ArgList &DriverArgs,
     SDL_FileNames.push_back(std::string("/libdevice/libbc-" + libname + ".a"));
     SDL_FileNames.push_back(std::string("/libbc-" + libname + ".a"));
     SDL_FileNames.push_back(std::string("/libdevice/lib" + libname + "-" +
-                                        archname + "-" + gpuname + ".bc"));
+                                        archname + "-" + Target + ".bc"));
     SDL_FileNames.push_back(
-        std::string("/lib" + libname + "-" + archname + "-" + gpuname + ".bc"));
+        std::string("/lib" + libname + "-" + archname + "-" + Target + ".bc"));
     SDL_FileNames.push_back(
         std::string("/libdevice/lib" + libname + "-" + archname + ".bc"));
     SDL_FileNames.push_back(
@@ -1693,9 +1693,9 @@ bool tools::SDLSearch(const Driver &D, const llvm::opt::ArgList &DriverArgs,
   } else {
     // Otherwise only 4 names to search for machine-code SDL
     SDL_FileNames.push_back(std::string("/libdevice/lib" + libname + "-" +
-                                        archname + "-" + gpuname + ".a"));
+                                        archname + "-" + Target + ".a"));
     SDL_FileNames.push_back(
-        std::string("/lib" + libname + "-" + archname + "-" + gpuname + ".a"));
+        std::string("/lib" + libname + "-" + archname + "-" + Target + ".a"));
     SDL_FileNames.push_back(
         std::string("/libdevice/lib" + libname + "-" + archname + ".a"));
     SDL_FileNames.push_back(
@@ -1871,15 +1871,10 @@ void tools::AddStaticDeviceLibs(Compilation *C, const Tool *T,
     }
   }
 
-  // SDL name only contains the processor name, while TargetID is required
-  // to extract compatible code objects.
-  StringRef GpuArch = !T ? TargetID :
-    getProcessorFromTargetID(T->getToolChain().getTriple(),TargetID);
-
   for (std::string SDL_Name : SDL_Names) {
     //  THIS IS THE ONLY CALL TO SDLSearch
     if (!(SDLSearch(D, DriverArgs, CC1Args, LibraryPaths, SDL_Name, ArchName,
-                    GpuArch, isBitCodeSDL, postClangLink))) {
+                    TargetID, isBitCodeSDL, postClangLink))) {
       GetSDLFromOffloadArchive(*C, D, *T, *JA, *Inputs, DriverArgs, CC1Args,
                                LibraryPaths, SDL_Name, ArchName, TargetID,
                                isBitCodeSDL, postClangLink);

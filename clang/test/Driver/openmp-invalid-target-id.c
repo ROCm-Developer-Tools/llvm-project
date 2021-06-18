@@ -29,7 +29,7 @@
 // RUN:   -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx900+xnack \
 // RUN:   %s 2>&1 | FileCheck -check-prefix=UNK-L %s
 
-// UNK-L: error: Invalid offload arch combinations: gfx908 and gfx908:unknown+
+// UNK-L: error: Invalid target ID: gfx908:unknown+
 
 // RUN: not %clang -### -target x86_64-linux-gnu -fopenmp\
 // RUN:   -fopenmp-targets=amdgcn-amd-amdhsa,amdgcn-amd-amdhsa,amdgcn-amd-amdhsa \
@@ -38,7 +38,7 @@
 // RUN:   -Xopenmp-target=amdgcn-amd-amdhsa -march=gfx900+xnack \
 // RUN:   %s 2>&1 | FileCheck -check-prefix=MIXED-L %s
 
-// MIXED-L: error: Invalid offload arch combinations: gfx908 and gfx908:sramecc+:unknown+
+// MIXED-L: error: Invalid target ID: gfx908:sramecc+:unknown+
 
 // RUN: not %clang -### -target x86_64-linux-gnu -fopenmp\
 // RUN:   -fopenmp-targets=amdgcn-amd-amdhsa,amdgcn-amd-amdhsa \
@@ -96,7 +96,7 @@
 // RUN:   --offload-arch=gfx900+xnack \
 // RUN:   %s 2>&1 | FileCheck -check-prefix=UNK %s
 
-// UNK: error: Invalid offload arch combinations: gfx908 and gfx908:unknown+
+// UNK: error: Invalid target ID: gfx908:unknown+
 
 // RUN: not %clang -### -target x86_64-linux-gnu \
 // RUN:   -fopenmp --offload-arch=gfx908 \
@@ -104,7 +104,7 @@
 // RUN:   --offload-arch=gfx900+xnack \
 // RUN:   %s 2>&1 | FileCheck -check-prefix=MIXED %s
 
-// MIXED: error: Invalid offload arch combinations: gfx908 and gfx908:sramecc+:unknown+
+// MIXED: error: Invalid target ID: gfx908:sramecc+:unknown+
 
 // RUN: not %clang -### -target x86_64-linux-gnu \
 // RUN:   -fopenmp --offload-arch=gfx908 \
