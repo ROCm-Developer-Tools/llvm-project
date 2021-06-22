@@ -2062,7 +2062,7 @@ int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
   hsa_amd_svm_attribute_pair_t tt;
   tt.attribute = HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG;
   tt.value = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
-  //  hsa_amd_svm_attributes_set(ptr, size, &tt, 1);
+  hsa_amd_svm_attributes_set(ptr, size, &tt, 1);
   return 0;
 }
 
