@@ -89,18 +89,18 @@ MemSpaceLinearSmallOMP_t *coarse_grain_mem_tab = nullptr;
 #undef check // Drop definition from internal.h
 #ifdef OMPTARGET_DEBUG
 #define check(msg, status)                                                     \
-  if (status != ATMI_STATUS_SUCCESS) {                                         \
-    /* fprintf(stderr, "[%s:%d] %s failed.\n", __FILE__, __LINE__, #msg);*/    \
-    DP(#msg " failed\n");                                                      \
-    /*assert(0);*/                                                             \
-  } else {                                                                     \
-    /* fprintf(stderr, "[%s:%d] %s succeeded.\n", __FILE__, __LINE__, #msg);   \
-     */                                                                        \
-    DP(#msg " succeeded\n");                                                   \
-  }
+//   if (status != ATMI_STATUS_SUCCESS) {                                         \
+//     /* fprintf(stderr, "[%s:%d] %s failed.\n", __FILE__, __LINE__, #msg);*/    \
+//     DP(#msg " failed\n");                                                      \
+//     /*assert(0);*/                                                             \
+//   } else {                                                                     \
+//     /* fprintf(stderr, "[%s:%d] %s succeeded.\n", __FILE__, __LINE__, #msg);   \
+//      */                                                                        \
+//     DP(#msg " succeeded\n");                                                   \
+//   }
 #else
 #define check(msg, status)                                                     \
-  {}
+//   {}
 #endif
 
 #include "elf_common.h"
@@ -2055,11 +2055,14 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
 // as coarse grain
 // \arg ptr is the base pointer of the region to be registered as coarse grain
 // \arg size is the size of the memory region to be registered as coarse grain
-int __tgt_rtl_set_coarse_grain_mem_region(const void *ptr, int64_t size) {
+int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
   coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
 
   // TODO: call hipMemAdvise to set region as coarse grain
-
+  hsa_amd_svm_attribute_pair_t tt;
+  tt.attribute = HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG;
+  tt.value = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
+  //  hsa_amd_svm_attributes_set(ptr, size, &tt, 1);
   return 0;
 }
 
