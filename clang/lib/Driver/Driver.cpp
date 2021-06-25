@@ -945,6 +945,12 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
         } else
           TargetID = getCanonicalTargetID(ArchStr.getValue(), Features);
 
+        // if amdgcn and unified shared memory, add xnack+
+        if (TT.isAMDGCN() && C.getInputArgs().hasArg(options::OPT_offload_usm))
+          // FIXME: Need to check if xnack+ is already there
+          //        or if xnack- is there, then fatal error.
+          TargetID.append(":xnack+");
+
         std::string NormalizedName;
         if (TT.hasEnvironment())
           NormalizedName = Twine(TT.normalize() + "-" + TargetID).str();
