@@ -1792,12 +1792,13 @@ int32_t __tgt_rtl_run_target_team_region_locked(
   int num_groups = 0;
   int threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
 
-  if (KernelInfo->ExecutionMode != ExecutionModeType::GENERIC) {  
+  if (KernelInfo->ExecutionMode != ExecutionModeType::GENERIC) {
     // Compute the maximum number of VGPRs allowed for a workgroup
     int max_vgprs_per_group =
-      RTLDeviceInfoTy::Total_VGPR_Count / OMP_AMD_MIN_SIMUL_GROUPS;
+        RTLDeviceInfoTy::Total_VGPR_Count / OMP_AMD_MIN_SIMUL_GROUPS;
 
-    // Compute the max number of threads per group based on the kernel VGPR usage
+    // Compute the max number of threads per group based on the kernel VGPR
+    // usage
     threadsPerGroup = max_vgprs_per_group / vgpr_count;
 
     if (threadsPerGroup > RTLDeviceInfoTy::Default_WG_Size) {
