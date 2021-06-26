@@ -1790,24 +1790,27 @@ int32_t __tgt_rtl_run_target_team_region_locked(
    * Set limit based on ThreadsPerGroup and GroupsPerDevice
    */
   int num_groups = 0;
+  int threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
 
-  // Compute the maximum number of VGPRs allowed for a workgroup
-  int max_vgprs_per_group =
+  if (KernelInfo->ExecutionMode != ExecutionModeType::GENERIC) {  
+    // Compute the maximum number of VGPRs allowed for a workgroup
+    int max_vgprs_per_group =
       RTLDeviceInfoTy::Total_VGPR_Count / OMP_AMD_MIN_SIMUL_GROUPS;
 
-  // Compute the max number of threads per group based on the kernel VGPR usage
-  int threadsPerGroup = max_vgprs_per_group / vgpr_count;
+    // Compute the max number of threads per group based on the kernel VGPR usage
+    threadsPerGroup = max_vgprs_per_group / vgpr_count;
 
-  if (threadsPerGroup > RTLDeviceInfoTy::Default_WG_Size) {
-    // Cap it beyond the default
-    threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
-  } else if (threadsPerGroup < RTLDeviceInfoTy::Warp_Size) {
-    // Lower bound is a wavefront size
-    threadsPerGroup = RTLDeviceInfoTy::Warp_Size;
-  } else {
-    // Round it down to a multiple of wavefront size
-    threadsPerGroup = (threadsPerGroup / RTLDeviceInfoTy::Warp_Size) *
-                      RTLDeviceInfoTy::Warp_Size;
+    if (threadsPerGroup > RTLDeviceInfoTy::Default_WG_Size) {
+      // Cap it beyond the default
+      threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
+    } else if (threadsPerGroup < RTLDeviceInfoTy::Warp_Size) {
+      // Lower bound is a wavefront size
+      threadsPerGroup = RTLDeviceInfoTy::Warp_Size;
+    } else {
+      // Round it down to a multiple of wavefront size
+      threadsPerGroup = (threadsPerGroup / RTLDeviceInfoTy::Warp_Size) *
+                        RTLDeviceInfoTy::Warp_Size;
+    }
   }
 
   getLaunchVals(threadsPerGroup, num_groups, KernelInfo->ConstWGSize,
