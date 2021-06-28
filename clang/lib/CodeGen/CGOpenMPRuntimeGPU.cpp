@@ -4813,7 +4813,32 @@ void CGOpenMPRuntimeGPU::processRequiresDirective(
       case CudaArch::SM_53:
       case CudaArch::SM_60:
       case CudaArch::SM_61:
-      case CudaArch::SM_62: {
+      case CudaArch::SM_62:
+      case CudaArch::GFX600:
+      case CudaArch::GFX601:
+      case CudaArch::GFX602:
+      case CudaArch::GFX701:
+      case CudaArch::GFX702:
+      case CudaArch::GFX703:
+      case CudaArch::GFX704:
+      case CudaArch::GFX705:
+      case CudaArch::GFX801:
+      case CudaArch::GFX802:
+      case CudaArch::GFX803:
+      case CudaArch::GFX805:
+      case CudaArch::GFX810:
+      case CudaArch::GFX900:
+      case CudaArch::GFX904:
+      case CudaArch::GFX906:
+      case CudaArch::GFX909:
+      case CudaArch::GFX90c:
+      case CudaArch::GFX1010:
+      case CudaArch::GFX1011:
+      case CudaArch::GFX1012:
+      case CudaArch::GFX1030:
+      case CudaArch::GFX1031:
+      case CudaArch::GFX1032:
+      case CudaArch::GFX1033: {
         SmallString<256> Buffer;
         llvm::raw_svector_ostream Out(Buffer);
         Out << "Target architecture " << CudaArchToString(Arch)
@@ -4826,35 +4851,10 @@ void CGOpenMPRuntimeGPU::processRequiresDirective(
       case CudaArch::SM_75:
       case CudaArch::SM_80:
       case CudaArch::SM_86:
-      case CudaArch::GFX600:
-      case CudaArch::GFX601:
-      case CudaArch::GFX602:
       case CudaArch::GFX700:
-      case CudaArch::GFX701:
-      case CudaArch::GFX702:
-      case CudaArch::GFX703:
-      case CudaArch::GFX704:
-      case CudaArch::GFX705:
-      case CudaArch::GFX801:
-      case CudaArch::GFX802:
-      case CudaArch::GFX803:
-      case CudaArch::GFX805:
-      case CudaArch::GFX810:
-      case CudaArch::GFX900:
       case CudaArch::GFX902:
-      case CudaArch::GFX904:
-      case CudaArch::GFX906:
       case CudaArch::GFX908:
-      case CudaArch::GFX909:
       case CudaArch::GFX90a:
-      case CudaArch::GFX90c:
-      case CudaArch::GFX1010:
-      case CudaArch::GFX1011:
-      case CudaArch::GFX1012:
-      case CudaArch::GFX1030:
-      case CudaArch::GFX1031:
-      case CudaArch::GFX1032:
-      case CudaArch::GFX1033:
       case CudaArch::UNUSED:
       case CudaArch::UNKNOWN:
         break;
