@@ -117,9 +117,9 @@
   #elif defined(__gfx909__)
     #define _DEVICE_GPU 909
   #elif defined(__gfx90a__)
-    #define _DEVICE_GPU 90a
+    #define _DEVICE_GPU 9011
   #elif defined(__gfx90c__)
-    #define _DEVICE_GPU 90c
+    #define _DEVICE_GPU 9013
   #elif defined(__gfx1010__)
     #define _DEVICE_GPU 1010
   #elif defined(__gfx1011__)
