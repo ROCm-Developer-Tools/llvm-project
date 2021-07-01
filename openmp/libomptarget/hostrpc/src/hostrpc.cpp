@@ -143,6 +143,22 @@ EXTERN double hostrpc_varfn_double_execute(char *print_buffer, uint32_t bufsz) {
   return unionarg.dval;
 }
 
+EXTERN void __ockl_sanitizer_report(uint64_t addr, uint64_t pc, uint64_t wgidx,
+                                    uint64_t wgidy, uint64_t wgidz,
+                                    uint64_t wave_id, uint64_t is_read,
+                                    uint64_t access_size) {
+  hostrpc_result_t value =
+      hostrpc_invoke(PACK_VERS(HOSTRPC_SERVICE_SANITIZER), addr, pc, wgidx,
+                     wgidy, wgidz, wave_id, is_read, access_size);
+  return (void)value.arg0;
+}
+
+EXTERN uint64_t __ockl_devmem_request(uint64_t addr, uint64_t size) {
+  hostrpc_result_t result = hostrpc_invoke(PACK_VERS(HOSTRPC_SERVICE_DEVMEM),
+                                           addr, size, 0, 0, 0, 0, 0, 0);
+  return (uint64_t)result.arg0;
+}
+
 // -----------------------------------------------------------------------------
 //
 // vector_product_zeros: Example stub to demonstrate hostrpc services

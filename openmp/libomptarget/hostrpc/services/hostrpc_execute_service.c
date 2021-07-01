@@ -344,6 +344,12 @@ extern void hostrpc_execute_service(uint32_t service, uint32_t device_id,
   case HOSTRPC_SERVICE_DEMO:
     hostrpc_handler_SERVICE_DEMO(device_id, payload);
     break;
+  case HOSTRPC_SERVICE_DEVMEM:
+    fprintf(stderr, "NO HOSTRPC_SERVICE_DEVMEM handler \n");
+    break;
+  case HOSTRPC_SERVICE_SANITIZER:
+    fprintf(stderr, "NO HOSTRPC_SERVICE_SANITIZER handler \n");
+    break;
   default:
     hostrpc_abort(HOSTRPC_INVALIDSERVICE_ERROR);
     printf("ERROR: hostrpc got a bad service id:%d\n", service);
