@@ -26,6 +26,15 @@ extern omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext,
 // init entry points
 ////////////////////////////////////////////////////////////////////////////////
 
+EXTERN void printit(int it) {
+  printf("it = %d\n", it);
+}
+
+EXTERN void printptr(int *ptr) {
+  printf("ptr = %p\n", ptr);
+}
+
+
 EXTERN void __kmpc_kernel_init(int ThreadLimit, int16_t RequiresOMPRuntime) {
   PRINT(LD_IO, "call to __kmpc_kernel_init with version %f\n",
         OMPTARGET_NVPTX_VERSION);
@@ -161,6 +170,7 @@ EXTERN void __kmpc_spmd_kernel_init(int ThreadLimit,
 EXTERN void __kmpc_spmd_kernel_deinit_v2(int16_t RequiresOMPRuntime) {
   // We're not going to pop the task descr stack of each thread since
   // there are no more parallel regions in SPMD mode.
+  printf("in deinit v2\n");	
   if (!RequiresOMPRuntime)
     return;
 

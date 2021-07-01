@@ -111,6 +111,12 @@ public:
 
     // All warps that are in excess of the maximum requested, do
     // not execute the loop
+    printf(
+          "OMP Thread %d: schedule type %d, chunk size = %lld, mytid "
+          "%d, num tids %d\n",
+          (int)gtid, (int)schedtype, (long long)chunk, (int)gtid,
+          (int)numberOfActiveOMPThreads);
+
     PRINT(LD_LOOP,
           "OMP Thread %d: schedule type %d, chunk size = %lld, mytid "
           "%d, num tids %d\n",
@@ -188,6 +194,13 @@ public:
     *plower = lb;
     *pupper = ub;
     *pstride = stride;
+    printf(
+          "Got sched: Active %d, total %d: lb %lld, ub %lld, stride %lld, last "
+          "%d\n",
+          (int)numberOfActiveOMPThreads, (int)GetNumberOfWorkersInTeam(),
+          (long long)(*plower), (long long)(*pupper), (long long)(*pstride),
+          (int)lastiter);
+
     PRINT(LD_LOOP,
           "Got sched: Active %d, total %d: lb %lld, ub %lld, stride %lld, last "
           "%d\n",
@@ -198,7 +211,7 @@ public:
     ompd_set_device_thread_state(omp_state_work_parallel);
 #endif /*OMPD_SUPPORT*/
   }
-
+  
   ////////////////////////////////////////////////////////////////////////////////
   // Support for dispatch Init
 
