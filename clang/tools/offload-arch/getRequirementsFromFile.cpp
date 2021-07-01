@@ -16,13 +16,14 @@
 #include <fcntl.h>
 #include <gelf.h>
 #include <libelf.h>
+#include <unistd.h>
 
 std::vector<std::string>
-_aot_get_requirements_from_file(std::string input_filename) {
+_aot_get_requirements_from_file(const std::string &input_filename) {
   std::vector<std::string> results;
   int ii, num_syms, fd;
   elf_version(EV_CURRENT);
-  fd = open(input_filename.c_str(), O_RDONLY);
+  fd = open(input_filename.c_str(), O_LARGEFILE);
   if (!fd) {
     fprintf(stderr, "ERROR: Could not open file %s\n", input_filename.c_str());
     return results;
@@ -52,7 +53,6 @@ _aot_get_requirements_from_file(std::string input_filename) {
   // application binary by looking for "offload_arch" in symtab
   Elf_Data *sec_data = elf_getdata(scn, NULL);
   num_syms = symtab.sh_size / symtab.sh_entsize;
-  int num_images = 0;
   std::string symname;
   GElf_Sym sym;
   size_t req_offset, req_strsz;
@@ -70,30 +70,30 @@ _aot_get_requirements_from_file(std::string input_filename) {
       req_strsz = sym.st_size;
       req_offsets.push_back(req_offset);
       req_strszs.push_back(req_strsz);
-      num_images++;
     }
   }
   elf_end(elf);
 
-  if (!num_images) {
+  if (req_strszs.size() == 0) {
     fprintf(stderr, "ERROR: No requirements found for any images in %s\n",
             input_filename.c_str());
     return results;
   }
 
-  // Reopen file and seek to the requirements strings
-  FILE *pFile;
-  pFile = fopen(input_filename.c_str(), "rb");
-  for (ii = 0; ii < num_images; ++ii) {
+#define REQ_STRMAX 1024
+  char req_str_buffer[REQ_STRMAX];
+  for (ii = 0; ii < req_strszs.size(); ++ii) {
     req_offset = req_offsets[ii];
     req_strsz = req_strszs[ii];
-    fseek(pFile, req_offset, SEEK_SET);
-    char buffer[1024];
-    size_t fread_result = fread(buffer, 1, req_strsz, pFile);
-    buffer[(uint)req_strsz] = '\0';
-    results.push_back(std::string(buffer));
+    if (req_strsz > REQ_STRMAX) {
+      fprintf(stderr, "ERROR: Requirements string exceeds buffer limit of %d\n",
+              REQ_STRMAX);
+      return results;
+    }
+    pread64(fd, req_str_buffer, req_strsz, req_offset);
+    req_str_buffer[(uint)req_strsz] = '\0';
+    results.push_back(std::string(req_str_buffer));
   }
-
-  fclose(pFile);
+  close(fd);
   return results;
 }
