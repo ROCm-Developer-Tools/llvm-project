@@ -50,7 +50,7 @@
 
 #ifndef OMPT_SUPPORT
 #include <ompt_device_callbacks.h>
-#define OMPT_IF_ENABLED(stmts) if (ompt_device_callbacks.if_enabled()) { stmts }
+#define OMPT_IF_ENABLED(stmts) if (ompt_device_callbacks.is_enabled()) { stmts }
 #else
 #define OMPT_IF_ENABLED(stmts)
 #endif
