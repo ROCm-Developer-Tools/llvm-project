@@ -28,9 +28,19 @@ EXTERN void __tgt_register_requires(int64_t flags) {
   PM->RTLs.RegisterRequires(flags);
 }
 
+static __tgt_image_info **__tgt_AllImageInfos;
+static int __tgt_num_registered_images = 0;
+static bool __tgt_pr = true;
 ////////////////////////////////////////////////////////////////////////////////
 /// adds a target shared library to the target execution image
 EXTERN void __tgt_register_lib(__tgt_bin_desc *desc) {
+  // This supports offload-arch -f when a binary was stripped
+  if (__tgt_pr && getenv("LIBOMPTARGET_PRINT_REQUIREMENTS")) {
+    for (int32_t i = 0; i < desc->NumDeviceImages; ++i)
+      printf("%s\n", __tgt_AllImageInfos[i]->requirements);
+    exit(0);
+  }
+  __tgt_pr = false;
   TIMESCOPE();
   std::call_once(PM->RTLs.initFlag, &RTLsTy::LoadRTLs, &PM->RTLs);
   for (auto &RTL : PM->RTLs.AllRTLs) {
@@ -43,8 +53,6 @@ EXTERN void __tgt_register_lib(__tgt_bin_desc *desc) {
   PM->RTLs.RegisterLib(desc);
 }
 
-static __tgt_image_info **__tgt_AllImageInfos;
-static int __tgt_num_registered_images = 0;
 EXTERN void __tgt_register_image_info(__tgt_image_info *imageInfo) {
 
   DP(" register_image_info image %d of %d  requirements:%s VERSION:%d\n",

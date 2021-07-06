@@ -16,12 +16,14 @@
 #include <fcntl.h>
 #include <gelf.h>
 #include <libelf.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 std::vector<std::string>
 _aot_get_requirements_from_file(const std::string &input_filename) {
   std::vector<std::string> results;
-  int ii, num_syms, fd;
+  int fd;
+  uint ii, num_syms;
   elf_version(EV_CURRENT);
   fd = open(input_filename.c_str(), O_LARGEFILE);
   if (!fd) {
@@ -44,9 +46,11 @@ _aot_get_requirements_from_file(const std::string &input_filename) {
       break;
   }
   if (!scn) {
-    fprintf(stderr, "ERROR: No symbol table found in %s\n",
-            input_filename.c_str());
-    return results;
+    // Symbols may have been stripped, so run binary to print requirements
+    setenv("LIBOMPTARGET_PRINT_REQUIREMENTS", "1", 1);
+    char *all_args[] = {(char *)0};
+    execv(input_filename.c_str(), all_args);
+    exit(0);
   }
 
   // Get file offsets for requirements string of each offload image in
@@ -90,7 +94,12 @@ _aot_get_requirements_from_file(const std::string &input_filename) {
               REQ_STRMAX);
       return results;
     }
-    pread64(fd, req_str_buffer, req_strsz, req_offset);
+    uint rc = pread64(fd, req_str_buffer, req_strsz, req_offset);
+    if (!rc) {
+      fprintf(stderr, "ERROR: Could not read requirements from %s \n",
+              input_filename.c_str());
+      return results;
+    }
     req_str_buffer[(uint)req_strsz] = '\0';
     results.push_back(std::string(req_str_buffer));
   }
