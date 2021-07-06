@@ -297,6 +297,13 @@ uint16_t create_header(hsa_packet_type_t type, int barrier,
 }
 } // namespace core
 
+struct EnvironmentVariables {
+  int NumTeams;
+  int TeamLimit;
+  int TeamThreadLimit;
+  int MaxTeamsDefault;
+};
+
 /// Class containing all the device information
 class RTLDeviceInfoTy {
   std::vector<std::list<FuncOrGblEntryTy>> FuncGblEntries;
@@ -324,10 +331,7 @@ public:
   std::vector<int> NumThreads;
 
   // OpenMP Environment properties
-  int EnvNumTeams;
-  int EnvTeamLimit;
-  int EnvTeamThreadLimit;
-  int EnvMaxTeamsDefault;
+  EnvironmentVariables Env;
 
   // OpenMP Requires Flags
   int64_t RequiresFlags;
@@ -439,6 +443,16 @@ public:
     E.Table.EntriesBegin = E.Table.EntriesEnd = 0;
   }
 
+  static int readEnvElseMinusOne(const char *Env) {
+    const char *envStr = getenv(Env);
+    int res = -1;
+    if (envStr) {
+      res = std::stoi(envStr);
+      DP("Parsed %s=%d\n", Env, res);
+    }
+    return res;
+  }
+
   RTLDeviceInfoTy() {
     // LIBOMPTARGET_KERNEL_TRACE provides a kernel launch trace to stderr
     // anytime. You do not need a debug library build.
@@ -513,37 +527,10 @@ public:
     }
 
     // Get environment variables regarding teams
-    char *envStr = getenv("OMP_TEAM_LIMIT");
-    if (envStr) {
-      // OMP_TEAM_LIMIT has been set
-      EnvTeamLimit = std::stoi(envStr);
-      DP("Parsed OMP_TEAM_LIMIT=%d\n", EnvTeamLimit);
-    } else {
-      EnvTeamLimit = -1;
-    }
-    envStr = getenv("OMP_NUM_TEAMS");
-    if (envStr) {
-      // OMP_NUM_TEAMS has been set
-      EnvNumTeams = std::stoi(envStr);
-      DP("Parsed OMP_NUM_TEAMS=%d\n", EnvNumTeams);
-    } else {
-      EnvNumTeams = -1;
-    }
-    // Get environment variables regarding expMaxTeams
-    envStr = getenv("OMP_MAX_TEAMS_DEFAULT");
-    if (envStr) {
-      EnvMaxTeamsDefault = std::stoi(envStr);
-      DP("Parsed OMP_MAX_TEAMS_DEFAULT=%d\n", EnvMaxTeamsDefault);
-    } else {
-      EnvMaxTeamsDefault = -1;
-    }
-    envStr = getenv("OMP_TEAMS_THREAD_LIMIT");
-    if (envStr) {
-      EnvTeamThreadLimit = std::stoi(envStr);
-      DP("Parsed OMP_TEAMS_THREAD_LIMIT=%d\n", EnvTeamThreadLimit);
-    } else {
-      EnvTeamThreadLimit = -1;
-    }
+    Env.TeamLimit = readEnvElseMinusOne("OMP_TEAM_LIMIT");
+    Env.NumTeams = readEnvElseMinusOne("OMP_NUM_TEAMS");
+    Env.MaxTeamsDefault = readEnvElseMinusOne("OMP_MAX_TEAMS_DEFAULT");
+    Env.TeamThreadLimit = readEnvElseMinusOne("OMP_TEAMS_THREAD_LIMIT");
 
     // Default state.
     RequiresFlags = OMP_REQ_UNDEFINED;
@@ -798,18 +785,18 @@ int32_t __tgt_rtl_init_device(int device_id) {
 
   // Adjust teams to the env variables
 
-  if (DeviceInfo.EnvTeamLimit > 0 &&
+  if (DeviceInfo.Env.TeamLimit > 0 &&
       (enforce_upper_bound(&DeviceInfo.GroupsPerDevice[device_id],
-                           DeviceInfo.EnvTeamLimit))) {
+                           DeviceInfo.Env.TeamLimit))) {
     DP("Capping max groups per device to OMP_TEAM_LIMIT=%d\n",
-       DeviceInfo.EnvTeamLimit);
+       DeviceInfo.Env.TeamLimit);
   }
 
   // Set default number of teams
-  if (DeviceInfo.EnvNumTeams > 0) {
-    DeviceInfo.NumTeams[device_id] = DeviceInfo.EnvNumTeams;
+  if (DeviceInfo.Env.NumTeams > 0) {
+    DeviceInfo.NumTeams[device_id] = DeviceInfo.Env.NumTeams;
     DP("Default number of teams set according to environment %d\n",
-       DeviceInfo.EnvNumTeams);
+       DeviceInfo.Env.NumTeams);
   } else {
     char *TeamsPerCUEnvStr = getenv("OMP_TARGET_TEAMS_PER_PROC");
     int TeamsPerCU = DefaultTeamsPerCU;
@@ -830,11 +817,11 @@ int32_t __tgt_rtl_init_device(int device_id) {
   }
 
   // Adjust threads to the env variables
-  if (DeviceInfo.EnvTeamThreadLimit > 0 &&
+  if (DeviceInfo.Env.TeamThreadLimit > 0 &&
       (enforce_upper_bound(&DeviceInfo.NumThreads[device_id],
-                           DeviceInfo.EnvTeamThreadLimit))) {
+                           DeviceInfo.Env.TeamThreadLimit))) {
     DP("Capping max number of threads to OMP_TEAMS_THREAD_LIMIT=%d\n",
-       DeviceInfo.EnvTeamThreadLimit);
+       DeviceInfo.Env.TeamThreadLimit);
   }
 
   // Set default number of threads
@@ -1598,28 +1585,22 @@ int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr) {
   return OFFLOAD_SUCCESS;
 }
 
-// Determine launch values for threadsPerGroup and num_groups.
-// Outputs: treadsPerGroup, num_groups
-// Inputs: Max_Teams, Max_WG_Size, Warp_Size, ExecutionMode,
-//         EnvTeamLimit, EnvNumTeams, num_teams, thread_limit,
-//         loop_tripcount.
+// Determine launch values for kernel.
 struct launchVals {
   int WorkgroupSize;
   int GridSize;
 };
-
-launchVals getLaunchVals(int ConstWGSize, int ExecutionMode, int EnvTeamLimit,
-                         int EnvNumTeams, int num_teams, int thread_limit,
+launchVals getLaunchVals(EnvironmentVariables Env, int ConstWGSize,
+                         int ExecutionMode, int num_teams, int thread_limit,
                          uint64_t loop_tripcount, int DeviceNumTeams) {
 
   int threadsPerGroup = RTLDeviceInfoTy::Default_WG_Size;
   int num_groups = 0;
 
-  int Max_Teams = DeviceInfo.EnvMaxTeamsDefault > 0
-                      ? DeviceInfo.EnvMaxTeamsDefault
-                      : DeviceNumTeams;
-  if (Max_Teams > DeviceInfo.HardTeamLimit)
-    Max_Teams = DeviceInfo.HardTeamLimit;
+  int Max_Teams =
+      Env.MaxTeamsDefault > 0 ? Env.MaxTeamsDefault : DeviceNumTeams;
+  if (Max_Teams > RTLDeviceInfoTy::HardTeamLimit)
+    Max_Teams = RTLDeviceInfoTy::HardTeamLimit;
 
   if (print_kernel_trace & STARTUP_DETAILS) {
     fprintf(stderr, "RTLDeviceInfoTy::Max_Teams: %d\n",
@@ -1659,10 +1640,8 @@ launchVals getLaunchVals(int ConstWGSize, int ExecutionMode, int EnvTeamLimit,
   DP("Preparing %d threads\n", threadsPerGroup);
 
   // Set default num_groups (teams)
-  if (DeviceInfo.EnvTeamLimit > 0)
-    num_groups = (Max_Teams < DeviceInfo.EnvTeamLimit)
-                     ? Max_Teams
-                     : DeviceInfo.EnvTeamLimit;
+  if (Env.TeamLimit > 0)
+    num_groups = (Max_Teams < Env.TeamLimit) ? Max_Teams : Env.TeamLimit;
   else
     num_groups = Max_Teams;
   DP("Set default num of groups %d\n", num_groups);
@@ -1689,19 +1668,16 @@ launchVals getLaunchVals(int ConstWGSize, int ExecutionMode, int EnvTeamLimit,
   }
   if (print_kernel_trace & STARTUP_DETAILS) {
     fprintf(stderr, "num_groups: %d\n", num_groups);
-    fprintf(stderr, "DeviceInfo.EnvNumTeams %d\n", DeviceInfo.EnvNumTeams);
-    fprintf(stderr, "DeviceInfo.EnvTeamLimit %d\n", DeviceInfo.EnvTeamLimit);
+    fprintf(stderr, "Env.NumTeams %d\n", Env.NumTeams);
+    fprintf(stderr, "Env.TeamLimit %d\n", Env.TeamLimit);
   }
 
-  if (DeviceInfo.EnvNumTeams > 0) {
-    num_groups = (DeviceInfo.EnvNumTeams < num_groups) ? DeviceInfo.EnvNumTeams
-                                                       : num_groups;
-    DP("Modifying teams based on EnvNumTeams %d\n", DeviceInfo.EnvNumTeams);
-  } else if (DeviceInfo.EnvTeamLimit > 0) {
-    num_groups = (DeviceInfo.EnvTeamLimit < num_groups)
-                     ? DeviceInfo.EnvTeamLimit
-                     : num_groups;
-    DP("Modifying teams based on EnvTeamLimit%d\n", DeviceInfo.EnvTeamLimit);
+  if (Env.NumTeams > 0) {
+    num_groups = (Env.NumTeams < num_groups) ? Env.NumTeams : num_groups;
+    DP("Modifying teams based on Env.NumTeams %d\n", Env.NumTeams);
+  } else if (Env.TeamLimit > 0) {
+    num_groups = (Env.TeamLimit < num_groups) ? Env.TeamLimit : num_groups;
+    DP("Modifying teams based on Env.TeamLimit%d\n", Env.TeamLimit);
   } else {
     if (num_teams <= 0) {
       if (loop_tripcount > 0) {
@@ -1736,9 +1712,8 @@ launchVals getLaunchVals(int ConstWGSize, int ExecutionMode, int EnvTeamLimit,
   if (num_teams > 0) {
     num_groups = num_teams;
     // Cap num_groups to EnvMaxTeamsDefault if set.
-    if (DeviceInfo.EnvMaxTeamsDefault > 0 &&
-        num_groups > DeviceInfo.EnvMaxTeamsDefault)
-      num_groups = DeviceInfo.EnvMaxTeamsDefault;
+    if (Env.MaxTeamsDefault > 0 && num_groups > Env.MaxTeamsDefault)
+      num_groups = Env.MaxTeamsDefault;
   }
   if (print_kernel_trace & STARTUP_DETAILS) {
     fprintf(stderr, "threadsPerGroup: %d\n", threadsPerGroup);
@@ -1829,13 +1804,12 @@ int32_t __tgt_rtl_run_target_team_region_locked(
   /*
    * Set limit based on ThreadsPerGroup and GroupsPerDevice
    */
-  launchVals LV =
-      getLaunchVals(KernelInfo->ConstWGSize, KernelInfo->ExecutionMode,
-                    DeviceInfo.EnvTeamLimit, DeviceInfo.EnvNumTeams,
-                    num_teams,      // From run_region arg
-                    thread_limit,   // From run_region arg
-                    loop_tripcount, // From run_region arg
-                    DeviceInfo.NumTeams[KernelInfo->device_id]);
+  launchVals LV = getLaunchVals(DeviceInfo.Env, KernelInfo->ConstWGSize,
+                                KernelInfo->ExecutionMode,
+                                num_teams,      // From run_region arg
+                                thread_limit,   // From run_region arg
+                                loop_tripcount, // From run_region arg
+                                DeviceInfo.NumTeams[KernelInfo->device_id]);
   const int GridSize = LV.GridSize;
   const int WorkgroupSize = LV.WorkgroupSize;
 
