@@ -30,6 +30,10 @@ EXTERN void printit(int it) {
   printf("it = %d\n", it);
 }
 
+EXTERN void printi64(uint64_t it) {
+  printf("it = %d\n", it);
+}
+
 EXTERN void printptr(int *ptr) {
   printf("ptr = %p\n", ptr);
 }
