@@ -1244,9 +1244,6 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-internal-isystem");
       CmdArgs.push_back(Args.MakeArgString(P));
     }
-
-    CmdArgs.push_back("-include");
-    CmdArgs.push_back("__clang_openmp_device_functions.h");
   }
 
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
@@ -6403,6 +6400,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     if (!(Triple.isAMDGCN() && C.getDriver().isSaveTempsEnabled() &&
           JA.getOffloadingDeviceKind() == Action::OFK_OpenMP))
       CmdArgs.push_back("-disable-llvm-passes");
+  }
+  if (JA.isDeviceOffloading(Action::OFK_OpenMP) ||
+      JA.isHostOffloading(Action::OFK_OpenMP)) {
+    if (Args.hasArg(options::OPT_offload_usm))
+      CmdArgs.push_back("-D_OPENMP_USM");
+    CmdArgs.push_back("-include");
+    CmdArgs.push_back("openmp_wrappers/__clang_openmp_offloading.h");
   }
 
   Args.AddAllArgs(CmdArgs, options::OPT_undef);
