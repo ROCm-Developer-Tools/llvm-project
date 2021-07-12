@@ -2060,7 +2060,6 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
 // \arg ptr is the base pointer of the region to be registered as coarse grain
 // \arg size is the size of the memory region to be registered as coarse grain
 int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
-#if 0
   coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
   printf("ptr = %p, size = %zu\n", ptr, size);
   // set region as coarse grain when mapping
@@ -2076,7 +2075,7 @@ int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
      printf("Error on setting coarse grain mem: %s\n", msg);
   } else
     printf("All is good\n");
-#endif
+
   return 0;
 }
 
