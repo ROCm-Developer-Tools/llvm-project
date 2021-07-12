@@ -16,7 +16,7 @@
 
 // Insert requires unified_shared_memory directive with option -offload_usm
 // for both host and device passes.
-#ifdef _OPENMP_OFFLOADING_USM
+#ifdef _OPENMP_USM
 #pragma omp requires unified_shared_memory
 #endif
 
