@@ -121,11 +121,8 @@ std::vector<std::string> _aot_get_pci_ids(const char *driver_search_phrase,
         std::size_t found_loc = file_contents.find(driver_search_phrase);
         if (found_loc != std::string::npos) {
           found_loc = file_contents.find(pci_id_search_phrase);
-          if (found_loc != std::string::npos) {
+          if (found_loc != std::string::npos)
             PCI_IDS.push_back(file_contents.substr(found_loc + 7, 9));
-            if (!AOT_get_all_active_devices)
-              return PCI_IDS;
-          }
         }
       }
     } // end of foreach subdir
@@ -151,8 +148,6 @@ std::vector<std::string> _aot_lookup_codename(std::string lookup_codename) {
           DeviceID = aot_table_entry.devid;
           snprintf(&pci_id[0], 10, "%x:%x", VendorID, DeviceID);
           PCI_IDS.push_back(std::string(&pci_id[0]));
-          if (!AOT_get_all_active_devices)
-            return PCI_IDS;
         }
       }
   return PCI_IDS;
@@ -172,8 +167,6 @@ _aot_lookup_offload_arch(std::string lookup_offload_arch) {
           DeviceID = aot_table_entry.devid;
           snprintf(&pci_id[0], 10, "%x:%x", VendorID, DeviceID);
           PCI_IDS.push_back(std::string(&pci_id[0]));
-          if (!AOT_get_all_active_devices)
-            return PCI_IDS;
         }
       }
   return PCI_IDS;
@@ -299,17 +292,9 @@ int main(int argc, char **argv) {
     } else {
       // Search for all supported offload archs;
       PCI_IDS = _aot_get_pci_ids(AMDGPU_SEARCH_PHRASE, AMDGPU_PCIID_PHRASE);
-      if (AOT_get_all_active_devices) {
-        std::vector<std::string> PCI_IDs_next_arch;
-        PCI_IDs_next_arch =
-            _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
-        for (auto PCI_ID : PCI_IDs_next_arch)
-          PCI_IDS.push_back(PCI_ID);
-      } else {
-        // stop offload-arch at first device found`
-        if (PCI_IDS.empty())
-          PCI_IDS = _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE);
-      }
+      for (auto PCI_ID :
+           _aot_get_pci_ids(NVIDIA_SEARCH_PHRASE, NVIDIA_PCIID_PHRASE))
+        PCI_IDS.push_back(PCI_ID);
     }
 
   } else {
@@ -334,6 +319,7 @@ int main(int argc, char **argv) {
   }
 
   int rc = 0;
+  bool first_device_printed = false;
   for (auto PCI_ID : PCI_IDS) {
     unsigned vid32, devid32;
     sscanf(PCI_ID.c_str(), "%x:%x", &vid32, &devid32);
@@ -351,10 +337,16 @@ int main(int argc, char **argv) {
         xinfo.append(" ").append(PCI_ID);
       if (print_triple)
         xinfo.append(" ").append(_aot_get_triple(vid, devid));
-      if (print_capabilities_for_runtime_requirements)
+      if (print_capabilities_for_runtime_requirements) {
         xinfo.append(" ").append(
             _aot_get_capabilities(vid, devid, offload_arch));
-      printf("%s%s\n", offload_arch.c_str(), xinfo.c_str());
+      }
+      if (AOT_get_all_active_devices || !first_device_printed) {
+        first_device_printed = true;
+        printf("%s%s\n", offload_arch.c_str(), xinfo.c_str());
+      } else {
+        break;
+      }
     }
   }
   return rc;
