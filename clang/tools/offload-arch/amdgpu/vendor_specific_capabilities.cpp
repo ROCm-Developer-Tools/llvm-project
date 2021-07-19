@@ -62,6 +62,9 @@ static hsa_status_t (*_dl_hsa_agent_iterate_isas)(
 static std::vector<amdgpu_features_t> AMDGPU_FEATUREs;
 static std::vector<hsa_agent_t *> HSA_AGENTs;
 
+static std::string offload_arch_requested;
+static bool first_call = true;
+
 #define _return_on_err(err)                                                    \
   {                                                                            \
     if ((err) != HSA_STATUS_SUCCESS) {                                         \
@@ -116,6 +119,7 @@ static hsa_status_t get_isa_info(hsa_isa_t isa, void *data) {
   err = _dl_hsa_isa_get_info_alt(isa, HSA_ISA_INFO_FBARRIER_MAX_SIZE,
                                  &isa_i.fbarrier_max_size);
   _return_on_err(err);
+
   AMDGPU_FEATUREs.push_back(isa_i);
   return err;
 }
@@ -136,8 +140,10 @@ static hsa_status_t iterateAgentsCallback(hsa_agent_t Agent, void *Data) {
   Status = _dl_hsa_agent_get_info(Agent, HSA_AGENT_INFO_NAME, GPUName);
   if (Status != HSA_STATUS_SUCCESS)
     return Status;
-  GPUs->push_back(GPUName);
-  HSA_AGENTs.push_back(&Agent);
+  if (offload_arch_requested.compare(GPUName) == 0) {
+    GPUs->push_back(GPUName);
+    HSA_AGENTs.push_back(&Agent);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -189,23 +195,32 @@ void *_aot_dynload_hsa_runtime() {
 std::string _aot_amdgpu_capabilities(uint16_t vid, uint16_t devid,
                                      std::string oa) {
   std::string amdgpu_capabilities;
-  
-  void *dlhandle = _aot_dynload_hsa_runtime();
-  if (!dlhandle) {
-    amdgpu_capabilities.append(" HSAERROR-LOADING");
-    return amdgpu_capabilities;
-  }
-  hsa_status_t Status = _dl_hsa_init();
-  if (Status != HSA_STATUS_SUCCESS) {
-    amdgpu_capabilities.append(" HSAERROR-INITIALIZATION");
-    return amdgpu_capabilities;
+  offload_arch_requested = oa;
+
+  if (first_call) {
+    first_call = false;
+    void *dlhandle = _aot_dynload_hsa_runtime();
+    if (!dlhandle) {
+      amdgpu_capabilities.append(" HSAERROR-LOADING");
+      return amdgpu_capabilities;
+    }
+    hsa_status_t Status = _dl_hsa_init();
+    if (Status != HSA_STATUS_SUCCESS) {
+      amdgpu_capabilities.append(" HSAERROR-INITIALIZATION");
+      return amdgpu_capabilities;
+    }
   }
   std::vector<std::string> GPUs;
-  Status = _dl_hsa_iterate_agents(iterateAgentsCallback, &GPUs);
+  hsa_status_t Status = _dl_hsa_iterate_agents(iterateAgentsCallback, &GPUs);
   if (Status != HSA_STATUS_SUCCESS) {
     amdgpu_capabilities.append(" HSAERROR-AGENT_ITERATION");
     return amdgpu_capabilities;
   }
+  if (GPUs.size() == 0) {
+    amdgpu_capabilities.append("NOT-HSA-VISIBLE");
+    return amdgpu_capabilities;
+  }
+
   int isa_number = 0;
   hsa_agent_t *agent_ptr = HSA_AGENTs[isa_number];
   Status = _dl_hsa_agent_iterate_isas(*agent_ptr, get_isa_info, &isa_number);
@@ -231,8 +246,7 @@ std::string _aot_amdgpu_capabilities(uint16_t vid, uint16_t devid,
     amdgpu_capabilities.append(" ");
     amdgpu_capabilities.append(features.substr(prev_pos, pos - prev_pos));
   }
-
-  _dl_hsa_shut_down();
-  dlclose(dlhandle);
+  // We cannot shutdown hsa or close dlhandle because
+  // _aot_amd_capabilities could be called multiple times.
   return amdgpu_capabilities;
 }
