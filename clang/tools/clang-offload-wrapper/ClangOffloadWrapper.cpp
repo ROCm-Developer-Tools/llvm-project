@@ -304,8 +304,14 @@ private:
       auto *GV =
           new GlobalVariable(M, RequirementV->getType(), /*isConstant*/ true,
                              GlobalValue::InternalLinkage, RequirementV,
-                             Twine("offload_arch_" + Twine(img_count)));
+                             Twine("__offload_arch_" + Twine(img_count)));
       GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+
+      // store value of these variables (i.e. offload archs) into a custom
+      // section which will be used by "offload-arch -f". It won't be
+      // removed during binary stripping.
+      GV->setSection(".offload_arch_list");
+
       auto *RequirementVPtr =
           ConstantExpr::getGetElementPtr(GV->getValueType(), GV, Zero);
       RequirementVPtr =
@@ -433,7 +439,9 @@ int main(int argc, const char **argv) {
   SmallVector<ArrayRef<char>, 4u> Requirements;
   Requirements.reserve(OffloadArchs.size());
   for (unsigned i = 0; i != OffloadArchs.size(); ++i) {
-    Requirements.emplace_back(OffloadArchs[i].data(), OffloadArchs[i].size());
+    OffloadArchs[i].append("\0");
+    Requirements.emplace_back(OffloadArchs[i].data(),
+                              OffloadArchs[i].size() + 1);
   }
 
   // Create a wrapper for device binaries and write its bitcode to the file.
