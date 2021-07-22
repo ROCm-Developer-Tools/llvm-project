@@ -53,7 +53,7 @@ else()
   )
 endif()
 
-target_link_libraries(offload-arch PUBLIC -ldl -lelf)
+target_link_libraries(offload-arch PRIVATE -ldl -lelf)
 
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
