@@ -30,6 +30,7 @@ include_directories(${LIBOMPTARGET_LLVM_INCLUDE_DIRS})
 if(OPENMP_STANDALONE_BUILD OR (NOT OPENMP_ENABLE_LIBOMPTARGET_PROFILING))
   add_library(omptarget SHARED ${LIBOMPTARGET_SRC_FILES})
   target_link_libraries(omptarget
+    ${CMAKE_INSTALL_PREFIX}/lib/libLLVMOffloadArch.a
     ${CMAKE_DL_LIBS}
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports")
 else()
@@ -38,6 +39,7 @@ else()
     )
   add_llvm_library(omptarget SHARED ${LIBOMPTARGET_SRC_FILES}
       LINK_LIBS ${CMAKE_DL_LIBS}
+      ${CMAKE_INSTALL_PREFIX}/lib/libLLVMOffloadArch.a
       "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports"
       )
   target_compile_definitions(omptarget PUBLIC OMPTARGET_PROFILE_ENABLED)
