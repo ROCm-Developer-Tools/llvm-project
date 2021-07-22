@@ -23,7 +23,6 @@
 
 #include "hsa.h"
 #include "hsa_ext_amd.h"
-#include "hsa_ext_finalize.h"
 
 #include "atmi.h"
 #include "atmi_runtime.h"
