@@ -22,7 +22,7 @@
 
 // On device pass, include __clang_openmp_device_functions.h
 #if defined(__AMDGCN__) || defined(__NVPTX__)
-#include <__clang_openmp_device_functions.h>
+#include "openmp_wrappers/__clang_openmp_device_functions.h"
 #endif
 
 #endif // __CLANG_OPENMP_OFFLOADING_H__

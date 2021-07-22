@@ -6401,14 +6401,22 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
           JA.getOffloadingDeviceKind() == Action::OFK_OpenMP))
       CmdArgs.push_back("-disable-llvm-passes");
   }
-  if (JA.isDeviceOffloading(Action::OFK_OpenMP) ||
-      JA.isHostOffloading(Action::OFK_OpenMP)) {
+
+  auto id = Input.getType();
+  bool isPreprocessedOutput =
+      (id == types::TY_PP_C || id == types::TY_PP_CXX ||
+       id == types::TY_PP_CXXModule || id == types::TY_CXXModule);
+  if ((JA.isDeviceOffloading(Action::OFK_OpenMP) ||
+       JA.isHostOffloading(Action::OFK_OpenMP)) &&
+      !isPreprocessedOutput) {
     if (Args.hasArg(options::OPT_offload_usm))
       CmdArgs.push_back("-D_OPENMP_USM");
+    SmallString<128> P(D.ResourceDir);
+    llvm::sys::path::append(
+        P, "include/openmp_wrappers/__clang_openmp_offloading.h");
     CmdArgs.push_back("-include");
-    CmdArgs.push_back("openmp_wrappers/__clang_openmp_offloading.h");
+    CmdArgs.push_back(Args.MakeArgString(P));
   }
-
   Args.AddAllArgs(CmdArgs, options::OPT_undef);
 
   std::string AltPath = D.getInstalledDir();
