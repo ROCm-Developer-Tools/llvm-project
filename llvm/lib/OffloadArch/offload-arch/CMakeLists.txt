@@ -22,7 +22,6 @@ add_custom_target(
    DEPENDS offload-arch)
 
 install(PROGRAMS
-    ${CMAKE_CURRENT_BINARY_DIR}/offload-arch
     ${CMAKE_CURRENT_BINARY_DIR}/amdgpu-arch
     ${CMAKE_CURRENT_BINARY_DIR}/nvidia-arch
     ${CMAKE_CURRENT_BINARY_DIR}/intelhd-arch
