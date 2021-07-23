@@ -9,18 +9,16 @@
 /// OffloadArch.cpp : Library Functions for OffloadArch
 ///
 //===----------------------------------------------------------------------===//
-
+//
+#include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Support/WithColor.h"
 #include <dirent.h>
-#include <fcntl.h>
 #include <fstream>
-#include <gelf.h>
-#include <libelf.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-
 #include "generated_offload_arch.h"
 #include "llvm/OffloadArch/OffloadArch.h"
+
+using namespace llvm;
+using namespace object;
 
 std::string _aot_get_file_contents(std::string fname) {
   std::string file_contents;
@@ -212,88 +210,78 @@ __aot_get_capabilities_for_runtime(char *offload_arch_output_buffer,
   return 0;
 }
 
+LLVM_ATTRIBUTE_NORETURN inline void
+exitWithError(const Twine &Message, StringRef Whence = StringRef(),
+              StringRef Hint = StringRef()) {
+  WithColor::error(errs(), "offload-arch");
+  if (!Whence.empty())
+    errs() << Whence.str() << ": ";
+  errs() << Message << "\n";
+  if (!Hint.empty())
+    WithColor::note() << Hint.str() << "\n";
+  ::exit(EXIT_FAILURE);
+}
+LLVM_ATTRIBUTE_NORETURN inline void
+exitWithError(std::error_code EC, StringRef Whence = StringRef()) {
+  exitWithError(EC.message(), Whence);
+}
+LLVM_ATTRIBUTE_NORETURN inline void exitWithError(Error E, StringRef Whence) {
+  exitWithError(errorToErrorCode(std::move(E)), Whence);
+}
+template <typename T, typename... Ts>
+T unwrapOrError(Expected<T> EO, Ts &&...Args) {
+  if (EO)
+    return std::move(*EO);
+  exitWithError(EO.takeError(), std::forward<Ts>(Args)...);
+}
+
 /// Function used by offload-arch tool to get requirements from each image of
 /// an elf binary file. Requirements (like offload arch name, target features)
 /// are read from a custom section ".offload_arch_list" in elf binary.
-
 std::vector<std::string>
 _aot_get_requirements_from_file(const std::string &input_filename) {
   std::vector<std::string> results;
-  int fd;
-  elf_version(EV_CURRENT);
-  fd = open(input_filename.c_str(), O_RDONLY | O_LARGEFILE);
-  if (!fd) {
-    fprintf(stderr, "ERROR: Could not open file %s\n", input_filename.c_str());
+  ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrError =
+      MemoryBuffer::getFile(input_filename);
+  if (!BufOrError) {
+    fprintf(stderr, " MemoryBuffer error reading file \n");
+    results.push_back("MEM ERROR");
     return results;
   }
-  Elf *elf = elf_begin(fd, ELF_C_READ, NULL);
-  if (!elf) {
-    fprintf(stderr, "ERROR: File %s is NOT a valid elf file\n",
-            input_filename.c_str());
+  std::unique_ptr<MemoryBuffer> FileReadBuffer = std::move(*BufOrError);
+  Expected<std::unique_ptr<Binary>> BinaryOrErr =
+      createBinary(FileReadBuffer->getMemBufferRef(), /*Context=*/nullptr,
+                   /*InitContent=*/false);
+  if (!BinaryOrErr) {
+    results.push_back("createBinary ERROR");
     return results;
   }
-
-  GElf_Shdr offload_section;
-  Elf_Scn *scn = NULL;
-  size_t section_idx;
-  uint status;
-  // Get section header index.
-  status = elf_getshdrstrndx(elf, &section_idx);
-  if (status) {
-    fprintf(stderr, "ERROR: No section header index found in %s\n",
-            input_filename.c_str());
+  std::unique_ptr<Binary> Bin = std::move(*BinaryOrErr);
+  if (!isa<ELFObjectFile<ELF64LE>>(Bin)) {
+    results.push_back("NOT ELF64LE");
     return results;
   }
-
-  // Iterate over sections of elf.
-  while ((scn = elf_nextscn(elf, scn)) != NULL) {
-
-    // Get pointer to section header.
-    if (gelf_getshdr(scn, &offload_section) != &offload_section) {
-      fprintf(stderr, "ERROR: No section header found in %s\n",
-              input_filename.c_str());
-      return results;
+  ELFObjectFile<ELF64LE> *elf_obj_file =
+      dyn_cast<ELFObjectFile<ELF64LE>>(Bin.get());
+  StringRef FileName = elf_obj_file->getFileName();
+  for (section_iterator SI = elf_obj_file->section_begin(),
+                        SE = elf_obj_file->section_end();
+       SI != SE; ++SI) {
+    const SectionRef &Section = *SI;
+    StringRef SectionName = unwrapOrError(Section.getName(), FileName);
+    if (SectionName == ".offload_arch_list") {
+      StringRef Contents = unwrapOrError(Section.getContents(), FileName);
+      const char *arch_list_ptr = Contents.data();
+      std::string arch;
+      // Iterate over list of requirements to extract individual requirements.
+      for (uint i = 0; i < Contents.size(); i++) {
+        for (uint j = i; arch_list_ptr[j] != '\0'; j++, i++) {
+          arch.push_back(arch_list_ptr[i]);
+        }
+        results.push_back(arch);
+        arch.resize(0);
+      }
     }
-
-    // Read section name from pointer to section header.
-    std::string sname(elf_strptr(elf, section_idx, offload_section.sh_name));
-    if (sname.empty()) {
-      fprintf(stderr, "ERROR: No section name found in %s\n",
-              input_filename.c_str());
-      return results;
-    }
-
-    // Check if this is the section being searched.
-    if (!sname.compare(".offload_arch_list"))
-      break;
   }
-  if (!scn) {
-    fprintf(stderr, "ERROR: .offload_arch_list section not found in %s\n",
-            input_filename.c_str());
-    return results;
-  }
-
-  Elf_Data *sec_data = NULL;
-  std::string arch;
-
-  // Get a pointer to list of null terminated requirements.
-  sec_data = elf_getdata(scn, sec_data);
-  if (!sec_data) {
-    fprintf(stderr, "ERROR: list of offload archs not found in %s\n",
-            input_filename.c_str());
-    return results;
-  }
-  char *arch_list_ptr = (char *)sec_data->d_buf;
-
-  // Iterate over list of requirements to extract individual requirements.
-  for (uint i = 0; i < offload_section.sh_size; i++) {
-    for (uint j = i; arch_list_ptr[j] != '\0'; j++, i++) {
-      arch.push_back(arch_list_ptr[i]);
-    }
-    results.push_back(arch);
-    arch.resize(0);
-  }
-  elf_end(elf);
-  close(fd);
   return results;
 }
