@@ -350,7 +350,7 @@ __tgt_get_active_offload_env(__tgt_active_offload_env *active_env,
                              char *offload_arch_output_buffer,
                              size_t offload_arch_output_buffer_size) {
   // Qget runtime capabilities of this system with libLLVMOffloadArch.a
-  if (int rc = __aot_get_capabilities_for_runtime(
+  if (int rc = _aot_get_capabilities_for_runtime(
           offload_arch_output_buffer, offload_arch_output_buffer_size))
     return;
   active_env->capabilities = offload_arch_output_buffer;

@@ -176,9 +176,8 @@ std::vector<std::string> _aot_get_all_pci_ids() {
 }
 
 /// Get runtime capabilities of this system for libomptarget runtime
-extern "C" int
-__aot_get_capabilities_for_runtime(char *offload_arch_output_buffer,
-                                   size_t offload_arch_output_buffer_size) {
+int _aot_get_capabilities_for_runtime(char *offload_arch_output_buffer,
+                                      size_t offload_arch_output_buffer_size) {
   std::vector<std::string> PCI_IDS = _aot_get_all_pci_ids();
   std::string offload_arch;
   for (auto PCI_ID : PCI_IDS) {
