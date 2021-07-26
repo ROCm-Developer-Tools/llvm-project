@@ -31,9 +31,8 @@
 
 ///
 /// Called by libomptarget runtime to get runtime capabilities.
-extern "C" int
-__aot_get_capabilities_for_runtime(char *offload_arch_output_buffer,
-                                   size_t offload_arch_output_buffer_size);
+int _aot_get_capabilities_for_runtime(char *offload_arch_output_buffer,
+                                      size_t offload_arch_output_buffer_size);
 
 /// Get the vendor specified softeare capabilities of the current runtime
 /// The input vendor id selects the vendor function to call.

@@ -26,26 +26,24 @@ add_custom_target(
   generated-table
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/generated_offload_arch.h)
 
-set(AOT_sources 
-  ${CMAKE_CURRENT_SOURCE_DIR}/OffloadArch.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/amdgpu/vendor_specific_capabilities.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/nvidia/vendor_specific_capabilities.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/intelhd/vendor_specific_capabilities.cpp
-)
-
 add_llvm_component_library(LLVMOffloadArch
-  STATIC
-  ${AOT_sources}
+    OffloadArch.cpp
+    amdgpu/vendor_specific_capabilities.cpp
+    nvidia/vendor_specific_capabilities.cpp
+    intelhd/vendor_specific_capabilities.cpp
   ADDITIONAL_HEADER_DIRS
-  "${LLVM_MAIN_INCLUDE_DIR}/llvm/OffloadArch"
-  DEPENDS generated-table
+    "${LLVM_MAIN_INCLUDE_DIR}/llvm/OffloadArch"
+    ${CMAKE_CURRENT_BINARY_DIR}
+  DEPENDS 
+    generated-table
+  LINK_COMPONENTS
+    BinaryFormat
+    Core 
+    Object
+    ProfileData
+    Support
+    InterfaceStub
 )
-target_link_libraries(LLVMOffloadArch LLVMObject LLVMSupport )
-
-include_directories(${CMAKE_CURRENT_BINARY_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}/amdgpu
-  ${CMAKE_CURRENT_SOURCE_DIR}/nvidia
-  ${CMAKE_CURRENT_SOURCE_DIR}/intelhd)
 
 add_subdirectory(offload-arch)
 
