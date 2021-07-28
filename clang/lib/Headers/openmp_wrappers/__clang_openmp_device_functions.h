@@ -14,11 +14,6 @@
 #error "This file is for OpenMP compilation only."
 #endif
 
-// Auto insert requires directive with option -offload_usm
-#ifdef _OPENMP_USM
-#pragma omp requires unified_shared_memory
-#endif
-
 #ifdef __NVPTX__
 #pragma omp begin declare variant match(                                       \
     device = {arch(nvptx, nvptx64)}, implementation = {extension(match_any)})

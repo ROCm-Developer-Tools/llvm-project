@@ -89,6 +89,7 @@ set(files
   nmmintrin.h
   opencl-c.h
   opencl-c-base.h
+  omp_libmextras.h
   offload_macros.h
   pkuintrin.h
   pmmintrin.h
@@ -160,6 +161,7 @@ set(openmp_wrapper_files
   openmp_wrappers/cmath
   openmp_wrappers/complex.h
   openmp_wrappers/complex
+  openmp_wrappers/__clang_openmp_offloading.h
   openmp_wrappers/__clang_openmp_device_functions.h
   openmp_wrappers/complex_cmath.h
   openmp_wrappers/new

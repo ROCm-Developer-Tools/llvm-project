@@ -13,7 +13,7 @@
 #include "rtl.h"
 #include "device.h"
 #include "private.h"
-
+#include "llvm/OffloadArch/OffloadArch.h"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -349,40 +349,16 @@ void RTLsTy::RegisterRequires(int64_t flags) {
      flags, RequiresFlags);
 }
 
-/// Query runtime capabilities of this system by calling offload-arch -c
-/// offload_arch_output_buffer is persistant storage returned by this
-/// __tgt_get_active_offload_env.
 static void
 __tgt_get_active_offload_env(__tgt_active_offload_env *active_env,
                              char *offload_arch_output_buffer,
                              size_t offload_arch_output_buffer_size) {
-  void *handle = dlopen("libomptarget.so", RTLD_NOW);
-  if (!handle)
-    DP("dlopen() failed: %s\n", dlerror());
-  char *libomptarget_dir_name = new char[PATH_MAX];
-  if (dlinfo(handle, RTLD_DI_ORIGIN, libomptarget_dir_name) == -1)
-    DP("RTLD_DI_ORIGIN failed: %s\n", dlerror());
-  std::string cmd_bin;
-  cmd_bin.assign(libomptarget_dir_name).append("/../bin/offload-arch");
-  struct stat stat_buffer;
-  if (stat(cmd_bin.c_str(), &stat_buffer)) {
-    DP("Missing offload-arch command at %s \n", cmd_bin.c_str());
-  } else {
-    // Add option to print capabilities of current system
-    cmd_bin.append(" -c");
-    FILE *stream = popen(cmd_bin.c_str(), "r");
-    while (fgets(offload_arch_output_buffer, offload_arch_output_buffer_size,
-                 stream) != NULL)
-      ;
-    pclose(stream);
-    active_env->capabilities = offload_arch_output_buffer;
-    size_t slen = strlen(active_env->capabilities);
-    offload_arch_output_buffer[slen - 1] =
-        '\0'; // terminate string before line feed
-    offload_arch_output_buffer +=
-        slen; // To store next value in offload_arch_output_buffer, not likely
-  }
-  delete[] libomptarget_dir_name;
+  // Qget runtime capabilities of this system with libLLVMOffloadArch.a
+  if (int rc = _aot_get_capabilities_for_runtime(
+          offload_arch_output_buffer, offload_arch_output_buffer_size))
+    return;
+  active_env->capabilities = offload_arch_output_buffer;
+  return;
 }
 
 std::vector<std::string> _splitstrings(char *input, const char *sep) {
@@ -545,18 +521,18 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
   if (!FoundRTL) {
     if (PM->TargetOffloadPolicy == tgt_mandatory)
       fprintf(stderr, "ERROR:\
-	Runtime capabilities do NOT meet any offload image requirements\n\
-	and the OMP_TARGET_OFFLOAD policy is mandatory.  Terminating!\n\
-	Runtime capabilities : %s\n",
+    Runtime capabilities do NOT meet any offload image requirements\n\
+          and the OMP_TARGET_OFFLOAD policy is mandatory.  Terminating!\n\
+          Runtime capabilities : %s\n",
               offload_env.capabilities);
     else if (PM->TargetOffloadPolicy == tgt_disabled)
       fprintf(stderr, "WARNING: Offloading is disabled.\n");
     else
       fprintf(
           stderr,
-          "WARNING: Runtime capabilities do NOT meet any image requirements.\n\
-	 So device offloading is now disabled.\n\
-	Runtime capabilities : %s\n",
+          "WARNING:  Runtime capabilities do NOT meet any image requirements.\n\
+          So device offloading is now disabled.\n\
+          Runtime capabilities : %s\n",
           offload_env.capabilities);
     if (PM->TargetOffloadPolicy != tgt_disabled) {
       for (int32_t i = 0; i < desc->NumDeviceImages; ++i) {

@@ -551,9 +551,6 @@ void AMDGPUOpenMPToolChain::addClangTargetOptions(
     CC1Args.push_back("-fapply-global-visibility-to-externs");
   }
 
-  if (DriverArgs.hasArg(options::OPT_offload_usm))
-    CC1Args.push_back("-D_OPENMP_USM");
-
   if (DriverArgs.hasArg(options::OPT_nogpulib))
     return;
   ArgStringList LibraryPaths;

@@ -14,7 +14,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "../OffloadArch.h"
+#include "llvm/OffloadArch/OffloadArch.h"
 
 // So offload-arch can be built without hsa installed a copy of hsa.h
 // is stored with the tool in the vendor specific directory.  This combined
@@ -160,13 +160,13 @@ void *_aot_dynload_hsa_runtime() {
   //        <directory-of-binary>/../lib/libhsa-runtime64.so
 
   struct stat stat_buffer;
-  
+
   // First search in system library paths. Allows user to dynamically
   // load desired version of hsa runtime.
   dlhandle = dlopen("libhsa-runtime64.so", RTLD_NOW);
 
   // In case of failure, search in known absolute locations.
-  if(!dlhandle) {
+  if (!dlhandle) {
     for (auto *rt_loc : hsa_runtime_locations) {
       if (stat(rt_loc, &stat_buffer) == 0) {
         dlhandle = dlopen(rt_loc, RTLD_NOW);
@@ -217,7 +217,7 @@ std::string _aot_amdgpu_capabilities(uint16_t vid, uint16_t devid,
     return amdgpu_capabilities;
   }
   if (GPUs.size() == 0) {
-    amdgpu_capabilities.append("NOT-HSA-VISIBLE");
+    amdgpu_capabilities.append("NOT-VISIBLE");
     return amdgpu_capabilities;
   }
 

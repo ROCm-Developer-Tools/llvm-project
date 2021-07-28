@@ -1244,9 +1244,6 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-internal-isystem");
       CmdArgs.push_back(Args.MakeArgString(P));
     }
-
-    CmdArgs.push_back("-include");
-    CmdArgs.push_back("__clang_openmp_device_functions.h");
   }
 
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
@@ -6405,6 +6402,21 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-disable-llvm-passes");
   }
 
+  auto id = Input.getType();
+  bool isPreprocessedOutput =
+      (id == types::TY_PP_C || id == types::TY_PP_CXX ||
+       id == types::TY_PP_CXXModule || id == types::TY_CXXModule);
+  if ((JA.isDeviceOffloading(Action::OFK_OpenMP) ||
+       JA.isHostOffloading(Action::OFK_OpenMP)) &&
+      !isPreprocessedOutput) {
+    if (Args.hasArg(options::OPT_offload_usm))
+      CmdArgs.push_back("-D_OPENMP_USM");
+    SmallString<128> P(D.ResourceDir);
+    llvm::sys::path::append(
+        P, "include/openmp_wrappers/__clang_openmp_offloading.h");
+    CmdArgs.push_back("-include");
+    CmdArgs.push_back(Args.MakeArgString(P));
+  }
   Args.AddAllArgs(CmdArgs, options::OPT_undef);
 
   std::string AltPath = D.getInstalledDir();
