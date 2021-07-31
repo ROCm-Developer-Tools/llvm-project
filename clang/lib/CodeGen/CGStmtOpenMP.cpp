@@ -5399,6 +5399,14 @@ std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
   // x--, --x -> xrval - 1;
   // x = x binop expr; -> xrval binop expr
   // x = expr Op x; - > expr binop xrval;
+
+  // if target is amdgpu and type is double, then emit call to fast
+  // atomic add
+  if (....) {
+    // carlo todo
+  }
+
+
   auto Res = emitOMPAtomicRMW(*this, X, E, BO, AO, IsXLHSInRHSPart);
   if (!Res.first) {
     if (X.isGlobalReg()) {

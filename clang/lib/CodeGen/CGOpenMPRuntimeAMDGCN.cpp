@@ -58,3 +58,10 @@ llvm::Value *CGOpenMPRuntimeAMDGCN::getGPUNumThreads(CodeGenFunction &CGF) {
   }
   return Bld.CreateCall(F, llvm::None, "nvptx_num_threads");
 }
+
+llvm::Value *CGOpenMPRuntimeAMDGCN::getFastFPAtomic(CodeGenFunction &CGF) {
+  CGBuilderTy &Bld = CGF.Builder;
+  llvm::Function *F =
+      CGF.CGM.getIntrinsic(llvm::Intrinsic::__builtin_amdgcn_global_atomic_fadd_f64);
+  return Bld.CreateCall(F, llvm::None, "atomic_add_fp64");
+}

@@ -38,6 +38,8 @@ if(CLANG_VENDOR)
     PROPERTIES COMPILE_DEFINITIONS "CLANG_VENDOR=\"${CLANG_VENDOR} \"")
 endif()
 
+set_source_files_properties(Targets/AMDGPU.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
+
 add_clang_library(clangBasic
   Attributes.cpp
   Builtins.cpp
