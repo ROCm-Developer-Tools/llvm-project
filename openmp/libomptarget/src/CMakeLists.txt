@@ -53,9 +53,3 @@ target_link_libraries(omptarget PRIVATE
 # Install libomptarget under the lib destination folder.
 install(TARGETS omptarget LIBRARY COMPONENT omptarget
   DESTINATION "${OPENMP_INSTALL_LIBDIR}")
-
-set_source_files_properties(api.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-set_source_files_properties(interface.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-set_source_files_properties(omptarget.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-set_source_files_properties(device.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-#set_source_files_properties(rtl.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")

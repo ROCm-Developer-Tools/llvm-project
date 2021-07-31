@@ -87,17 +87,18 @@ MemSpaceLinearSmallOMP_t *coarse_grain_mem_tab = nullptr;
 #undef check // Drop definition from internal.h
 #ifdef OMPTARGET_DEBUG
 #define check(msg, status)                                                     \
-//   if (status != ATMI_STATUS_SUCCESS) {                                         \
-//     /* fprintf(stderr, "[%s:%d] %s failed.\n", __FILE__, __LINE__, #msg);*/    \
-//     DP(#msg " failed\n");                                                      \
-//     /*assert(0);*/                                                             \
-//   } else {                                                                     \
-//     /* fprintf(stderr, "[%s:%d] %s succeeded.\n", __FILE__, __LINE__, #msg);   \
-//      */                                                                        \
-//     DP(#msg " succeeded\n");                                                   \
-//   }
+  if (status != ATMI_STATUS_SUCCESS) {                                         \
+    /* fprintf(stderr, "[%s:%d] %s failed.\n", __FILE__, __LINE__, #msg);*/    \
+    DP(#msg " failed\n");                                                      \
+    /*assert(0);*/                                                             \
+  } else {                                                                     \
+    /* fprintf(stderr, "[%s:%d] %s succeeded.\n", __FILE__, __LINE__, #msg);   \
+     */                                                                        \
+    DP(#msg " succeeded\n");                                                   \
+  }
 #else
-#define check(msg, status) //   {}
+#define check(msg, status)                                                     \
+  {}
 #endif
 
 #include "elf_common.h"
