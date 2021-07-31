@@ -3303,6 +3303,7 @@ public:
   /// \param AO Atomic ordering of the generated atomic instructions.
   /// \param CommonGen Code generator for complex expressions that cannot be
   /// expressed through atomicrmw instruction.
+  /// \param Hint OpenMP atomic hint expression
   /// \returns <true, OldAtomicValue> if simple 'atomicrmw' instruction was
   /// generated, <false, RValue::get(nullptr)> otherwise.
   std::pair<bool, RValue> EmitOMPAtomicSimpleUpdateExpr(
