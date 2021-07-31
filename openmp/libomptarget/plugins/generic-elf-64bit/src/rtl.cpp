@@ -282,8 +282,18 @@ int32_t __tgt_rtl_data_retrieve(int32_t device_id, void *hst_ptr, void *tgt_ptr,
   return OFFLOAD_SUCCESS;
 }
 
-int32_t __tgt_rtl_data_delete(int32_t device_id, void *tgt_ptr) {
-  free(tgt_ptr);
+int32_t __tgt_rtl_data_delete(int32_t device_id, void *tgt_ptr, int32_t kind) {
+  switch (kind) {
+  case TARGET_ALLOC_DEVICE:
+  case TARGET_ALLOC_HOST:
+  case TARGET_ALLOC_SHARED:
+  case TARGET_ALLOC_DEFAULT:
+    free(tgt_ptr);
+    break;
+  default:
+    REPORT("Invalid target data allocation kind");
+  }
+
   return OFFLOAD_SUCCESS;
 }
 

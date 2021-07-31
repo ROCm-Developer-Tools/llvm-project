@@ -1597,8 +1597,15 @@ int32_t __tgt_rtl_data_retrieve_async(int device_id, void *hst_ptr,
   return dataRetrieve(device_id, hst_ptr, tgt_ptr, size, AsyncInfo);
 }
 
-int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr) {
+int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr, int32_t kind) {
   assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
+
+  // used in case of omp_target_alloc with unified_shared_memory requirement
+  if (kind == TARGET_ALLOC_SHARED) {
+    free(tgt_ptr);
+    return OFFLOAD_SUCCESS;
+  }
+
   atmi_status_t err;
   DP("Tgt free data (tgt:%016llx).\n", (long long unsigned)(Elf64_Addr)tgt_ptr);
   err = atmi_free(tgt_ptr);
