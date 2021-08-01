@@ -2049,7 +2049,9 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
 // \arg ptr is the base pointer of the region to be registered as coarse grain
 // \arg size is the size of the memory region to be registered as coarse grain
 int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
+  // uncomment when table size bug is fixed
   //coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
+
   // set region as coarse grain when mapping
   hsa_amd_svm_attribute_pair_t tt;
   tt.attribute = HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG;
