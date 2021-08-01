@@ -5300,23 +5300,24 @@ static std::pair<bool, RValue> emitOMPAtomicRMW(CodeGenFunction &CGF, LValue X,
                                                 RValue Update,
                                                 BinaryOperatorKind BO,
                                                 llvm::AtomicOrdering AO,
-                                                bool IsXLHSInRHSPart) {
+                                                bool IsXLHSInRHSPart, const Expr *Hint) {
   ASTContext &Context = CGF.getContext();
   // Handle fast FP atomics for AMDGPU target (call intrinsic)
   // TODO: add check for flag -munsafe-fp-atomics and hint(amd_fast_fp_atomics)
   // Also add check for target supporting this kind of intrinsic
-  if (Context.getTargetInfo().getTriple().isAMDGCN() &&
-      (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
-      CGF.CGM.getLangOpts().OpenMPIsDevice &&
-      Update.isScalar() &&
-      (Update.getScalarVal()->getType()->isDoubleTy() ||
-       Update.getScalarVal()->getType()->isFloatTy())
-      && X.isSimple()) {
-    SmallVector<llvm::Value *> FPAtomicArgs;
-    auto Ret = CGF.CGM.getOpenMPRuntime().emitFastFPAtomicCall(CGF, X, Update, BO);
-    if(Ret.first)
-      return Ret;
-  }
+  if (Hint && Hint->isIntegerConstantExpr(Context) &&
+      (Hint->getIntegerConstantExpr(Context).getValue() == 0x10))
+	if (Context.getTargetInfo().getTriple().isAMDGCN() &&
+	    (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
+	    CGF.CGM.getLangOpts().OpenMPIsDevice &&
+	    Update.isScalar() &&
+	    (Update.getScalarVal()->getType()->isDoubleTy() ||
+	     Update.getScalarVal()->getType()->isFloatTy())
+	    && X.isSimple()) {
+	  auto Ret = CGF.CGM.getOpenMPRuntime().emitFastFPAtomicCall(CGF, X, Update, BO);
+	  if(Ret.first)
+	    return Ret;
+	}
 
   // Allow atomicrmw only if 'x' and 'update' are integer values, lvalue for 'x'
   // expression is simple and atomic is allowed for the given type for the
@@ -5409,7 +5410,7 @@ static std::pair<bool, RValue> emitOMPAtomicRMW(CodeGenFunction &CGF, LValue X,
 std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
     LValue X, RValue E, BinaryOperatorKind BO, bool IsXLHSInRHSPart,
     llvm::AtomicOrdering AO, SourceLocation Loc,
-    const llvm::function_ref<RValue(RValue)> CommonGen) {
+    const llvm::function_ref<RValue(RValue)> CommonGen, const Expr *Hint) {
   // Update expressions are allowed to have the following forms:
   // x binop= expr; -> xrval + expr;
   // x++, ++x -> xrval + 1;
@@ -5438,7 +5439,7 @@ std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
   }
 #endif
   // host and non amdgcn devices    
-  auto Res = emitOMPAtomicRMW(*this, X, E, BO, AO, IsXLHSInRHSPart);
+  auto Res = emitOMPAtomicRMW(*this, X, E, BO, AO, IsXLHSInRHSPart, Hint);
   if (!Res.first) {
     if (X.isGlobalReg()) {
       // Emit an update expression: 'xrval' binop 'expr' or 'expr' binop
@@ -5455,7 +5456,7 @@ std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
 static void emitOMPAtomicUpdateExpr(CodeGenFunction &CGF,
                                     llvm::AtomicOrdering AO, const Expr *X,
                                     const Expr *E, const Expr *UE,
-                                    bool IsXLHSInRHSPart, SourceLocation Loc) {
+                                    bool IsXLHSInRHSPart, SourceLocation Loc, const Expr *Hint) {
   assert(isa<BinaryOperator>(UE->IgnoreImpCasts()) &&
          "Update expr in 'atomic update' must be a binary operator.");
   const auto *BOUE = cast<BinaryOperator>(UE->IgnoreImpCasts());
@@ -5478,7 +5479,7 @@ static void emitOMPAtomicUpdateExpr(CodeGenFunction &CGF,
     return CGF.EmitAnyExpr(UE);
   };
   (void)CGF.EmitOMPAtomicSimpleUpdateExpr(
-      XLValue, ExprRValue, BOUE->getOpcode(), IsXLHSInRHSPart, AO, Loc, Gen);
+    XLValue, ExprRValue, BOUE->getOpcode(), IsXLHSInRHSPart, AO, Loc, Gen, Hint);
   CGF.CGM.getOpenMPRuntime().checkAndEmitLastprivateConditional(CGF, X);
   // OpenMP, 2.17.7, atomic Construct
   // If the write, update, or capture clause is specified and the release,
@@ -5625,7 +5626,7 @@ static void emitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
                               llvm::AtomicOrdering AO, bool IsPostfixUpdate,
                               const Expr *X, const Expr *V, const Expr *E,
                               const Expr *UE, bool IsXLHSInRHSPart,
-                              SourceLocation Loc) {
+                              SourceLocation Loc, const Expr *Hint) {
   switch (Kind) {
   case OMPC_read:
     emitOMPAtomicReadExpr(CGF, AO, X, V, Loc);
@@ -5635,7 +5636,7 @@ static void emitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
     break;
   case OMPC_unknown:
   case OMPC_update:
-    emitOMPAtomicUpdateExpr(CGF, AO, X, E, UE, IsXLHSInRHSPart, Loc);
+    emitOMPAtomicUpdateExpr(CGF, AO, X, E, UE, IsXLHSInRHSPart, Loc, Hint);
     break;
   case OMPC_capture:
     emitOMPAtomicCaptureExpr(CGF, AO, IsPostfixUpdate, V, X, E, UE,
@@ -5769,12 +5770,16 @@ void CodeGenFunction::EmitOMPAtomicDirective(const OMPAtomicDirective &S) {
       }
     }
   }
-
+  // carlo
+  const Expr *Hint = nullptr;
+  if (const auto *HintClause = S.getSingleClause<OMPHintClause>())
+    Hint = HintClause->getHint();
+  
   LexicalScope Scope(*this, S.getSourceRange());
   EmitStopPoint(S.getAssociatedStmt());
   emitOMPAtomicExpr(*this, Kind, AO, S.isPostfixUpdate(), S.getX(), S.getV(),
                     S.getExpr(), S.getUpdateExpr(), S.isXLHSInRHSPart(),
-                    S.getBeginLoc());
+                    S.getBeginLoc(), Hint);
 }
 
 static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
