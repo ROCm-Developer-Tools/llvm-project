@@ -36,8 +36,8 @@ public:
   /// Get the maximum number of threads in a block of the GPU.
   llvm::Value *getGPUNumThreads(CodeGenFunction &CGF) override;
 
-  // Get device function for fast FP atomics
-  llvm::Function *getFastFPAtomic(CodeGenFunction &CGF);
+  std::pair<bool, RValue> emitFastFPAtomicCall(CodeGenFunction &CGF,
+    LValue X, RValue Update, BinaryOperatorKind BO);  
 };
 
 } // namespace CodeGen

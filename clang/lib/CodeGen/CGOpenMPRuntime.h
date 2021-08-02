@@ -1907,9 +1907,11 @@ public:
   /// Returns true if the variable is a local variable in untied task.
   bool isLocalVarInUntiedTask(CodeGenFunction &CGF, const VarDecl *VD) const;
 
-  /// Get Fast FP Atomic function (when available on target)
-  virtual llvm::Function *getFastFPAtomic(CodeGenFunction &CGF) { return nullptr; }
-
+  /// Used for AMDGPU architectures where certain fast FP atomics are defined as instrinsic functions
+  virtual std::pair<bool, RValue> emitFastFPAtomicCall(CodeGenFunction &CGF,
+    LValue X, RValue Update, BinaryOperatorKind BO) {
+    return std::make_pair(false, RValue::get(nullptr));
+  }
 };
 
 /// Class supports emissionof SIMD-only code.

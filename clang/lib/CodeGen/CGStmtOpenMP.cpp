@@ -5302,6 +5302,22 @@ static std::pair<bool, RValue> emitOMPAtomicRMW(CodeGenFunction &CGF, LValue X,
                                                 llvm::AtomicOrdering AO,
                                                 bool IsXLHSInRHSPart) {
   ASTContext &Context = CGF.getContext();
+  // Handle fast FP atomics for AMDGPU target (call intrinsic)
+  // TODO: add check for flag -munsafe-fp-atomics and hint(amd_fast_fp_atomics)
+  // Also add check for target supporting this kind of intrinsic
+  if (Context.getTargetInfo().getTriple().isAMDGCN() &&
+      (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
+      CGF.CGM.getLangOpts().OpenMPIsDevice &&
+      Update.isScalar() &&
+      (Update.getScalarVal()->getType()->isDoubleTy() ||
+       Update.getScalarVal()->getType()->isFloatTy())
+      && X.isSimple()) {
+    SmallVector<llvm::Value *> FPAtomicArgs;
+    auto Ret = CGF.CGM.getOpenMPRuntime().emitFastFPAtomicCall(CGF, X, Update, BO);
+    if(Ret.first)
+      return Ret;
+  }
+
   // Allow atomicrmw only if 'x' and 'update' are integer values, lvalue for 'x'
   // expression is simple and atomic is allowed for the given type for the
   // target platform.
@@ -5400,11 +5416,10 @@ std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
   // x--, --x -> xrval - 1;
   // x = x binop expr; -> xrval binop expr
   // x = expr Op x; - > expr binop xrval;
-
-  // if target is amdgpu and type is double, then emit call to fast
-  // atomic add
+#if 0 
   // missing: if -munsafe-fp-atomics
   if (getContext().getTargetInfo().getTriple().isAMDGCN() &&
+      (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
       CGM.getLangOpts().OpenMPIsDevice &&
       E.isScalar() && E.getScalarVal()->getType()->isDoubleTy() && X.isSimple()) {     
     //llvm::Function *BinF = CGM.getOpenMPRuntime().getFastFPAtomic(*this);
@@ -5412,22 +5427,16 @@ std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
     FPAtomicArgs.reserve(2);
     FPAtomicArgs.push_back(X.getPointer(*this));
     FPAtomicArgs.push_back(E.getScalarVal());
-
-    // llvm::Value *Addr = EmitScalarExpr(FPAtomicArgs);
-    // llvm::Value *Val = EmitScalarExpr(E->getArg(1));
-    // llvm::Function *F =
-    //     CGM.getIntrinsic(IID, {ArgTy, Addr->getType(), Val->getType()});
-
     
     llvm::Function *AtomicF =
       CGM.getIntrinsic(llvm::Intrinsic::amdgcn_global_atomic_fadd,
-        {DoubleTy, FPAtomicArgs[0]->getType(), FPAtomicArgs[1]->getType()});
+        {FPAtomicArgs[1]->getType(), FPAtomicArgs[0]->getType(), FPAtomicArgs[1]->getType()});
    
     auto CallInst = EmitNounwindRuntimeCall(AtomicF, FPAtomicArgs);
     //auto CallInst = Builder.CreateCall(BinF, FPAtomicArgs);
     return std::make_pair(true, RValue::get(CallInst));
   }
-
+#endif
   // host and non amdgcn devices    
   auto Res = emitOMPAtomicRMW(*this, X, E, BO, AO, IsXLHSInRHSPart);
   if (!Res.first) {
