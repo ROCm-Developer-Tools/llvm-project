@@ -841,14 +841,12 @@ int32_t __tgt_rtl_init_device(int device_id) {
   // Initialize memspace table to keep track of coarse grain memory regions
   // TODO: this is only used in USM mode, and we should push the allocation
   // of the underlying page table to when USM mode is registered with the RTL
-  // FIXME: obtain memory and page size from device driver!
   {
+    // only valid for x86_64, todo: fix for multiarch
+    uint64_t max_addressable_byte = 0x00007fffffffffff;
     uint64_t KB = 1024;
-    uint64_t MB = 1024*KB;
-    uint64_t GB = 1024*MB;
-    uint64_t mem_size = 125*GB;
     uint64_t page_size = 4*KB;
-    coarse_grain_mem_tab = new MemSpaceLinearSmallOMP_t(mem_size, page_size);
+    coarse_grain_mem_tab = new MemSpaceLinearSmallOMP_t(max_addressable_byte, page_size);
   }
 
   DP("Device %d: default limit for groupsPerDevice %d & threadsPerGroup %d\n",
@@ -2048,9 +2046,8 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
 // as coarse grain
 // \arg ptr is the base pointer of the region to be registered as coarse grain
 // \arg size is the size of the memory region to be registered as coarse grain
-int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
-  // uncomment when table size bug is fixed
-  //coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
+int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) { 
+  coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
 
   // set region as coarse grain when mapping
   hsa_amd_svm_attribute_pair_t tt;
