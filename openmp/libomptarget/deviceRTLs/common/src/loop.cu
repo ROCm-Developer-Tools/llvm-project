@@ -213,7 +213,7 @@ printf(
     ompd_set_device_thread_state(omp_state_work_parallel);
 #endif /*OMPD_SUPPORT*/
   }
-  
+
   ////////////////////////////////////////////////////////////////////////////////
   // Support for dispatch Init
 

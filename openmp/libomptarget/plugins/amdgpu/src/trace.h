@@ -182,7 +182,8 @@ void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *ptr, int32_t Kind)
 }
 #define __tgt_rtl_data_alloc(...) __tgt_rtl_data_alloc_impl(__VA_ARGS__)
 
-static int32_t __tgt_rtl_data_delete_impl(int device_id, void *tgt_ptr, int32_t kind);
+static int32_t __tgt_rtl_data_delete_impl(int device_id, void *tgt_ptr,
+                                          int32_t kind);
 int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr, int32_t kind) {
   auto t = detail::log<int32_t>(__func__, device_id, tgt_ptr, kind);
   int32_t r = __tgt_rtl_data_delete_impl(device_id, tgt_ptr, kind);
@@ -364,23 +365,27 @@ int32_t __tgt_rtl_synchronize(int32_t device_id,
 }
 #define __tgt_rtl_synchronize(...) __tgt_rtl_synchronize_impl(__VA_ARGS__)
 
-static int32_t __tgt_rtl_set_coarse_grain_mem_region_impl(void *ptr, int64_t size);
+static int32_t __tgt_rtl_set_coarse_grain_mem_region_impl(void *ptr,
+                                                          int64_t size);
 int32_t __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
   auto t = detail::log<int32_t>(__func__, ptr, size);
   int32_t r = __tgt_rtl_set_coarse_grain_mem_region_impl(ptr, size);
   t.res(r);
   return r;
 }
-#define __tgt_rtl_set_coarse_grain_mem_region(...) __tgt_rtl_set_coarse_grain_mem_region_impl(__VA_ARGS__)
+#define __tgt_rtl_set_coarse_grain_mem_region(...)                             \
+  __tgt_rtl_set_coarse_grain_mem_region_impl(__VA_ARGS__)
 
-static int32_t __tgt_rtl_query_coarse_grain_mem_region_impl(const void *ptr, int64_t size);
+static int32_t __tgt_rtl_query_coarse_grain_mem_region_impl(const void *ptr,
+                                                            int64_t size);
 int32_t __tgt_rtl_query_coarse_grain_mem_region(const void *ptr, int64_t size) {
   auto t = detail::log<int32_t>(__func__, ptr, size);
   int32_t r = __tgt_rtl_query_coarse_grain_mem_region_impl(ptr, size);
   t.res(r);
   return r;
 }
-#define __tgt_rtl_query_coarse_grain_mem_region(...) __tgt_rtl_query_coarse_grain_mem_region_impl(__VA_ARGS__)
+#define __tgt_rtl_query_coarse_grain_mem_region(...)                           \
+  __tgt_rtl_query_coarse_grain_mem_region_impl(__VA_ARGS__)
 
 #ifdef __cplusplus
 }

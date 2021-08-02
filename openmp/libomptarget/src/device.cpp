@@ -255,14 +255,14 @@ void *DeviceTy::getOrAllocTgtPtr(void *HstPtrBegin, void *HstPtrBase,
       // can optimize memory access latency by registering allocated
       // memory as coarse_grain
       if (HstPtrBegin && RTL->set_coarse_grain_mem_region &&
-	  (PM->RTLs.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY))
-	RTL->set_coarse_grain_mem_region(HstPtrBegin, Size);
+          (PM->RTLs.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY))
+        RTL->set_coarse_grain_mem_region(HstPtrBegin, Size);
 
       // even under unified_shared_memory need to check for correctness of
       // use of map clauses. device pointer is same as host ptr in this case
-      HostDataToTargetMap.emplace(HostDataToTargetTy((uintptr_t)HstPtrBase,
-        (uintptr_t)HstPtrBegin, (uintptr_t)HstPtrBegin + Size, (uintptr_t) HstPtrBegin,
-        HstPtrName));
+      HostDataToTargetMap.emplace(HostDataToTargetTy(
+          (uintptr_t)HstPtrBase, (uintptr_t)HstPtrBegin,
+          (uintptr_t)HstPtrBegin + Size, (uintptr_t)HstPtrBegin, HstPtrName));
 
       IsHostPtr = true;
       rc = HstPtrBegin;
@@ -362,8 +362,8 @@ int DeviceTy::deallocTgtPtr(void *HstPtrBegin, int64_t Size, bool ForceDelete,
       DP("Deleting tgt data " DPxMOD " of size %" PRId64 "\n",
          DPxPTR(HT.TgtPtrBegin), Size);
       if (!(PM->RTLs.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY &&
-	    !HasCloseModifier))
-	deleteData((void *)HT.TgtPtrBegin);
+            !HasCloseModifier))
+        deleteData((void *)HT.TgtPtrBegin);
       DP("Removing%s mapping with HstPtrBegin=" DPxMOD ", TgtPtrBegin=" DPxMOD
          ", Size=%" PRId64 "\n",
          (ForceDelete ? " (forced)" : ""), DPxPTR(HT.HstPtrBegin),

@@ -9,10 +9,10 @@
 // #define NDEBUG
 #include <cassert>
 
-class MemSpaceBase_  {
- public:
- MemSpaceBase_(uint64_t mem_size, uint64_t page_size) :
-  mem_size(mem_size), page_size(page_size) {
+class MemSpaceBase_ {
+public:
+  MemSpaceBase_(uint64_t mem_size, uint64_t page_size)
+      : mem_size(mem_size), page_size(page_size) {
     assert(mem_size % page_size == 0);
     num_pages = mem_size / page_size;
     log2page_size = log2l(page_size);
@@ -33,11 +33,11 @@ protected:
 };
 
 class MemSpaceLinear_t : public MemSpaceBase_ {
- public:
- MemSpaceLinear_t(uint64_t mem_size, uint64_t page_size) :
-  MemSpaceBase_(mem_size, page_size) {
+public:
+  MemSpaceLinear_t(uint64_t mem_size, uint64_t page_size)
+      : MemSpaceBase_(mem_size, page_size) {
     // init tab to zero
-    tab = (uint8_t *) calloc(num_pages, sizeof(uint8_t));
+    tab = (uint8_t *)calloc(num_pages, sizeof(uint8_t));
   }
 
   // TODO: OpenMP will not remap same or subset region, only
@@ -45,10 +45,10 @@ class MemSpaceLinear_t : public MemSpaceBase_ {
   // table if the first element in the region is already set to 1
   void insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
-    uint64_t page_end = calc_page_index(base+size-1);
+    uint64_t page_end = calc_page_index(base + size - 1);
     assert(page_start < num_pages);
     assert(page_end < num_pages);
-    for(uint64_t i = page_start; i <= page_end; i++)
+    for (uint64_t i = page_start; i <= page_end; i++)
       tab[i] = 1;
   }
 
@@ -57,20 +57,21 @@ class MemSpaceLinear_t : public MemSpaceBase_ {
   // of pages used by any allocation
   bool contains(const uintptr_t base, size_t size) const {
     uint64_t page_start = calc_page_index(base);
-    uint64_t page_end = calc_page_index(base+size-1);
+    uint64_t page_end = calc_page_index(base + size - 1);
     printf("Using 8bit/page version\n");
-    for(uint64_t i = page_start; i <= page_end; i++)
-      if(tab[i] == 0) return false;
+    for (uint64_t i = page_start; i <= page_end; i++)
+      if (tab[i] == 0)
+        return false;
     return true;
   }
 
   void dump() const {
-    for(uint64_t i = 0; i < num_pages; i++)
-      if(tab[i] != 0)
-	printf("[%lu] = %d\n", i, tab[i]);
+    for (uint64_t i = 0; i < num_pages; i++)
+      if (tab[i] != 0)
+        printf("[%lu] = %d\n", i, tab[i]);
   }
 
- private:
+private:
   // the actual table that given a page index
   // contains whether the page belongs to the tracked
   // memory space
@@ -80,14 +81,14 @@ class MemSpaceLinear_t : public MemSpaceBase_ {
 
 // Same search semantics as Linear version, but uses a bit field
 class MemSpaceLinearSmall_t : public MemSpaceBase_ {
- public:
- MemSpaceLinearSmall_t(uint64_t mem_size, uint64_t page_size) :
-  MemSpaceBase_(mem_size, page_size) {
+public:
+  MemSpaceLinearSmall_t(uint64_t mem_size, uint64_t page_size)
+      : MemSpaceBase_(mem_size, page_size) {
     log2_pages_per_block = log2l(pages_per_block);
     assert((num_pages % 2) == 0);
     uint64_t tab_size = num_pages >> log2_pages_per_block;
     // init tab to zero
-    tab = (uint64_t *) calloc(tab_size, sizeof(uint64_t));
+    tab = (uint64_t *)calloc(tab_size, sizeof(uint64_t));
   }
 
   // TODO: OpenMP will not remap same or subset region, only
@@ -95,10 +96,10 @@ class MemSpaceLinearSmall_t : public MemSpaceBase_ {
   // table if the first element in the region is already set to 1
   virtual void insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
-    uint64_t page_end = calc_page_index(base+size-1);
-    for(uint64_t i = page_start; i <= page_end; i++) {
+    uint64_t page_end = calc_page_index(base + size - 1);
+    for (uint64_t i = page_start; i <= page_end; i++) {
       uint64_t blockId = i >> log2_pages_per_block;
-      uint64_t blockOffset = i & (pages_per_block-1);
+      uint64_t blockOffset = i & (pages_per_block - 1);
       set(tab[blockId], blockOffset);
     }
   }
@@ -108,11 +109,12 @@ class MemSpaceLinearSmall_t : public MemSpaceBase_ {
   // of pages used by any allocation
   bool contains(const uintptr_t base, size_t size) const {
     uint64_t page_start = calc_page_index(base);
-    uint64_t page_end = calc_page_index(base+size-1);
-    for(uint64_t i = page_start; i <= page_end; i++) {
+    uint64_t page_end = calc_page_index(base + size - 1);
+    for (uint64_t i = page_start; i <= page_end; i++) {
       uint64_t blockId = i >> log2_pages_per_block;
-      uint64_t blockOffset = i & (pages_per_block-1);
-      if(!isSet(tab[blockId], blockOffset)) return false;
+      uint64_t blockOffset = i & (pages_per_block - 1);
+      if (!isSet(tab[blockId], blockOffset))
+        return false;
     }
     return true;
   }
@@ -126,7 +128,7 @@ class MemSpaceLinearSmall_t : public MemSpaceBase_ {
     return ((1UL << idx) == (tab_loc & (1UL << idx)));
   }
 
- protected:
+protected:
   // the actual table that given a page index
   // contains whether the page belongs to the tracked
   // memory space
@@ -144,15 +146,16 @@ class MemSpaceLinearSmall_t : public MemSpaceBase_ {
 // on remapping of memory
 class MemSpaceLinearSmallOMP_t : public MemSpaceLinearSmall_t {
 public:
- MemSpaceLinearSmallOMP_t(uint64_t mem_size, uint64_t page_size) :
-  MemSpaceLinearSmall_t(mem_size, page_size) {}
+  MemSpaceLinearSmallOMP_t(uint64_t mem_size, uint64_t page_size)
+      : MemSpaceLinearSmall_t(mem_size, page_size) {}
   void insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
-    uint64_t page_end = calc_page_index(base+size-1);
-    for(uint64_t i = page_start; i <= page_end; i++) {
+    uint64_t page_end = calc_page_index(base + size - 1);
+    for (uint64_t i = page_start; i <= page_end; i++) {
       uint64_t blockId = i >> log2_pages_per_block;
-      uint64_t blockOffset = i & (pages_per_block-1);
-      if (isSet(tab[blockId], blockOffset)) return;
+      uint64_t blockOffset = i & (pages_per_block - 1);
+      if (isSet(tab[blockId], blockOffset))
+        return;
       set(tab[blockId], blockOffset);
     }
   }
