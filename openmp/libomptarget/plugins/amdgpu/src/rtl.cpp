@@ -838,10 +838,9 @@ int32_t __tgt_rtl_init_device(int device_id) {
   }
 
   // Initialize memspace table to keep track of coarse grain memory regions
-  // TODO: this is only used in USM mode, and we should push the allocation
-  // of the underlying page table to when USM mode is registered with the RTL
-  {
-    // only valid for x86_64, todo: fix for multiarch
+  // in USM mode
+  if (DeviceInfo.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY) {
+    // only valid for x86_64, but overshot for x86_32. todo: fix
     uint64_t max_addressable_byte = 0x00007fffffffffff;
     uint64_t KB = 1024;
     uint64_t page_size = 4 * KB;
