@@ -111,13 +111,6 @@ public:
 
     // All warps that are in excess of the maximum requested, do
     // not execute the loop
-#if 0
-printf(
-          "OMP Thread %d: schedule type %d, chunk size = %lld, mytid "
-          "%d, num tids %d\n",
-          (int)gtid, (int)schedtype, (long long)chunk, (int)gtid,
-          (int)numberOfActiveOMPThreads);
-#endif
     PRINT(LD_LOOP,
           "OMP Thread %d: schedule type %d, chunk size = %lld, mytid "
           "%d, num tids %d\n",
@@ -195,14 +188,6 @@ printf(
     *plower = lb;
     *pupper = ub;
     *pstride = stride;
-#if 0
-printf(
-          "Got sched: Active %d, total %d: lb %lld, ub %lld, stride %lld, last "
-          "%d\n",
-          (int)numberOfActiveOMPThreads, (int)GetNumberOfWorkersInTeam(),
-          (long long)(*plower), (long long)(*pupper), (long long)(*pstride),
-          (int)lastiter);
-#endif
     PRINT(LD_LOOP,
           "Got sched: Active %d, total %d: lb %lld, ub %lld, stride %lld, last "
           "%d\n",
