@@ -2042,27 +2042,21 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
 // \arg ptr is the base pointer of the region to be registered as coarse grain
 // \arg size is the size of the memory region to be registered as coarse grain
 int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
-  coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
-  printf("ptr = %p, size = %zu\n", ptr, size);
+  //coarse_grain_mem_tab->insert((const uintptr_t) ptr, size);
   // set region as coarse grain when mapping
-
   hsa_amd_svm_attribute_pair_t tt;
   tt.attribute = HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG;
   tt.value = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
 
   hsa_status_t err = hsa_amd_svm_attributes_set(ptr, size, &tt, 1);
   if (err != HSA_STATUS_SUCCESS) {
-     const char* msg = 0;
-     hsa_status_string(err, &msg);
-     printf("Error on setting coarse grain mem: %s\n", msg);
-  } else
-    printf("All is good\n");
+    return OFFLOAD_FAIL;
+  }
 
-  return 0;
+  return OFFLOAD_SUCCESS;
 }
 
 // Query if [ptr, ptr+size] belongs to coarse grain memory region
 int32_t __tgt_rtl_query_coarse_grain_mem_region(const void *ptr, int64_t size) {
-  if (!coarse_grain_mem_tab) return 0;
   return coarse_grain_mem_tab->contains((const uintptr_t) ptr, size);
 }
