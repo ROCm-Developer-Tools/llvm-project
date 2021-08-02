@@ -91,9 +91,6 @@ public:
     tab = (uint64_t *)calloc(tab_size, sizeof(uint64_t));
   }
 
-  // TODO: OpenMP will not remap same or subset region, only
-  // completely separated regions. We can skip setting
-  // table if the first element in the region is already set to 1
   virtual void insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
     uint64_t page_end = calc_page_index(base + size - 1);
@@ -148,16 +145,17 @@ class MemSpaceLinearSmallOMP_t : public MemSpaceLinearSmall_t {
 public:
   MemSpaceLinearSmallOMP_t(uint64_t mem_size, uint64_t page_size)
       : MemSpaceLinearSmall_t(mem_size, page_size) {}
-  void insert(const uintptr_t base, size_t size) {
+  bool test_and_insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
     uint64_t page_end = calc_page_index(base + size - 1);
     for (uint64_t i = page_start; i <= page_end; i++) {
       uint64_t blockId = i >> log2_pages_per_block;
       uint64_t blockOffset = i & (pages_per_block - 1);
       if (isSet(tab[blockId], blockOffset))
-        return;
+        return true;
       set(tab[blockId], blockOffset);
     }
+    return false;
   }
 };
 

@@ -2046,7 +2046,11 @@ atmi_status_t atmi_memcpy_no_signal(void *dest, const void *src, size_t size,
 // \arg ptr is the base pointer of the region to be registered as coarse grain
 // \arg size is the size of the memory region to be registered as coarse grain
 int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
-  coarse_grain_mem_tab->insert((const uintptr_t)ptr, size);
+
+  // OpenMP map extensions are not allowed. If the first page is marked already as coarse grained
+  // then all other must also be alrady marked. This means they were already switched to coarse grain
+  // memory and do not need to be set again
+  if(coarse_grain_mem_tab->test_and_insert((const uintptr_t)ptr, size)) return OFFLOAD_SUCCESS;
 
   // set region as coarse grain when mapping
   hsa_amd_svm_attribute_pair_t tt;
