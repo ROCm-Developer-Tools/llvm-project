@@ -213,7 +213,7 @@ public:
 
   /// Get the maximum number of threads in a block of the GPU.
   virtual llvm::Value *getGPUNumThreads(CodeGenFunction &CGF) = 0;
-
+  
   /// Emit call to void __kmpc_push_proc_bind(ident_t *loc, kmp_int32
   /// global_tid, int proc_bind) to generate code for 'proc_bind' clause.
   virtual void emitProcBindClause(CodeGenFunction &CGF,

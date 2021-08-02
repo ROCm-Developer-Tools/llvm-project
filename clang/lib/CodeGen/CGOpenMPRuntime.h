@@ -387,7 +387,7 @@ protected:
   /// \param CriticalName Name of the critical region.
   ///
   llvm::Value *getCriticalRegionLock(StringRef CriticalName);
-
+  
 private:
 
   /// Map for SourceLocation and OpenMP runtime library debug locations.
@@ -1906,6 +1906,10 @@ public:
 
   /// Returns true if the variable is a local variable in untied task.
   bool isLocalVarInUntiedTask(CodeGenFunction &CGF, const VarDecl *VD) const;
+
+  /// Get Fast FP Atomic function (when available on target)
+  virtual llvm::Function *getFastFPAtomic(CodeGenFunction &CGF) { return nullptr; }
+
 };
 
 /// Class supports emissionof SIMD-only code.

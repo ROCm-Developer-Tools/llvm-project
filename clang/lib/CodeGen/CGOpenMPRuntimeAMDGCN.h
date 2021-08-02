@@ -37,7 +37,7 @@ public:
   llvm::Value *getGPUNumThreads(CodeGenFunction &CGF) override;
 
   // Get device function for fast FP atomics
-  llvm::Value *CGOpenMPRuntimeAMDGCN::getFastFPAtomic(CodeGenFunction &CGF);
+  llvm::Function *getFastFPAtomic(CodeGenFunction &CGF);
 };
 
 } // namespace CodeGen

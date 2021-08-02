@@ -29,6 +29,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/AtomicOrdering.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h" // remove when done debugging
 using namespace clang;
 using namespace CodeGen;
 using namespace llvm::omp;
@@ -5402,11 +5403,32 @@ std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
 
   // if target is amdgpu and type is double, then emit call to fast
   // atomic add
-  if (....) {
-    // carlo todo
+  // missing: if -munsafe-fp-atomics
+  if (getContext().getTargetInfo().getTriple().isAMDGCN() &&
+      CGM.getLangOpts().OpenMPIsDevice &&
+      E.isScalar() && E.getScalarVal()->getType()->isDoubleTy() && X.isSimple()) {     
+    //llvm::Function *BinF = CGM.getOpenMPRuntime().getFastFPAtomic(*this);
+    SmallVector<llvm::Value *> FPAtomicArgs;
+    FPAtomicArgs.reserve(2);
+    FPAtomicArgs.push_back(X.getPointer(*this));
+    FPAtomicArgs.push_back(E.getScalarVal());
+
+    // llvm::Value *Addr = EmitScalarExpr(FPAtomicArgs);
+    // llvm::Value *Val = EmitScalarExpr(E->getArg(1));
+    // llvm::Function *F =
+    //     CGM.getIntrinsic(IID, {ArgTy, Addr->getType(), Val->getType()});
+
+    
+    llvm::Function *AtomicF =
+      CGM.getIntrinsic(llvm::Intrinsic::amdgcn_global_atomic_fadd,
+        {DoubleTy, FPAtomicArgs[0]->getType(), FPAtomicArgs[1]->getType()});
+   
+    auto CallInst = EmitNounwindRuntimeCall(AtomicF, FPAtomicArgs);
+    //auto CallInst = Builder.CreateCall(BinF, FPAtomicArgs);
+    return std::make_pair(true, RValue::get(CallInst));
   }
 
-
+  // host and non amdgcn devices    
   auto Res = emitOMPAtomicRMW(*this, X, E, BO, AO, IsXLHSInRHSPart);
   if (!Res.first) {
     if (X.isGlobalReg()) {
