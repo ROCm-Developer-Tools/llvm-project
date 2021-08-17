@@ -5305,19 +5305,20 @@ static std::pair<bool, RValue> emitOMPAtomicRMW(CodeGenFunction &CGF, LValue X,
   // Handle fast FP atomics for AMDGPU target (call intrinsic)
   // TODO: add check for flag -munsafe-fp-atomics and hint(amd_fast_fp_atomics)
   // Also add check for target supporting this kind of intrinsic
-  if (Hint && Hint->isIntegerConstantExpr(Context) &&
-      (Hint->getIntegerConstantExpr(Context).getValue() == 0x10))
-	if (Context.getTargetInfo().getTriple().isAMDGCN() &&
-	    (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
-	    CGF.CGM.getLangOpts().OpenMPIsDevice &&
-	    Update.isScalar() &&
-	    (Update.getScalarVal()->getType()->isDoubleTy() ||
-	     Update.getScalarVal()->getType()->isFloatTy())
-	    && X.isSimple()) {
-	  auto Ret = CGF.CGM.getOpenMPRuntime().emitFastFPAtomicCall(CGF, X, Update, BO);
-	  if(Ret.first)
-	    return Ret;
-	}
+  if (Context.getTargetInfo().getTriple().isAMDGCN() &&
+      // add (-munsafe-fp-atomics || -mno-unsafe-fp-atomics=false) &&
+      Hint && Hint->isIntegerConstantExpr(Context) &&
+      (Hint->getIntegerConstantExpr(Context).getValue() == HintClause::OpenMPSyncHintExpr::AMD_fast_fp_atomics) &&
+      (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
+      CGF.CGM.getLangOpts().OpenMPIsDevice &&
+      Update.isScalar() &&
+      (Update.getScalarVal()->getType()->isDoubleTy() ||
+       Update.getScalarVal()->getType()->isFloatTy())
+      && X.isSimple()) {
+    auto Ret = CGF.CGM.getOpenMPRuntime().emitFastFPAtomicCall(CGF, X, Update, BO);
+    if(Ret.first)
+      return Ret;
+  }
 
   // Allow atomicrmw only if 'x' and 'update' are integer values, lvalue for 'x'
   // expression is simple and atomic is allowed for the given type for the
@@ -5770,7 +5771,6 @@ void CodeGenFunction::EmitOMPAtomicDirective(const OMPAtomicDirective &S) {
       }
     }
   }
-  // carlo
   const Expr *Hint = nullptr;
   if (const auto *HintClause = S.getSingleClause<OMPHintClause>())
     Hint = HintClause->getHint();
