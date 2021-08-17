@@ -116,6 +116,10 @@ struct RTLsTy {
 
   int64_t RequiresFlags = OMP_REQ_UNDEFINED;
 
+  // Mirror environment variable LIBOMPTARGET_NO_MAPS
+  // when active, maps are ignored by the runtime
+  bool NoMaps = false;
+
   explicit RTLsTy() = default;
 
   // Register the clauses of the requires directive.

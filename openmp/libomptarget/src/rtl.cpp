@@ -102,106 +102,110 @@ void RTLsTy::LoadRTLs() {
     }
   }
 
-  // Parse environment variable OMP_TARGET_OFFLOAD (if set)
-  PM->TargetOffloadPolicy =
-      (kmp_target_offload_kind_t)__kmpc_get_target_offload();
-  if (PM->TargetOffloadPolicy == tgt_disabled) {
-    return;
-  }
+  if (const char *NoMapsStr = getenv("LIBOMPTARGET_NO_MAPS")) {
+    if (NoMapStr)
+      NoMaps = std::stoi(NoMapsStr);
 
-  // Plugins should be loaded from same directory as libomptarget.so
-  void *handle = dlopen("libomptarget.so", RTLD_NOW);
-  if (!handle)
-    DP("dlopen() failed: %s\n", dlerror());
-  char *libomptarget_dir_name = new char[PATH_MAX];
-  if (dlinfo(handle, RTLD_DI_ORIGIN, libomptarget_dir_name) == -1)
-    DP("RTLD_DI_ORIGIN failed: %s\n", dlerror());
-  struct stat stat_buffer;
-  int platform_num = 0;
+    // Parse environment variable OMP_TARGET_OFFLOAD (if set)
+    PM->TargetOffloadPolicy =
+        (kmp_target_offload_kind_t)__kmpc_get_target_offload();
+    if (PM->TargetOffloadPolicy == tgt_disabled) {
+      return;
+    }
 
-  DP("Loading RTLs...\n");
+    // Plugins should be loaded from same directory as libomptarget.so
+    void *handle = dlopen("libomptarget.so", RTLD_NOW);
+    if (!handle)
+      DP("dlopen() failed: %s\n", dlerror());
+    char *libomptarget_dir_name = new char[PATH_MAX];
+    if (dlinfo(handle, RTLD_DI_ORIGIN, libomptarget_dir_name) == -1)
+      DP("RTLD_DI_ORIGIN failed: %s\n", dlerror());
+    struct stat stat_buffer;
+    int platform_num = 0;
 
-  // Attempt to open all the plugins and, if they exist, check if the interface
-  // is correct and if they are supporting any devices.
-  for (auto *Name : RTLNames) {
-    // Only one quick check file required to attempt to load platform plugin
-    std::string full_plugin_name;
-    bool found = false;
-    for (auto *QuickCheckName : RTLQuickCheckFiles[platform_num++]) {
-      if (QuickCheckName) {
-        if (!strcmp(QuickCheckName, "") ||
-            (stat(QuickCheckName, &stat_buffer) == 0))
-          found = true;
+    DP("Loading RTLs...\n");
+
+    // Attempt to open all the plugins and, if they exist, check if the
+    // interface is correct and if they are supporting any devices.
+    for (auto *Name : RTLNames) {
+      // Only one quick check file required to attempt to load platform plugin
+      std::string full_plugin_name;
+      bool found = false;
+      for (auto *QuickCheckName : RTLQuickCheckFiles[platform_num++]) {
+        if (QuickCheckName) {
+          if (!strcmp(QuickCheckName, "") ||
+              (stat(QuickCheckName, &stat_buffer) == 0))
+            found = true;
+        }
       }
-    }
-    if (!found) // Not finding quick check files is a faster fail than dlopen
-      continue;
-    full_plugin_name.assign(libomptarget_dir_name).append("/").append(Name);
-    DP("Loading library '%s'...\n", full_plugin_name.c_str());
-    void *dynlib_handle = dlopen(full_plugin_name.c_str(), RTLD_NOW);
+      if (!found) // Not finding quick check files is a faster fail than dlopen
+        continue;
+      full_plugin_name.assign(libomptarget_dir_name).append("/").append(Name);
+      DP("Loading library '%s'...\n", full_plugin_name.c_str());
+      void *dynlib_handle = dlopen(full_plugin_name.c_str(), RTLD_NOW);
 
-    if (!dynlib_handle) {
-      // Library does not exist or cannot be found.
-      DP("Unable to load '%s': %s!\n", full_plugin_name.c_str(), dlerror());
-      continue;
-    }
+      if (!dynlib_handle) {
+        // Library does not exist or cannot be found.
+        DP("Unable to load '%s': %s!\n", full_plugin_name.c_str(), dlerror());
+        continue;
+      }
 
-    DP("Successfully loaded library '%s'!\n", full_plugin_name.c_str());
+      DP("Successfully loaded library '%s'!\n", full_plugin_name.c_str());
 
-    AllRTLs.emplace_back();
+      AllRTLs.emplace_back();
 
-    // Retrieve the RTL information from the runtime library.
-    RTLInfoTy &R = AllRTLs.back();
+      // Retrieve the RTL information from the runtime library.
+      RTLInfoTy &R = AllRTLs.back();
 
-    bool ValidPlugin = true;
+      bool ValidPlugin = true;
 
-    if (!(*((void **)&R.is_valid_binary) =
-              dlsym(dynlib_handle, "__tgt_rtl_is_valid_binary")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.number_of_devices) =
-              dlsym(dynlib_handle, "__tgt_rtl_number_of_devices")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.init_device) =
-              dlsym(dynlib_handle, "__tgt_rtl_init_device")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.load_binary) =
-              dlsym(dynlib_handle, "__tgt_rtl_load_binary")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.data_alloc) =
-              dlsym(dynlib_handle, "__tgt_rtl_data_alloc")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.data_submit) =
-              dlsym(dynlib_handle, "__tgt_rtl_data_submit")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.data_retrieve) =
-              dlsym(dynlib_handle, "__tgt_rtl_data_retrieve")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.data_delete) =
-              dlsym(dynlib_handle, "__tgt_rtl_data_delete")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.run_region) =
-              dlsym(dynlib_handle, "__tgt_rtl_run_target_region")))
-      ValidPlugin = false;
-    if (!(*((void **)&R.run_team_region) =
-              dlsym(dynlib_handle, "__tgt_rtl_run_target_team_region")))
-      ValidPlugin = false;
+      if (!(*((void **)&R.is_valid_binary) =
+                dlsym(dynlib_handle, "__tgt_rtl_is_valid_binary")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.number_of_devices) =
+                dlsym(dynlib_handle, "__tgt_rtl_number_of_devices")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.init_device) =
+                dlsym(dynlib_handle, "__tgt_rtl_init_device")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.load_binary) =
+                dlsym(dynlib_handle, "__tgt_rtl_load_binary")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.data_alloc) =
+                dlsym(dynlib_handle, "__tgt_rtl_data_alloc")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.data_submit) =
+                dlsym(dynlib_handle, "__tgt_rtl_data_submit")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.data_retrieve) =
+                dlsym(dynlib_handle, "__tgt_rtl_data_retrieve")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.data_delete) =
+                dlsym(dynlib_handle, "__tgt_rtl_data_delete")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.run_region) =
+                dlsym(dynlib_handle, "__tgt_rtl_run_target_region")))
+        ValidPlugin = false;
+      if (!(*((void **)&R.run_team_region) =
+                dlsym(dynlib_handle, "__tgt_rtl_run_target_team_region")))
+        ValidPlugin = false;
 
-    // Invalid plugin
-    if (!ValidPlugin) {
-      DP("Invalid plugin as necessary interface is not found.\n");
-      AllRTLs.pop_back();
-      continue;
-    }
+      // Invalid plugin
+      if (!ValidPlugin) {
+        DP("Invalid plugin as necessary interface is not found.\n");
+        AllRTLs.pop_back();
+        continue;
+      }
 
-    // No devices are supported by this RTL?
-    if (!(R.NumberOfDevices = R.number_of_devices())) {
-      // The RTL is invalid! Will pop the object from the RTLs list.
-      DP("No devices supported in this RTL\n");
-      AllRTLs.pop_back();
-      continue;
-    }
+      // No devices are supported by this RTL?
+      if (!(R.NumberOfDevices = R.number_of_devices())) {
+        // The RTL is invalid! Will pop the object from the RTLs list.
+        DP("No devices supported in this RTL\n");
+        AllRTLs.pop_back();
+        continue;
+      }
 
-    R.LibraryHandler = dynlib_handle;
+      R.LibraryHandler = dynlib_handle;
 
 #ifdef OMPTARGET_DEBUG
     R.RTLName = Name;
@@ -243,7 +247,7 @@ void RTLsTy::LoadRTLs() {
   DP("RTLs loaded!\n");
 
   return;
-}
+  }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Functionality for registering libs
