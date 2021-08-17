@@ -37,7 +37,7 @@ public:
   llvm::Value *getGPUNumThreads(CodeGenFunction &CGF) override;
 
   std::pair<bool, RValue> emitFastFPAtomicCall(CodeGenFunction &CGF,
-    LValue X, RValue Update, BinaryOperatorKind BO);  
+    LValue X, RValue Update, BinaryOperatorKind BO);
 };
 
 } // namespace CodeGen

@@ -26,10 +26,6 @@ set(LLVM_LINK_COMPONENTS
   TransformUtils
   )
 
-set_source_files_properties(CGStmtOpenMP.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-set_source_files_properties(CGSOpenMPRuntime.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-set_source_files_properties(CGSOpenMPRuntimeGPU.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-
 add_clang_library(clangCodeGen
   BackendUtil.cpp
   CGAtomic.cpp

@@ -387,7 +387,7 @@ protected:
   /// \param CriticalName Name of the critical region.
   ///
   llvm::Value *getCriticalRegionLock(StringRef CriticalName);
-  
+
 private:
 
   /// Map for SourceLocation and OpenMP runtime library debug locations.

@@ -78,11 +78,11 @@ std::pair<bool, RValue> CGOpenMPRuntimeAMDGCN::emitFastFPAtomicCall(CodeGenFunct
   SmallVector<llvm::Value *> FPAtomicArgs;
   FPAtomicArgs.reserve(2);
   FPAtomicArgs.push_back(X.getPointer(CGF));
-  FPAtomicArgs.push_back(UpdateFixed.getScalarVal());    
-  
+  FPAtomicArgs.push_back(UpdateFixed.getScalarVal());
+
   llvm::Function *AtomicF = CGM.getIntrinsic(IID,
-    {FPAtomicArgs[1]->getType(), FPAtomicArgs[0]->getType(), FPAtomicArgs[1]->getType()});  
-  auto CallInst = CGF.EmitNounwindRuntimeCall(AtomicF, FPAtomicArgs);  
+    {FPAtomicArgs[1]->getType(), FPAtomicArgs[0]->getType(), FPAtomicArgs[1]->getType()});
+  auto CallInst = CGF.EmitNounwindRuntimeCall(AtomicF, FPAtomicArgs);
 
   return std::make_pair(true, RValue::get(CallInst));
 }

@@ -11,8 +11,6 @@ if(WIN32)
   set(system_libs version)
 endif()
 
-set_source_files_properties(ToolChains/Clang.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-
 add_clang_library(clangDriver
   Action.cpp
   Compilation.cpp

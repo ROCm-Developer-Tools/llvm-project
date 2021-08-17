@@ -84,5 +84,3 @@ target_link_libraries(
 
 # Report to the parent scope that we are building a plugin for amdgpu
 set(LIBOMPTARGET_SYSTEM_TARGETS "${LIBOMPTARGET_SYSTEM_TARGETS} amdgcn-amd-amdhsa" PARENT_SCOPE)
-
-set_source_files_properties(src/rtl.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")

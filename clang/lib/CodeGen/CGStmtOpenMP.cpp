@@ -29,7 +29,6 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/AtomicOrdering.h"
-#include "llvm/IR/IntrinsicsAMDGPU.h" // remove when done debugging
 using namespace clang;
 using namespace CodeGen;
 using namespace llvm::omp;
@@ -5418,28 +5417,6 @@ std::pair<bool, RValue> CodeGenFunction::EmitOMPAtomicSimpleUpdateExpr(
   // x--, --x -> xrval - 1;
   // x = x binop expr; -> xrval binop expr
   // x = expr Op x; - > expr binop xrval;
-#if 0 
-  // missing: if -munsafe-fp-atomics
-  if (getContext().getTargetInfo().getTriple().isAMDGCN() &&
-      (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
-      CGM.getLangOpts().OpenMPIsDevice &&
-      E.isScalar() && E.getScalarVal()->getType()->isDoubleTy() && X.isSimple()) {     
-    //llvm::Function *BinF = CGM.getOpenMPRuntime().getFastFPAtomic(*this);
-    SmallVector<llvm::Value *> FPAtomicArgs;
-    FPAtomicArgs.reserve(2);
-    FPAtomicArgs.push_back(X.getPointer(*this));
-    FPAtomicArgs.push_back(E.getScalarVal());
-    
-    llvm::Function *AtomicF =
-      CGM.getIntrinsic(llvm::Intrinsic::amdgcn_global_atomic_fadd,
-        {FPAtomicArgs[1]->getType(), FPAtomicArgs[0]->getType(), FPAtomicArgs[1]->getType()});
-   
-    auto CallInst = EmitNounwindRuntimeCall(AtomicF, FPAtomicArgs);
-    //auto CallInst = Builder.CreateCall(BinF, FPAtomicArgs);
-    return std::make_pair(true, RValue::get(CallInst));
-  }
-#endif
-  // host and non amdgcn devices    
   auto Res = emitOMPAtomicRMW(*this, X, E, BO, AO, IsXLHSInRHSPart, Hint);
   if (!Res.first) {
     if (X.isGlobalReg()) {
@@ -5774,7 +5751,7 @@ void CodeGenFunction::EmitOMPAtomicDirective(const OMPAtomicDirective &S) {
   const Expr *Hint = nullptr;
   if (const auto *HintClause = S.getSingleClause<OMPHintClause>())
     Hint = HintClause->getHint();
-  
+
   LexicalScope Scope(*this, S.getSourceRange());
   EmitStopPoint(S.getAssociatedStmt());
   emitOMPAtomicExpr(*this, Kind, AO, S.isPostfixUpdate(), S.getX(), S.getV(),
