@@ -102,8 +102,8 @@ void RTLsTy::LoadRTLs() {
     }
   }
 
-  if (const char *NoMapsStr = getenv("LIBOMPTARGET_NO_MAPS")) {
-    if (NoMapStr)
+  if (const char *NoMapsStr = getenv("LIBOMPTARGET_NO_MAPS"))
+    if (NoMapsStr)
       NoMaps = std::stoi(NoMapsStr);
 
     // Parse environment variable OMP_TARGET_OFFLOAD (if set)
