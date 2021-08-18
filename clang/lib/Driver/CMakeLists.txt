@@ -12,6 +12,7 @@ if(WIN32)
 endif()
 
 set_source_files_properties(ToolChains/Clang.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
+set_source_files_properties(Driver.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
 
 add_clang_library(clangDriver
   Action.cpp
