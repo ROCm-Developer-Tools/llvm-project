@@ -6512,9 +6512,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // TODO: remove, only applied to amdgpu
-  //    if (Args.hasFlag(options::OPT_munsafe_fp_atomics,
-  //                     options::OPT_mno_unsafe_fp_atomics, /*Default=*/false))
-  CmdArgs.push_back("-munsafe-fp-atomics");
+  if (Args.hasFlag(options::OPT_munsafe_fp_atomics,
+		   options::OPT_mno_unsafe_fp_atomics, /*Default=*/false))
+    CmdArgs.push_back("-munsafe-fp-atomics");
 
   if (Triple.isAMDGPU()) {
     handleAMDGPUCodeObjectVersionOptions(D, Args, CmdArgs);

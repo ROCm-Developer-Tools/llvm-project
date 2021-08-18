@@ -67,6 +67,7 @@ std::pair<bool, RValue> CGOpenMPRuntimeAMDGCN::emitFastFPAtomicCall(CodeGenFunct
   switch (BO) {
   case BO_Sub:
     UpdateFixed = RValue::get(Bld.CreateFNeg(Update.getScalarVal()));
+    [[fallthrough]];
   case BO_Add:
     IID = llvm::Intrinsic::amdgcn_global_atomic_fadd;
     break;
