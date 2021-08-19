@@ -5301,13 +5301,27 @@ static std::pair<bool, RValue> emitOMPAtomicRMW(CodeGenFunction &CGF, LValue X,
                                                 llvm::AtomicOrdering AO,
                                                 bool IsXLHSInRHSPart, const Expr *Hint) {
   ASTContext &Context = CGF.getContext();
+
   // Handle fast FP atomics for AMDGPU target (call intrinsic)
-  // TODO: add check for flag -munsafe-fp-atomics and hint(amd_fast_fp_atomics)
-  // Also add check for target supporting this kind of intrinsic
+  // Flag\Hint|  None | Fast | Safe |
+  //----------------------------------
+  //           |       |      |      |
+  //   Fast    | Fast  | Fast | Safe |
+  // (unsafe)  |       |      |      |
+  //----------------------------------
+  //           |       |      |      |
+  //   Safe    | Safe  | Fast | Safe |
+  //(no-unsafe)|       |      |      |
+  //----------------------------------
+  bool userRequestsAMDGPUFastFPAtomics =
+    (Hint && Hint->getIntegerConstantExpr(Context).getValue() == HintClause::OpenMPSyncHintExpr::AMD_fast_fp_atomics) ? true :
+    (Hint && Hint->getIntegerConstantExpr(Context).getValue() == HintClause::OpenMPSyncHintExpr::AMD_safe_fp_atomics) ? false :
+    Context.getTargetInfo().allowAMDGPUUnsafeFPAtomics();
+
+  // TODO: raise user warning if user selected fast FP atomics but target arch does not support it
+
   if (Context.getTargetInfo().getTriple().isAMDGCN() &&
-      // add (-munsafe-fp-atomics || -mno-unsafe-fp-atomics=false) &&
-      Hint && Hint->isIntegerConstantExpr(Context) &&
-      (Hint->getIntegerConstantExpr(Context).getValue() == HintClause::OpenMPSyncHintExpr::AMD_fast_fp_atomics) &&
+      userRequestsAMDGPUFastFPAtomics &&
       (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&
       CGF.CGM.getLangOpts().OpenMPIsDevice &&
       Update.isScalar() &&

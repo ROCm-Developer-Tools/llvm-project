@@ -26,8 +26,6 @@ set(LLVM_LINK_COMPONENTS
   TransformUtils
   )
 
-set_source_files_properties(TargetInfo.cpp PROPERTIES COMPILE_FLAGS "-O0 -g")
-
 add_clang_library(clangCodeGen
   BackendUtil.cpp
   CGAtomic.cpp
