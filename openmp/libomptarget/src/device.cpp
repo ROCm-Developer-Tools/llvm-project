@@ -255,8 +255,7 @@ void *DeviceTy::getOrAllocTgtPtr(void *HstPtrBegin, void *HstPtrBase,
 	// When allocating under unified_shared_memory, amdgpu plugin
 	// can optimize memory access latency by registering allocated
 	// memory as coarse_grain
-	if (HstPtrBegin && RTL->set_coarse_grain_mem_region &&
-	    (PM->RTLs.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY))
+	if (HstPtrBegin && RTL->set_coarse_grain_mem_region)
 	  RTL->set_coarse_grain_mem_region(HstPtrBegin, Size);
 
 	// even under unified_shared_memory need to check for correctness of
