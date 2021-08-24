@@ -5319,7 +5319,7 @@ static std::pair<bool, RValue> emitOMPAtomicRMW(CodeGenFunction &CGF, LValue X,
     Context.getTargetInfo().allowAMDGPUUnsafeFPAtomics();
 
   // TODO: raise user warning if user selected fast FP atomics but target arch does not support it
-
+  // TODO: handle x++ and similar
   if (Context.getTargetInfo().getTriple().isAMDGCN() &&
       userRequestsAMDGPUFastFPAtomics &&
       (BO == BO_Add || BO == BO_LT || BO == BO_GT) &&

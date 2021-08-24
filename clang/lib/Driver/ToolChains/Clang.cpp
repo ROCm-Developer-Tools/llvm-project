@@ -6511,9 +6511,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
-  // TODO: remove when visible in OpenMP
-  CmdArgs.push_back("-munsafe-fp-atomics");
-
   if (Triple.isAMDGPU()) {
     handleAMDGPUCodeObjectVersionOptions(D, Args, CmdArgs);
 
