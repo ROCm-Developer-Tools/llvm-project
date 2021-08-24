@@ -109,6 +109,10 @@ void RTLsTy::LoadRTLs() {
     return;
   }
 
+  if (const char *NoMapsStr = getenv("OMPX_DISABLE_MAPS"))
+    if (NoMapsStr)
+      NoMaps = std::stoi(NoMapsStr);
+
   // Plugins should be loaded from same directory as libomptarget.so
   void *handle = dlopen("libomptarget.so", RTLD_NOW);
   if (!handle)
