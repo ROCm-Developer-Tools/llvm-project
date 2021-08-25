@@ -47,13 +47,13 @@ public:
     tab = (uint64_t *)calloc(tab_size, sizeof(uint64_t));
   }
 
-  // Test if any of the bit field is set and if not, set all
-  // page bit fields (based on OpenMP assumption where maps cannot
-  // be extended)
+  // Test if any of the pages containing [base, base+size-1] is set 
+  // and if not, set all page bit fields (based on OpenMP assumption
+  //  where maps cannot be extended)
   // \arg base : pointer to first byte of the memory area whose
   // type should become of the tracked type
   // \arg size : size in bytes of the memory area whose type
-  // should becom of the tracked type
+  // should become of the tracked type
   // \ret if any of the pages was already set
   inline bool test_and_insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
@@ -74,9 +74,14 @@ public:
     return false;
   }
 
-  // worst case complexity: O(n) with n = total number of pages
-  // avg case complexity: O(num_pages) with num_pages = average number
-  // of pages used by any allocation
+  // Test if any of the pages containing all locations
+  // pointed to by [base, base+size-1] are of the tracked
+  //  memory type
+  // \arg base : pointer to first byte of the memory area whose
+  // type should become of the tracked type
+  // \arg size : number of bytes of the memory area whose type
+  // should become of the tracked type
+  // \ret true if any of the pages was set; false otherwise
   bool contains(const uintptr_t base, size_t size) const {
     uint64_t page_start = calc_page_index(base);
     uint64_t page_end = calc_page_index(base + size - 1);
