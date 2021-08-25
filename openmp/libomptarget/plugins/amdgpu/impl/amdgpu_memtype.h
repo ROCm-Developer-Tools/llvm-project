@@ -47,7 +47,7 @@ public:
     tab = (uint64_t *)calloc(tab_size, sizeof(uint64_t));
   }
 
-  // Test if any of the pages containing [base, base+size-1] is set 
+  // Test if any of the pages containing [base, base+size-1] is set
   // and if not, set all page bit fields (based on OpenMP assumption
   //  where maps cannot be extended)
   // \arg base : pointer to first byte of the memory area whose
