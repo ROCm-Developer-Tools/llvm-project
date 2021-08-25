@@ -950,6 +950,9 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
           // FIXME: Need to check if xnack+ is already there
           //        or if xnack- is there, then fatal error.
           TargetID.append(":xnack+");
+        if (TT.isAMDGCN() &&
+            C.getInputArgs().hasArg(options::OPT_no_offload_usm))
+          TargetID.append(":xnack-");
 
         std::string NormalizedName;
         if (TT.hasEnvironment())
