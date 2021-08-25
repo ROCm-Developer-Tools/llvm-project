@@ -1,0 +1,112 @@
+#ifndef __AMDGPU_MEMSPACE__H
+#define __AMDGPU_MEMSPACE__H
+
+#include <cstdint>
+#include <map>
+#include <math.h>
+
+// uncomment to disable assert()
+// #define NDEBUG
+#include <cassert>
+
+// Virtual memory configuration on Linux x86_64
+// for AMDGPU based systems
+namespace AMDGPU_X86_64_SystemConfiguration {
+  const uint64_t max_addressable_byte = 0x00007fffffffffff;
+  // 4KB
+  const uint64_t page_size = 4 * 1024;
+}
+
+// Bit field table to track single memory page type
+class AMDGPUMemTypeBitFieldTable {
+ private:
+  // set \arg idx bit to 1
+  inline void set(uint64_t &tab_loc, const uint64_t idx) {
+    tab_loc |= 1UL << idx;
+  }
+
+  // test if \arg idx bit is set to 1
+  inline bool isSet(const uint64_t tab_loc, const uint64_t idx) const {
+    return ((1UL << idx) == (tab_loc & (1UL << idx)));
+  }
+  
+  // return table index for page pointed to by \arg ptr
+  inline uint64_t calc_page_index(uintptr_t ptr) const {
+    return ptr >> log2page_size;
+  }
+  
+ public:
+  AMDGPUMemTypeBitFieldTable(uint64_t mem_size, uint64_t page_size) {
+    assert(mem_size % page_size == 0);
+    num_pages = mem_size / page_size;
+    log2page_size = log2l(page_size);
+    
+    log2_pages_per_block = log2l(pages_per_block);
+    assert((num_pages % 2) == 0);
+    uint64_t tab_size = num_pages >> log2_pages_per_block;
+    tab = (uint64_t *)calloc(tab_size, sizeof(uint64_t));
+  }
+  
+  // Test if any of the bit field is set and if not, set all
+  // page bit fields (based on OpenMP assumption where maps cannot
+  // be extended)
+  // \arg base : pointer to first byte of the memory area whose
+  // type should become of the tracked type
+  // \arg size : size in bytes of the memory area whose type
+  // should becom of the tracked type
+  // \ret if any of the pages was already set
+  inline bool test_and_insert(const uintptr_t base, size_t size) {
+    uint64_t page_start = calc_page_index(base);
+    uint64_t page_end = calc_page_index(base + size - 1);
+
+    // if the first page is set, then all of them are
+    uint64_t blockId = page_start >> log2_pages_per_block;
+    uint64_t blockOffset = page_start & (pages_per_block - 1);
+    if (isSet(tab[blockId], blockOffset))
+      return true;
+
+    // if the first page is not set, then none of them is
+    for (uint64_t i = page_start+1; i <= page_end; i++) {
+      blockId = i >> log2_pages_per_block;
+      blockOffset = i & (pages_per_block - 1);
+      set(tab[blockId], blockOffset);
+    }
+    return false;
+  }
+
+  // worst case complexity: O(n) with n = total number of pages
+  // avg case complexity: O(num_pages) with num_pages = average number
+  // of pages used by any allocation
+  bool contains(const uintptr_t base, size_t size) const {
+    uint64_t page_start = calc_page_index(base);
+    uint64_t page_end = calc_page_index(base + size - 1);
+    for (uint64_t i = page_start; i <= page_end; i++) {
+      uint64_t blockId = i >> log2_pages_per_block;
+      uint64_t blockOffset = i & (pages_per_block - 1);
+      if (!isSet(tab[blockId], blockOffset))
+        return false;
+    }
+    return true;
+  }
+
+private:
+  uint64_t num_pages;
+
+  // leading zero's for page size
+  // used to calculate index in table
+  uint64_t log2page_size;
+
+  // number of pages tracked in a single table entry
+  // (uint64_t: one bit per page)
+  const int pages_per_block = 64;
+  int log2_pages_per_block;
+
+  // the actual table that given a page index
+  // contains whether the page belongs to the tracked
+  // memory type. For any bit:
+  // 0 = page is *not* of tracked type
+  // 1 = page is of tracked type
+  uint64_t *tab;
+};
+
+#endif // __AMDGPU_MEMSPACE__H

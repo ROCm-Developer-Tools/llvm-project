@@ -37,10 +37,11 @@
 
 #include "Debug.h"
 #include "get_elf_mach_gfx_name.h"
-#include "memspace.h"
 #include "omptargetplugin.h"
 #include "print_tracing.h"
 #include "trace.h"
+#include "amdgpu_memtype.h"
+
 
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
 
@@ -82,7 +83,8 @@ int print_kernel_trace;
 uint32_t TgtStackItemSize = 0;
 
 // Data structure used to keep track of coarse grain memory regions
-MemSpaceLinearSmallOMP_t *coarse_grain_mem_tab = nullptr;
+//MemSpaceLinearSmallOMP_t *coarse_grain_mem_tab = nullptr;
+AMDGPUMemTypeBitFieldTable *coarse_grain_mem_tab = nullptr;
 
 #undef check // Drop definition from internal.h
 #ifdef OMPTARGET_DEBUG
@@ -841,12 +843,10 @@ int32_t __tgt_rtl_init_device(int device_id) {
   // Initialize memspace table to keep track of coarse grain memory regions
   // in USM mode
   if (DeviceInfo.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY) {
-    // only valid for x86_64, but overshot for x86_32. todo: fix
-    uint64_t max_addressable_byte = 0x00007fffffffffff;
-    uint64_t KB = 1024;
-    uint64_t page_size = 4 * KB;
+    // TODO: add framework for multiple systems supporting unified_shared_memory
     coarse_grain_mem_tab =
-        new MemSpaceLinearSmallOMP_t(max_addressable_byte, page_size);
+      new AMDGPUMemTypeBitFieldTable(AMDGPU_X86_64_SystemConfiguration::max_addressable_byte,
+        AMDGPU_X86_64_SystemConfiguration::page_size);
   }
 
   DP("Device %d: default limit for groupsPerDevice %d & threadsPerGroup %d\n",
