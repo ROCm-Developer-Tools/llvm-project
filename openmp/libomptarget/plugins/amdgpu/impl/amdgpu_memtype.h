@@ -12,14 +12,14 @@
 // Virtual memory configuration on Linux x86_64
 // for AMDGPU based systems
 namespace AMDGPU_X86_64_SystemConfiguration {
-  const uint64_t max_addressable_byte = 0x00007fffffffffff;
-  // 4KB
-  const uint64_t page_size = 4 * 1024;
-}
+const uint64_t max_addressable_byte = 0x00007fffffffffff;
+// 4KB
+const uint64_t page_size = 4 * 1024;
+} // namespace AMDGPU_X86_64_SystemConfiguration
 
 // Bit field table to track single memory page type
 class AMDGPUMemTypeBitFieldTable {
- private:
+private:
   // set \arg idx bit to 1
   inline void set(uint64_t &tab_loc, const uint64_t idx) {
     tab_loc |= 1UL << idx;
@@ -29,24 +29,24 @@ class AMDGPUMemTypeBitFieldTable {
   inline bool isSet(const uint64_t tab_loc, const uint64_t idx) const {
     return ((1UL << idx) == (tab_loc & (1UL << idx)));
   }
-  
+
   // return table index for page pointed to by \arg ptr
   inline uint64_t calc_page_index(uintptr_t ptr) const {
     return ptr >> log2page_size;
   }
-  
- public:
+
+public:
   AMDGPUMemTypeBitFieldTable(uint64_t mem_size, uint64_t page_size) {
     assert(mem_size % page_size == 0);
     num_pages = mem_size / page_size;
     log2page_size = log2l(page_size);
-    
+
     log2_pages_per_block = log2l(pages_per_block);
     assert((num_pages % 2) == 0);
     uint64_t tab_size = num_pages >> log2_pages_per_block;
     tab = (uint64_t *)calloc(tab_size, sizeof(uint64_t));
   }
-  
+
   // Test if any of the bit field is set and if not, set all
   // page bit fields (based on OpenMP assumption where maps cannot
   // be extended)
@@ -66,7 +66,7 @@ class AMDGPUMemTypeBitFieldTable {
       return true;
 
     // if the first page is not set, then none of them is
-    for (uint64_t i = page_start+1; i <= page_end; i++) {
+    for (uint64_t i = page_start + 1; i <= page_end; i++) {
       blockId = i >> log2_pages_per_block;
       blockOffset = i & (pages_per_block - 1);
       set(tab[blockId], blockOffset);
