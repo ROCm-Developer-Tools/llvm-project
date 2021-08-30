@@ -2249,6 +2249,10 @@ def offload_usm : Joined<["-"], "offload-usm">,
   HelpText<"Offload to devices that support unified shared memory. With -fopenmp"
            "this option auto-generates the directive 'omp requires unified_shared_memory'"
            "and configures the toolchain accordingly.">;
+def no_offload_usm : Joined<["-"], "no-offload-usm">,
+  Flags<[FlangOption, HelpHidden]>,
+  HelpText<"Disable support for OpenMP unified shared memory."
+           "this option configures the toolchain for default offloading.">;
 def fopenmp_relocatable_target : Flag<["-"], "fopenmp-relocatable-target">,
   Group<f_Group>, Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
 def fnoopenmp_relocatable_target : Flag<["-"], "fnoopenmp-relocatable-target">,

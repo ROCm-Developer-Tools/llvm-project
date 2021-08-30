@@ -84,7 +84,6 @@ macro(add_openmp_library libname archname dir)
     -Xopenmp-target=${triple}
     -march=${GPU}
     -nogpulib
-    -nogpuinc
     -c
     -I${CMAKE_CURRENT_SOURCE_DIR}/src
     -I${CMAKE_CURRENT_BINARY_DIR}/../../runtime/src)
