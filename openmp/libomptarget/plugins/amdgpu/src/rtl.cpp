@@ -2065,7 +2065,8 @@ int __tgt_rtl_set_coarse_grain_mem_region(void *ptr, int64_t size) {
 int32_t __tgt_rtl_query_coarse_grain_mem_region(const void *ptr, int64_t size) {
   // if the table is not yet allocated, it means we have not yet gone through
   // an OpenMP pragma or API that would provoke intialization of the RTL
-  if (!coarse_grain_mem_tab) return 0;
+  if (!coarse_grain_mem_tab)
+    return 0;
 
   return coarse_grain_mem_tab->contains((const uintptr_t)ptr, size);
 }

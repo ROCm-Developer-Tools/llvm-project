@@ -331,6 +331,7 @@ EXTERN int omp_target_disassociate_ptr(void *host_ptr, int device_num) {
 
 EXTERN int omp_is_coarse_grain_mem_region(void *ptr, size_t size) {
   DeviceTy &Device = PM->Devices[omp_get_default_device()];
-  if (!Device.RTL->query_coarse_grain_mem_region) return 0;
+  if (!Device.RTL->query_coarse_grain_mem_region)
+    return 0;
   return Device.RTL->query_coarse_grain_mem_region(ptr, size);
 }
