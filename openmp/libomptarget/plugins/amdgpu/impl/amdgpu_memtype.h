@@ -47,26 +47,18 @@ public:
     tab = (uint64_t *)calloc(tab_size, sizeof(uint64_t));
   }
 
-  // Test if any of the pages containing [base, base+size-1] is set
-  // and if not, set all page bit fields (based on OpenMP assumption
-  //  where maps cannot be extended)
+  // Set all pages touched by address in the range [base, base+size-1]
   // \arg base : pointer to first byte of the memory area whose
   // type should become of the tracked type
   // \arg size : size in bytes of the memory area whose type
   // should become of the tracked type
   // \ret if any of the pages was already set
-  inline bool test_and_insert(const uintptr_t base, size_t size) {
+  inline bool insert(const uintptr_t base, size_t size) {
     uint64_t page_start = calc_page_index(base);
     uint64_t page_end = calc_page_index(base + size - 1);
-
-    // if the first page is set, then all of them are
     uint64_t blockId = page_start >> log2_pages_per_block;
     uint64_t blockOffset = page_start & (pages_per_block - 1);
-    if (isSet(tab[blockId], blockOffset))
-      return true;
-
-    // if the first page is not set, then none of them is
-    for (uint64_t i = page_start + 1; i <= page_end; i++) {
+    for (uint64_t i = page_start; i <= page_end; i++) {
       blockId = i >> log2_pages_per_block;
       blockOffset = i & (pages_per_block - 1);
       set(tab[blockId], blockOffset);
@@ -74,9 +66,8 @@ public:
     return false;
   }
 
-  // Test if any of the pages containing all locations
-  // pointed to by [base, base+size-1] are of the tracked
-  //  memory type
+  // Test if all pages in the range [base, base+size-1]
+  // are of the tracked memory type.
   // \arg base : pointer to first byte of the memory area whose
   // type should become of the tracked type
   // \arg size : number of bytes of the memory area whose type
