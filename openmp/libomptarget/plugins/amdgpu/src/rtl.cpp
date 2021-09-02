@@ -36,11 +36,11 @@
 #include "internal.h"
 
 #include "Debug.h"
-#include "amdgpu_memtype.h"
 #include "get_elf_mach_gfx_name.h"
 #include "omptargetplugin.h"
 #include "print_tracing.h"
 #include "trace.h"
+#include "memtype.h"
 
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
 
@@ -48,6 +48,8 @@
 #define TARGET_NAME AMDHSA
 #endif
 #define DEBUG_PREFIX "Target " GETNAME(TARGET_NAME) " RTL"
+
+#include "MemoryManager.h"
 
 // hostrpc interface, FIXME: consider moving to its own include these are
 // statically linked into amdgpu/plugin if present from hostrpc_services.a,
@@ -81,7 +83,7 @@ int print_kernel_trace;
 // Size of the target call stack struture
 uint32_t TgtStackItemSize = 0;
 
-// Data structure used to keep track of coarse grain memory regions
+// Data structure to keep track of coarse grain memory pages
 AMDGPUMemTypeBitFieldTable *coarse_grain_mem_tab = nullptr;
 
 #undef check // Drop definition from internal.h
@@ -457,6 +459,69 @@ public:
     return res;
   }
 
+  /// Tracker of memory allocation types.
+  // tgt_rtl_data_free is not passed memory type (host or device)
+  // but it is saved in this data structure
+  class AMDGPUDeviceAllocatorTy : public DeviceAllocatorTy {
+    int device_id;
+    std::unordered_map<void *, TargetAllocTy> HostAllocations;
+
+  public:
+    AMDGPUDeviceAllocatorTy(int device_id) : device_id(device_id) {}
+
+    void *allocate(size_t size, void *, TargetAllocTy kind) override {
+      if (size == 0)
+        return nullptr;
+      void *ptr = nullptr;
+      switch (kind) {
+      case TARGET_ALLOC_DEFAULT:
+      case TARGET_ALLOC_DEVICE: {
+	void *devPtr;
+	atmi_status_t err = atmi_malloc(&devPtr, size, get_gpu_mem_place(device_id));
+	ptr = (err == ATMI_STATUS_SUCCESS) ? devPtr : nullptr;
+	if (!ptr)
+	  REPORT("Error allocating device memory");
+        break;
+      }
+      case TARGET_ALLOC_HOST:
+      case TARGET_ALLOC_SHARED:
+        ptr = malloc(size);
+	if (!ptr)
+	  REPORT("Error allocating host memory");
+	HostAllocations[ptr] = kind;
+        break;
+      }
+
+      return ptr;
+    }
+
+    int free(void *ptr) override {
+      TargetAllocTy kind =
+          (HostAllocations.find(ptr) == HostAllocations.end())
+              ? TARGET_ALLOC_DEFAULT
+              : TARGET_ALLOC_HOST;
+      switch (kind) {
+      case TARGET_ALLOC_DEFAULT:
+      case TARGET_ALLOC_DEVICE: {
+	atmi_status_t err = atmi_free(ptr);
+	if (err != ATMI_STATUS_SUCCESS) {
+	  DP("Error when freeing device memory\n");
+	  return OFFLOAD_FAIL;
+	}
+        break;
+      }
+      case TARGET_ALLOC_HOST:
+      case TARGET_ALLOC_SHARED:
+	free(ptr);
+        break;
+      }
+      return OFFLOAD_SUCCESS;
+    }
+  };
+
+  // One device allocator per device
+  std::vector<AMDGPUDeviceAllocatorTy> DeviceAllocators;
+
   RTLDeviceInfoTy() {
     // LIBOMPTARGET_KERNEL_TRACE provides a kernel launch trace to stderr
     // anytime. You do not need a debug library build.
@@ -538,6 +603,9 @@ public:
 
     // Default state.
     RequiresFlags = OMP_REQ_UNDEFINED;
+
+    for (int I = 0; I < NumberOfDevices; ++I)
+      DeviceAllocators.emplace_back(I);
   }
 
   ~RTLDeviceInfoTy() {
@@ -1528,26 +1596,15 @@ __tgt_target_table *__tgt_rtl_load_binary_locked(int32_t device_id,
 }
 
 void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *, int32_t kind) {
-  void *ptr = NULL;
+  void *ptr = nullptr;
   assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
 
-  // used in case of omp_target_alloc with unified_shared_memory requirement
-  if (kind == TARGET_ALLOC_SHARED) {
-    void *ptr = malloc(size);
+  ptr = DeviceInfo.DeviceAllocators[device_id].allocate(size, nullptr, (TargetAllocTy) kind);
+  if (kind == TARGET_ALLOC_SHARED)
     __tgt_rtl_set_coarse_grain_mem_region(ptr, size);
-    return ptr;
-  }
 
-  if (kind != TARGET_ALLOC_DEFAULT) {
-    REPORT("Invalid target data allocation kind or requested allocator not "
-           "implemented yet\n");
-    return NULL;
-  }
-
-  atmi_status_t err = atmi_malloc(&ptr, size, get_gpu_mem_place(device_id));
   DP("Tgt alloc data %ld bytes, (tgt:%016llx).\n", size,
      (long long unsigned)(Elf64_Addr)ptr);
-  ptr = (err == ATMI_STATUS_SUCCESS) ? ptr : NULL;
   return ptr;
 }
 
@@ -1593,23 +1650,9 @@ int32_t __tgt_rtl_data_retrieve_async(int device_id, void *hst_ptr,
   return dataRetrieve(device_id, hst_ptr, tgt_ptr, size, AsyncInfo);
 }
 
-int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr, int32_t kind) {
+int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr) {
   assert(device_id < DeviceInfo.NumberOfDevices && "Device ID too large");
-
-  // used in case of omp_target_alloc with unified_shared_memory requirement
-  if (kind == TARGET_ALLOC_SHARED) {
-    free(tgt_ptr);
-    return OFFLOAD_SUCCESS;
-  }
-
-  atmi_status_t err;
-  DP("Tgt free data (tgt:%016llx).\n", (long long unsigned)(Elf64_Addr)tgt_ptr);
-  err = atmi_free(tgt_ptr);
-  if (err != ATMI_STATUS_SUCCESS) {
-    DP("Error when freeing CUDA memory\n");
-    return OFFLOAD_FAIL;
-  }
-  return OFFLOAD_SUCCESS;
+  return DeviceInfo.DeviceAllocators[device_id].free(tgt_ptr);
 }
 
 // Determine launch values for kernel.

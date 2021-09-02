@@ -81,10 +81,7 @@ EXTERN void omp_target_free(void *device_ptr, int device_num) {
     return;
   }
 
-  if (PM->RTLs.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY)
-    PM->Devices[device_num].deleteData(device_ptr, TARGET_ALLOC_SHARED);
-  else
-    PM->Devices[device_num].deleteData(device_ptr, TARGET_ALLOC_DEFAULT);
+  PM->Devices[device_num].deleteData(device_ptr);
   DP("omp_target_free deallocated device ptr\n");
 }
 

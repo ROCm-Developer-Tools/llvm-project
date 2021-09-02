@@ -182,11 +182,10 @@ void *__tgt_rtl_data_alloc(int device_id, int64_t size, void *ptr, int32_t Kind)
 }
 #define __tgt_rtl_data_alloc(...) __tgt_rtl_data_alloc_impl(__VA_ARGS__)
 
-static int32_t __tgt_rtl_data_delete_impl(int device_id, void *tgt_ptr,
-                                          int32_t kind);
-int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr, int32_t kind) {
-  auto t = detail::log<int32_t>(__func__, device_id, tgt_ptr, kind);
-  int32_t r = __tgt_rtl_data_delete_impl(device_id, tgt_ptr, kind);
+static int32_t __tgt_rtl_data_delete_impl(int device_id, void *tgt_ptr);
+int32_t __tgt_rtl_data_delete(int device_id, void *tgt_ptr) {
+  auto t = detail::log<int32_t>(__func__, device_id, tgt_ptr);
+  int32_t r = __tgt_rtl_data_delete_impl(device_id, tgt_ptr);
   t.res(r);
   return r;
 }

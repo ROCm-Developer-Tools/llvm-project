@@ -1,5 +1,5 @@
-#ifndef __AMDGPU_MEMSPACE__H
-#define __AMDGPU_MEMSPACE__H
+#ifndef __MEMTYPE_H__
+#define __MEMTYPE_H__
 
 #include <cstdint>
 #include <map>
@@ -105,4 +105,4 @@ private:
   uint64_t *tab;
 };
 
-#endif // __AMDGPU_MEMSPACE__H
+#endif // __MEMTYPE_H__

@@ -198,7 +198,7 @@ struct DeviceTy {
   /// Deallocates memory which \p TgtPtrBegin points at and returns
   /// \p Kind dictates what allocator was used (host, shared, device).
   /// OFFLOAD_SUCCESS/OFFLOAD_FAIL when succeeds/fails.
-  int32_t deleteData(void *TgtPtrBegin, int32_t Kind = TARGET_ALLOC_DEFAULT);
+  int32_t deleteData(void *TgtPtrBegin);
 
   // Data transfer. When AsyncInfo is nullptr, the transfer will be
   // synchronous.
