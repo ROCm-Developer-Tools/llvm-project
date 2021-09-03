@@ -948,7 +948,7 @@ public:
 
   int dataDelete(const int DeviceId, void *TgtPtr) {
     if (UseMemoryManager)
-      return MemoryManagers[DeviceId]->alloc_free(TgtPtr);
+      return MemoryManagers[DeviceId]->free(TgtPtr);
 
     return DeviceAllocators[DeviceId].alloc_free(TgtPtr);
   }
