@@ -48,7 +48,7 @@
 #endif
 #define DEBUG_PREFIX "Target " GETNAME(TARGET_NAME) " RTL"
 
-#ifndef OMPT_SUPPORT
+#ifdef OMPT_SUPPORT
 #include <ompt_device_callbacks.h>
 #define OMPT_IF_ENABLED(stmts) if (ompt_device_callbacks.is_enabled()) { stmts }
 #else
@@ -502,11 +502,13 @@ public:
     NumThreads.resize(NumberOfDevices);
     deviceStateStore.resize(NumberOfDevices);
 
-    OMPT_IF_ENABLED
-      (
-       ompt_device_callbacks.prepare_devices(NumberOfDevices);
-      )
-
+#ifdef OMPT_SUPPORT
+    // TODO ompt_device_callbacks.enabled is not yet set since
+    // register_callbacks on the plugin instance is not yet
+    // called. Hence, unconditionally prepare devices.
+    ompt_device_callbacks.prepare_devices(NumberOfDevices);
+#endif
+       
     for (int i = 0; i < NumberOfDevices; i++) {
       uint32_t queue_size = 0;
       {
