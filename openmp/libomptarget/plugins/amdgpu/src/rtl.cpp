@@ -453,7 +453,8 @@ public:
     return res;
   }
 
-  RTLDeviceInfoTy() {
+  void Init(int64_t RequiresFlagsIn) {
+
     // LIBOMPTARGET_KERNEL_TRACE provides a kernel launch trace to stderr
     // anytime. You do not need a debug library build.
     //  0 => no tracing
@@ -463,6 +464,12 @@ public:
       print_kernel_trace = atoi(envStr);
     else
       print_kernel_trace = 0;
+
+    // Checks already performed in libomptarget
+    RequiresFlags = RequiresFlagsIn;
+    // Set HSA_XNACK to "on" before initializing ROCr
+    if (RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY)
+      setenv("HSA_XNACK", "1", 1);
 
     DP("Start initializing HSA-ATMI\n");
     atmi_status_t err = atmi_init();
@@ -531,9 +538,6 @@ public:
     Env.NumTeams = readEnvElseMinusOne("OMP_NUM_TEAMS");
     Env.MaxTeamsDefault = readEnvElseMinusOne("OMP_MAX_TEAMS_DEFAULT");
     Env.TeamThreadLimit = readEnvElseMinusOne("OMP_TEAMS_THREAD_LIMIT");
-
-    // Default state.
-    RequiresFlags = OMP_REQ_UNDEFINED;
   }
 
   ~RTLDeviceInfoTy() {
@@ -690,6 +694,11 @@ template <typename T> bool enforce_upper_bound(T *value, T upper) {
   return changed;
 }
 } // namespace
+
+int32_t __tgt_rtl_init_lib(int64_t requires_flags) {
+  DeviceInfo.Init(requires_flags);
+  return OFFLOAD_SUCCESS;
+}
 
 int32_t __tgt_rtl_init_device(int device_id) {
   hsa_status_t err;

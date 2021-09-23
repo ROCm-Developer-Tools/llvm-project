@@ -234,6 +234,14 @@ void RTLsTy::LoadRTLs() {
         dlsym(dynlib_handle, "__tgt_rtl_unregister_lib");
     *((void **)&R.supports_empty_images) =
         dlsym(dynlib_handle, "__tgt_rtl_supports_empty_images");
+
+    // If RTL has init_lib function, call it
+    // Should never be called anywhere else in libomptarget than here
+    typedef int64_t(init_lib_ty)(int64_t);
+    init_lib_ty *init_lib = nullptr;
+    if ((*((void **)&init_lib) =
+	  dlsym(dynlib_handle, "__tgt_rtl_init_lib")))
+      init_lib(RequiresFlags);
   }
   delete[] libomptarget_dir_name;
   DP("RTLs loaded!\n");

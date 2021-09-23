@@ -364,6 +364,17 @@ int32_t __tgt_rtl_synchronize(int32_t device_id,
 }
 #define __tgt_rtl_synchronize(...) __tgt_rtl_synchronize_impl(__VA_ARGS__)
 
+static int32_t __tgt_rtl_init_lib_impl(int64_t requires_flags);
+
+int32_t __tgt_rtl_init_lib(int64_t requires_flags) {
+  auto t = detail::log<int32_t>(__func__, requires_flags);
+  int32_t r = __tgt_rtl_init_lib_impl(requires_flags);
+  t.res(r);
+  return r;
+}
+#define __tgt_rtl_init_lib(...)                           \
+  __tgt_rtl_init_lib_impl(__VA_ARGS__)
+
 #ifdef __cplusplus
 }
 #endif
