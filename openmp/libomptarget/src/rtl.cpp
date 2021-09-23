@@ -239,8 +239,7 @@ void RTLsTy::LoadRTLs() {
     // Should never be called anywhere else in libomptarget than here
     typedef int64_t(init_lib_ty)(int64_t);
     init_lib_ty *init_lib = nullptr;
-    if ((*((void **)&init_lib) =
-	  dlsym(dynlib_handle, "__tgt_rtl_init_lib")))
+    if ((*((void **)&init_lib) = dlsym(dynlib_handle, "__tgt_rtl_init_lib")))
       init_lib(RequiresFlags);
   }
   delete[] libomptarget_dir_name;

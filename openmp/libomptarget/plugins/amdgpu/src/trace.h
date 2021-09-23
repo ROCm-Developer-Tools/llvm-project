@@ -372,8 +372,7 @@ int32_t __tgt_rtl_init_lib(int64_t requires_flags) {
   t.res(r);
   return r;
 }
-#define __tgt_rtl_init_lib(...)                           \
-  __tgt_rtl_init_lib_impl(__VA_ARGS__)
+#define __tgt_rtl_init_lib(...) __tgt_rtl_init_lib_impl(__VA_ARGS__)
 
 #ifdef __cplusplus
 }
