@@ -8092,7 +8092,10 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Input.isFilename() && "Invalid input.");
   CmdArgs.push_back(Input.getFilename());
 
-  const char *Exec = getToolChain().getDriver().getClangProgramPath();
+  // Get "clang" specifically, because the driver name might be set to flang-new
+  // instead, which does not support -cc1as but does also not require custom
+  // handling of this action
+  const char *Exec = Args.MakeArgString(getToolChain().GetProgramPath("clang"));
   if (D.CC1Main && !D.CCGenDiagnostics) {
     // Invoke cc1as directly in this process.
     C.addCommand(std::make_unique<CC1Command>(JA, *this,
