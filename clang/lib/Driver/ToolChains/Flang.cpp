@@ -342,6 +342,17 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
 
   assert(Input.isFilename() && "Invalid input.");
 
+  bool IsHostOffloadingAction = JA.isHostOffloading(Action::OFK_OpenMP) ||
+                                JA.isHostOffloading(C.getActiveOffloadKinds());
+  for (const InputInfo &I : Inputs) {
+    if (&I == &Input || I.getType() == types::TY_Nothing) {
+      // This is the primary input or contains nothing.
+    } else if (IsHostOffloadingAction) {
+      CmdArgs.push_back(Args.MakeArgString("-fembed-offload-object=" +
+                                           TC.getInputFilename(I)));
+    }
+  }
+
   addDashXForInput(Args, Input, CmdArgs);
 
   CmdArgs.push_back(Input.getFilename());

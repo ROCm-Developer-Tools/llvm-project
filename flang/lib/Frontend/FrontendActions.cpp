@@ -612,6 +612,12 @@ void CodeGenAction::setUpTargetMachine() {
       /*Reloc::Model=*/CGOpts.getRelocationModel(),
       /*CodeModel::Model=*/std::nullopt, OptLevel));
   assert(tm && "Failed to create TargetMachine");
+  // See line 1302 clang/lib/CodeGen/BackendUtil
+  // We need to call something like EmbedObject for OffloadObjects
+  for (llvm::StringRef OffloadObject : CGOpts.OffloadObjects) {
+    printf("----FFFFFFFFF--- Flang Needs to EmbedObject %s\n",
+           OffloadObject.str().c_str());
+  }
 }
 
 static std::unique_ptr<llvm::raw_pwrite_stream>
