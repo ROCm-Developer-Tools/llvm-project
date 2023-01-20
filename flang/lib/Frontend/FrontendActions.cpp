@@ -47,12 +47,14 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Object/OffloadBinary.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <memory>
 
 using namespace Fortran::frontend;
@@ -744,6 +746,24 @@ void CodeGenAction::runOptimizationPipeline(llvm::raw_pwrite_stream &os) {
   mpm.run(*llvmModule, mam);
 }
 
+void CodeGenAction::embedOffloadObjects() {
+  CompilerInstance &ci = this->getInstance();
+  const auto &CGOpts = ci.getInvocation().getCodeGenOpts();
+
+  for (llvm::StringRef OffloadObject : CGOpts.OffloadObjects) {
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> ObjectOrErr =
+        llvm::MemoryBuffer::getFileOrSTDIN(OffloadObject);
+    if (std::error_code EC = ObjectOrErr.getError()) {
+      auto DiagID = ci.getDiagnostics().getCustomDiagID(
+          clang::DiagnosticsEngine::Error, "could not open '%0' for embedding");
+      ci.getDiagnostics().Report(DiagID) << OffloadObject;
+    }
+    llvm::embedBufferInModule(
+        *llvmModule, **ObjectOrErr, ".llvm.offloading",
+        llvm::Align(llvm::object::OffloadBinary::getAlignment()));
+  }
+}
+
 void CodeGenAction::executeAction() {
   CompilerInstance &ci = this->getInstance();
 
@@ -791,11 +811,16 @@ void CodeGenAction::executeAction() {
     ci.getDiagnostics().Report(clang::diag::warn_fe_override_module)
         << theTriple;
   }
+
   // Always set the triple and data layout, to make sure they match and are set.
   // Note that this overwrites any datalayout stored in the LLVM-IR. This avoids
   // an assert for incompatible data layout when the code-generation happens.
   llvmModule->setTargetTriple(theTriple);
   llvmModule->setDataLayout(tm->createDataLayout());
+
+  // Embed offload objects specified with -fembed-offload-object
+  if (!ci.getInvocation().getCodeGenOpts().OffloadObjects.empty())
+    embedOffloadObjects();
 
   // Run LLVM's middle-end (i.e. the optimizer).
   runOptimizationPipeline(*os);
