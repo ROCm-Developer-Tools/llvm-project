@@ -73,12 +73,22 @@ public:
   mlir::LogicalResult
   matchAndRewrite(mlir::func::FuncOp op,
                   mlir::PatternRewriter &rewriter) const override {
+    mlir::LogicalResult ret = success();
     rewriter.startRootUpdate(op);
     auto result = fir::NameUniquer::deconstruct(op.getSymName());
-    if (fir::NameUniquer::isExternalFacingUniquedName(result))
-      op.setSymNameAttr(rewriter.getStringAttr(mangleExternalName(result)));
+    if (fir::NameUniquer::isExternalFacingUniquedName(result)) {
+      auto newSymbol = rewriter.getStringAttr(mangleExternalName(result));
+
+      // Try to update all SymbolRef's in the module that match the current op
+      if (ModuleOp mod = op->getParentOfType<ModuleOp>())
+        ret = op.replaceAllSymbolUses(newSymbol, mod);
+
+      op.setSymNameAttr(newSymbol);
+      SymbolTable::setSymbolName(op, newSymbol);
+    }
+
     rewriter.finalizeRootUpdate(op);
-    return success();
+    return ret;
   }
 };
 
