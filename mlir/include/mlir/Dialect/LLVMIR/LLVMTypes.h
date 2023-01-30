@@ -14,7 +14,6 @@
 #ifndef MLIR_DIALECT_LLVMIR_LLVMTYPES_H_
 #define MLIR_DIALECT_LLVMIR_LLVMTYPES_H_
 
-#include "mlir/IR/SubElementInterfaces.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Interfaces/DataLayoutInterfaces.h"
 #include <optional>
@@ -104,7 +103,6 @@ DEFINE_TRIVIAL_LLVM_TYPE(LLVMMetadataType);
 class LLVMStructType
     : public Type::TypeBase<LLVMStructType, Type, detail::LLVMStructTypeStorage,
                             DataLayoutTypeInterface::Trait,
-                            SubElementTypeInterface::Trait,
                             TypeTrait::IsMutable> {
 public:
   /// Inherit base constructors.
@@ -219,7 +217,7 @@ void printType(Type type, AsmPrinter &printer);
 } // namespace detail
 
 /// Parse any MLIR type or a concise syntax for LLVM types.
-ParseResult parsePrettyLLVMType(AsmParser &p, FailureOr<Type> &type);
+ParseResult parsePrettyLLVMType(AsmParser &p, Type &type);
 /// Print any MLIR type or a concise syntax for LLVM types.
 void printPrettyLLVMType(AsmPrinter &p, Type type);
 

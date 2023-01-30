@@ -576,8 +576,7 @@ bool TargetLowering::ShrinkDemandedOp(SDValue Op, unsigned BitWidth,
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   unsigned DemandedSize = Demanded.getActiveBits();
   unsigned SmallVTBits = DemandedSize;
-  if (!isPowerOf2_32(SmallVTBits))
-    SmallVTBits = NextPowerOf2(SmallVTBits);
+  SmallVTBits = llvm::bit_ceil(SmallVTBits);
   for (; SmallVTBits < BitWidth; SmallVTBits = NextPowerOf2(SmallVTBits)) {
     EVT SmallVT = EVT::getIntegerVT(*DAG.getContext(), SmallVTBits);
     if (TLI.isTruncateFree(Op.getValueType(), SmallVT) &&
@@ -1040,7 +1039,7 @@ static SDValue combineShiftToAVG(SDValue Op, SelectionDAG &DAG,
   EVT VT = Op.getValueType();
   unsigned MinWidth =
       std::max<unsigned>(VT.getScalarSizeInBits() - KnownBits, 8);
-  EVT NVT = EVT::getIntegerVT(*DAG.getContext(), PowerOf2Ceil(MinWidth));
+  EVT NVT = EVT::getIntegerVT(*DAG.getContext(), llvm::bit_ceil(MinWidth));
   if (VT.isVector())
     NVT = EVT::getVectorVT(*DAG.getContext(), NVT, VT.getVectorElementCount());
   if (!TLI.isOperationLegalOrCustom(AVGOpc, NVT))

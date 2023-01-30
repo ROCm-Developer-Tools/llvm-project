@@ -4674,6 +4674,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BImove:
   case Builtin::BImove_if_noexcept:
   case Builtin::BIforward:
+  case Builtin::BIforward_like:
   case Builtin::BIas_const:
     return RValue::get(EmitLValue(E->getArg(0)).getPointer(*this));
   case Builtin::BI__GetExceptionInfo: {
@@ -4922,7 +4923,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
       auto Info =
           CGM.getOpenCLRuntime().emitOpenCLEnqueuedBlock(*this, E->getArg(3));
       llvm::Value *Kernel =
-          Builder.CreatePointerCast(Info.Kernel, GenericVoidPtrTy);
+          Builder.CreatePointerCast(Info.KernelHandle, GenericVoidPtrTy);
       llvm::Value *Block =
           Builder.CreatePointerCast(Info.BlockArg, GenericVoidPtrTy);
 
@@ -4976,7 +4977,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
       auto Info =
           CGM.getOpenCLRuntime().emitOpenCLEnqueuedBlock(*this, E->getArg(3));
       llvm::Value *Kernel =
-          Builder.CreatePointerCast(Info.Kernel, GenericVoidPtrTy);
+          Builder.CreatePointerCast(Info.KernelHandle, GenericVoidPtrTy);
       auto *Block = Builder.CreatePointerCast(Info.BlockArg, GenericVoidPtrTy);
       llvm::Value *ElemPtr, *TmpSize, *TmpPtr;
       std::tie(ElemPtr, TmpSize, TmpPtr) = CreateArrayForSizeVar(4);
@@ -5033,7 +5034,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
       auto Info =
           CGM.getOpenCLRuntime().emitOpenCLEnqueuedBlock(*this, E->getArg(6));
       llvm::Value *Kernel =
-          Builder.CreatePointerCast(Info.Kernel, GenericVoidPtrTy);
+          Builder.CreatePointerCast(Info.KernelHandle, GenericVoidPtrTy);
       llvm::Value *Block =
           Builder.CreatePointerCast(Info.BlockArg, GenericVoidPtrTy);
 
@@ -5083,7 +5084,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
         getContext().getTargetAddressSpace(LangAS::opencl_generic));
     auto Info =
         CGM.getOpenCLRuntime().emitOpenCLEnqueuedBlock(*this, E->getArg(0));
-    Value *Kernel = Builder.CreatePointerCast(Info.Kernel, GenericVoidPtrTy);
+    Value *Kernel =
+        Builder.CreatePointerCast(Info.KernelHandle, GenericVoidPtrTy);
     Value *Arg = Builder.CreatePointerCast(Info.BlockArg, GenericVoidPtrTy);
     return RValue::get(EmitRuntimeCall(
         CGM.CreateRuntimeFunction(
@@ -5097,7 +5099,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
         getContext().getTargetAddressSpace(LangAS::opencl_generic));
     auto Info =
         CGM.getOpenCLRuntime().emitOpenCLEnqueuedBlock(*this, E->getArg(0));
-    Value *Kernel = Builder.CreatePointerCast(Info.Kernel, GenericVoidPtrTy);
+    Value *Kernel =
+        Builder.CreatePointerCast(Info.KernelHandle, GenericVoidPtrTy);
     Value *Arg = Builder.CreatePointerCast(Info.BlockArg, GenericVoidPtrTy);
     return RValue::get(EmitRuntimeCall(
         CGM.CreateRuntimeFunction(
@@ -5114,7 +5117,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     llvm::Value *NDRange = NDRangeL.getAddress(*this).getPointer();
     auto Info =
         CGM.getOpenCLRuntime().emitOpenCLEnqueuedBlock(*this, E->getArg(1));
-    Value *Kernel = Builder.CreatePointerCast(Info.Kernel, GenericVoidPtrTy);
+    Value *Kernel =
+        Builder.CreatePointerCast(Info.KernelHandle, GenericVoidPtrTy);
     Value *Block = Builder.CreatePointerCast(Info.BlockArg, GenericVoidPtrTy);
     const char *Name =
         BuiltinID == Builtin::BIget_kernel_max_sub_group_size_for_ndrange
@@ -19480,10 +19484,11 @@ Value *CodeGenFunction::EmitRISCVBuiltinExpr(unsigned BuiltinID,
 
   Intrinsic::ID ID = Intrinsic::not_intrinsic;
   unsigned NF = 1;
-  constexpr unsigned TAIL_UNDISTURBED = 0;
-  constexpr unsigned TAIL_AGNOSTIC = 1;
-  constexpr unsigned TAIL_AGNOSTIC_MASK_AGNOSTIC = 3;
-  int PolicyAttrs = TAIL_UNDISTURBED;
+  // The 0th bit simulates the `vta` of RVV
+  // The 1st bit simulates the `vma` of RVV
+  constexpr unsigned RVV_VTA = 0x1;
+  constexpr unsigned RVV_VMA = 0x2;
+  int PolicyAttrs = 0;
   bool IsMasked = false;
 
   // Required for overloaded intrinsics.

@@ -191,11 +191,17 @@ def uimmlog2xlen : Operand<XLenVT>, ImmLeaf<XLenVT, [{
   let OperandNamespace = "RISCVOp";
 }
 
-def uimm2 : Operand<XLenVT> {
+def uimm2 : Operand<XLenVT>, ImmLeaf<XLenVT, [{return isUInt<2>(Imm);}]> {
   let ParserMatchClass = UImmAsmOperand<2>;
   let DecoderMethod = "decodeUImmOperand<2>";
   let OperandType = "OPERAND_UIMM2";
   let OperandNamespace = "RISCVOp";
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (!MCOp.evaluateAsConstantImm(Imm))
+      return false;
+    return isUInt<2>(Imm);
+  }];
 }
 
 def uimm3 : Operand<XLenVT> {
@@ -446,13 +452,13 @@ def AddiPairImmLarge : SDNodeXForm<imm, [{
 }]>;
 
 def TrailingZeros : SDNodeXForm<imm, [{
-  return CurDAG->getTargetConstant(countTrailingZeros(N->getZExtValue()),
+  return CurDAG->getTargetConstant(llvm::countr_zero(N->getZExtValue()),
                                    SDLoc(N), N->getValueType(0));
 }]>;
 
 def XLenSubTrailingOnes : SDNodeXForm<imm, [{
   uint64_t XLen = Subtarget->getXLen();
-  uint64_t TrailingOnes = countTrailingOnes(N->getZExtValue());
+  uint64_t TrailingOnes = llvm::countr_one(N->getZExtValue());
   return CurDAG->getTargetConstant(XLen - TrailingOnes, SDLoc(N),
                                    N->getValueType(0));
 }]>;
@@ -1853,6 +1859,7 @@ include "RISCVInstrInfoF.td"
 include "RISCVInstrInfoD.td"
 include "RISCVInstrInfoC.td"
 include "RISCVInstrInfoZb.td"
+include "RISCVInstrInfoZc.td"
 include "RISCVInstrInfoZk.td"
 include "RISCVInstrInfoV.td"
 include "RISCVInstrInfoZfh.td"

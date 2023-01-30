@@ -937,73 +937,73 @@ let OtherPredicates = [isGFX90APlus] in
 
 // Patterns for global loads with no offset.
 class FlatLoadPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (FlatOffset i64:$vaddr, i16:$offset))),
+  (vt (node (FlatOffset i64:$vaddr, i32:$offset))),
   (inst $vaddr, $offset)
 >;
 
 class FlatLoadPat_D16 <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (node (FlatOffset (i64 VReg_64:$vaddr), i16:$offset), vt:$in),
+  (node (FlatOffset (i64 VReg_64:$vaddr), i32:$offset), vt:$in),
   (inst $vaddr, $offset, 0, $in)
 >;
 
 class FlatSignedLoadPat_D16 <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (node (GlobalOffset (i64 VReg_64:$vaddr), i16:$offset), vt:$in),
+  (node (GlobalOffset (i64 VReg_64:$vaddr), i32:$offset), vt:$in),
   (inst $vaddr, $offset, 0, $in)
 >;
 
 class GlobalLoadSaddrPat_D16 <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i16:$offset), vt:$in)),
+  (vt (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i32:$offset), vt:$in)),
   (inst $saddr, $voffset, $offset, 0, $in)
 >;
 
 class FlatLoadSignedPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (GlobalOffset (i64 VReg_64:$vaddr), i16:$offset))),
+  (vt (node (GlobalOffset (i64 VReg_64:$vaddr), i32:$offset))),
   (inst $vaddr, $offset)
 >;
 
 class GlobalLoadSaddrPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i16:$offset))),
+  (vt (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i32:$offset))),
   (inst $saddr, $voffset, $offset, 0)
 >;
 
 class GlobalStoreSaddrPat <FLAT_Pseudo inst, SDPatternOperator node,
                            ValueType vt> : GCNPat <
-  (node vt:$data, (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i16:$offset)),
+  (node vt:$data, (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i32:$offset)),
   (inst $voffset, getVregSrcForVT<vt>.ret:$data, $saddr, $offset)
 >;
 
 class GlobalAtomicStoreSaddrPat <FLAT_Pseudo inst, SDPatternOperator node,
                                  ValueType vt> : GCNPat <
-  (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i16:$offset), vt:$data),
+  (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i32:$offset), vt:$data),
   (inst $voffset, getVregSrcForVT<vt>.ret:$data, $saddr, $offset)
 >;
 
 class GlobalAtomicSaddrPat <FLAT_Pseudo inst, SDPatternOperator node,
                             ValueType vt, ValueType data_vt = vt> : GCNPat <
-  (vt (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i16:$offset), data_vt:$data)),
+  (vt (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i32:$offset), data_vt:$data)),
   (inst $voffset, getVregSrcForVT<data_vt>.ret:$data, $saddr, $offset)
 >;
 
 class GlobalAtomicNoRtnSaddrPat <FLAT_Pseudo inst, SDPatternOperator node,
                                  ValueType vt> : GCNPat <
-  (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i16:$offset), vt:$data),
+  (node (GlobalSAddr (i64 SReg_64:$saddr), (i32 VGPR_32:$voffset), i32:$offset), vt:$data),
   (inst $voffset, getVregSrcForVT<vt>.ret:$data, $saddr, $offset)
 >;
 
 class FlatStorePat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (node vt:$data, (FlatOffset i64:$vaddr, i16:$offset)),
+  (node vt:$data, (FlatOffset i64:$vaddr, i32:$offset)),
   (inst $vaddr, getVregSrcForVT<vt>.ret:$data, $offset)
 >;
 
 class FlatStoreSignedPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (node vt:$data, (GlobalOffset i64:$vaddr, i16:$offset)),
+  (node vt:$data, (GlobalOffset i64:$vaddr, i32:$offset)),
   (inst $vaddr, getVregSrcForVT<vt>.ret:$data, $offset)
 >;
 
 class FlatStoreAtomicPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
   // atomic store follows atomic binop convention so the address comes
   // first.
-  (node (FlatOffset i64:$vaddr, i16:$offset), vt:$data),
+  (node (FlatOffset i64:$vaddr, i32:$offset), vt:$data),
   (inst $vaddr, getVregSrcForVT<vt>.ret:$data, $offset)
 >;
 
@@ -1011,7 +1011,7 @@ class FlatStoreSignedAtomicPat <FLAT_Pseudo inst, SDPatternOperator node,
                                 ValueType vt, ValueType data_vt = vt> : GCNPat <
   // atomic store follows atomic binop convention so the address comes
   // first.
-  (node (GlobalOffset i64:$vaddr, i16:$offset), data_vt:$data),
+  (node (GlobalOffset i64:$vaddr, i32:$offset), data_vt:$data),
   (inst $vaddr, getVregSrcForVT<data_vt>.ret:$data, $offset)
 >;
 
@@ -1020,17 +1020,17 @@ multiclass FlatAtomicPat <string inst, string node, ValueType vt,
   defvar rtnNode = !cast<PatFrags>(node#"_"#vt.Size);
   defvar noRtnNode = !cast<PatFrags>(node#"_noret_"#vt.Size);
 
-  def : GCNPat <(vt (rtnNode (FlatOffset i64:$vaddr, i16:$offset), data_vt:$data)),
+  def : GCNPat <(vt (rtnNode (FlatOffset i64:$vaddr, i32:$offset), data_vt:$data)),
     (!cast<FLAT_Pseudo>(inst#"_RTN") VReg_64:$vaddr, getVregSrcForVT<data_vt>.ret:$data, $offset)>;
 
   let AddedComplexity = 1 in
-  def : GCNPat <(vt (noRtnNode (FlatOffset i64:$vaddr, i16:$offset), data_vt:$data)),
+  def : GCNPat <(vt (noRtnNode (FlatOffset i64:$vaddr, i32:$offset), data_vt:$data)),
     (!cast<FLAT_Pseudo>(inst) VReg_64:$vaddr, getVregSrcForVT<data_vt>.ret:$data, $offset)>;
 }
 
 class FlatSignedAtomicPatBase <FLAT_Pseudo inst, SDPatternOperator node,
                                ValueType vt, ValueType data_vt = vt> : GCNPat <
-  (vt (node (GlobalOffset i64:$vaddr, i16:$offset), data_vt:$data)),
+  (vt (node (GlobalOffset i64:$vaddr, i32:$offset), data_vt:$data)),
   (inst VReg_64:$vaddr, getVregSrcForVT<data_vt>.ret:$data, $offset)
 >;
 
@@ -1063,49 +1063,49 @@ multiclass FlatSignedAtomicPatWithAddrSpace<string inst, string intr, string add
 }
 
 class ScratchLoadSignedPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (ScratchOffset (i32 VGPR_32:$vaddr), i16:$offset))),
+  (vt (node (ScratchOffset (i32 VGPR_32:$vaddr), i32:$offset))),
   (inst $vaddr, $offset)
 >;
 
 class ScratchLoadSignedPat_D16 <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (node (ScratchOffset (i32 VGPR_32:$vaddr), i16:$offset), vt:$in),
+  (node (ScratchOffset (i32 VGPR_32:$vaddr), i32:$offset), vt:$in),
   (inst $vaddr, $offset, 0, $in)
 >;
 
 class ScratchStoreSignedPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (node vt:$data, (ScratchOffset (i32 VGPR_32:$vaddr), i16:$offset)),
+  (node vt:$data, (ScratchOffset (i32 VGPR_32:$vaddr), i32:$offset)),
   (inst getVregSrcForVT<vt>.ret:$data, $vaddr, $offset)
 >;
 
 class ScratchLoadSaddrPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (ScratchSAddr (i32 SGPR_32:$saddr), i16:$offset))),
+  (vt (node (ScratchSAddr (i32 SGPR_32:$saddr), i32:$offset))),
   (inst $saddr, $offset)
 >;
 
 class ScratchLoadSaddrPat_D16 <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (ScratchSAddr (i32 SGPR_32:$saddr), i16:$offset), vt:$in)),
+  (vt (node (ScratchSAddr (i32 SGPR_32:$saddr), i32:$offset), vt:$in)),
   (inst $saddr, $offset, 0, $in)
 >;
 
 class ScratchStoreSaddrPat <FLAT_Pseudo inst, SDPatternOperator node,
                             ValueType vt> : GCNPat <
-  (node vt:$data, (ScratchSAddr (i32 SGPR_32:$saddr), i16:$offset)),
+  (node vt:$data, (ScratchSAddr (i32 SGPR_32:$saddr), i32:$offset)),
   (inst getVregSrcForVT<vt>.ret:$data, $saddr, $offset)
 >;
 
 class ScratchLoadSVaddrPat <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (ScratchSVAddr (i32 VGPR_32:$vaddr), (i32 SGPR_32:$saddr), i16:$offset))),
+  (vt (node (ScratchSVAddr (i32 VGPR_32:$vaddr), (i32 SGPR_32:$saddr), i32:$offset))),
   (inst $vaddr, $saddr, $offset, 0)
 >;
 
 class ScratchStoreSVaddrPat <FLAT_Pseudo inst, SDPatternOperator node,
                              ValueType vt> : GCNPat <
-  (node vt:$data, (ScratchSVAddr (i32 VGPR_32:$vaddr), (i32 SGPR_32:$saddr), i16:$offset)),
+  (node vt:$data, (ScratchSVAddr (i32 VGPR_32:$vaddr), (i32 SGPR_32:$saddr), i32:$offset)),
   (inst getVregSrcForVT<vt>.ret:$data, $vaddr, $saddr, $offset)
 >;
 
 class ScratchLoadSVaddrPat_D16 <FLAT_Pseudo inst, SDPatternOperator node, ValueType vt> : GCNPat <
-  (vt (node (ScratchSVAddr (i32 VGPR_32:$vaddr), (i32 SGPR_32:$saddr), i16:$offset), vt:$in)),
+  (vt (node (ScratchSVAddr (i32 VGPR_32:$vaddr), (i32 SGPR_32:$saddr), i32:$offset), vt:$in)),
   (inst $vaddr, $saddr, $offset, 0, $in)
 >;
 
@@ -1160,8 +1160,8 @@ def : FlatStoreAtomicPat <FLAT_STORE_SHORT, atomic_store_16_flat, i16>;
 foreach as = [ "flat", "global" ] in {
 defm : FlatAtomicPat <"FLAT_ATOMIC_ADD", "atomic_load_add_"#as, i32>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_SUB", "atomic_load_sub_"#as, i32>;
-defm : FlatAtomicPat <"FLAT_ATOMIC_INC", "atomic_inc_"#as, i32>;
-defm : FlatAtomicPat <"FLAT_ATOMIC_DEC", "atomic_dec_"#as, i32>;
+defm : FlatAtomicPat <"FLAT_ATOMIC_INC", "atomic_load_uinc_wrap_"#as, i32>;
+defm : FlatAtomicPat <"FLAT_ATOMIC_DEC", "atomic_load_udec_wrap_"#as, i32>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_AND", "atomic_load_and_"#as, i32>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_SMAX", "atomic_load_max_"#as, i32>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_UMAX", "atomic_load_umax_"#as, i32>;
@@ -1174,8 +1174,8 @@ defm : FlatAtomicPat <"FLAT_ATOMIC_XOR", "atomic_load_xor_"#as, i32>;
 
 defm : FlatAtomicPat <"FLAT_ATOMIC_ADD_X2", "atomic_load_add_"#as, i64>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_SUB_X2", "atomic_load_sub_"#as, i64>;
-defm : FlatAtomicPat <"FLAT_ATOMIC_INC_X2", "atomic_inc_"#as, i64>;
-defm : FlatAtomicPat <"FLAT_ATOMIC_DEC_X2", "atomic_dec_"#as, i64>;
+defm : FlatAtomicPat <"FLAT_ATOMIC_INC_X2", "atomic_load_uinc_wrap_"#as, i64>;
+defm : FlatAtomicPat <"FLAT_ATOMIC_DEC_X2", "atomic_load_udec_wrap_"#as, i64>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_AND_X2", "atomic_load_and_"#as, i64>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_SMAX_X2", "atomic_load_max_"#as, i64>;
 defm : FlatAtomicPat <"FLAT_ATOMIC_UMAX_X2", "atomic_load_umax_"#as, i64>;
@@ -1429,8 +1429,8 @@ defm : GlobalFLATAtomicStorePats <GLOBAL_STORE_DWORDX2, atomic_store_64_global, 
 
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_ADD", "atomic_load_add_global", i32>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_SUB", "atomic_load_sub_global", i32>;
-defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_INC", "atomic_inc_global", i32>;
-defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_DEC", "atomic_dec_global", i32>;
+defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_INC", "atomic_load_uinc_wrap_global", i32>;
+defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_DEC", "atomic_load_udec_wrap_global", i32>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_AND", "atomic_load_and_global", i32>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_SMAX", "atomic_load_max_global", i32>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_UMAX", "atomic_load_umax_global", i32>;
@@ -1444,8 +1444,8 @@ defm : GlobalFLATAtomicPatsRtn <"GLOBAL_ATOMIC_CSUB", "int_amdgcn_global_atomic_
 
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_ADD_X2", "atomic_load_add_global", i64>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_SUB_X2", "atomic_load_sub_global", i64>;
-defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_INC_X2", "atomic_inc_global", i64>;
-defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_DEC_X2", "atomic_dec_global", i64>;
+defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_INC_X2", "atomic_load_uinc_wrap_global", i64>;
+defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_DEC_X2", "atomic_load_udec_wrap_global", i64>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_AND_X2", "atomic_load_and_global", i64>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_SMAX_X2", "atomic_load_max_global", i64>;
 defm : GlobalFLATAtomicPats <"GLOBAL_ATOMIC_UMAX_X2", "atomic_load_umax_global", i64>;

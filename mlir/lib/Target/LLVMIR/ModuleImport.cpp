@@ -71,6 +71,12 @@ static constexpr StringRef getGlobalDtorsVarName() {
   return "llvm.global_dtors";
 }
 
+/// Returns the symbol name for the module-level metadata operation. It must not
+/// conflict with the user namespace.
+static constexpr StringRef getGlobalMetadataOpName() {
+  return "__llvm_global_metadata";
+}
+
 /// Returns a supported MLIR floating point type of the given bit width or null
 /// if the bit width is not supported.
 static FloatType getDLFloatType(MLIRContext &ctx, int32_t bitwidth) {
@@ -359,23 +365,14 @@ ModuleImport::ModuleImport(ModuleOp mlirModule,
   builder.setInsertionPointToStart(mlirModule.getBody());
 }
 
-MetadataOp ModuleImport::getTBAAMetadataOp() {
-  if (tbaaMetadataOp)
-    return tbaaMetadataOp;
+MetadataOp ModuleImport::getGlobalMetadataOp() {
+  if (globalMetadataOp)
+    return globalMetadataOp;
 
   OpBuilder::InsertionGuard guard(builder);
-  Location loc = mlirModule.getLoc();
-
   builder.setInsertionPointToEnd(mlirModule.getBody());
-  tbaaMetadataOp = builder.create<MetadataOp>(loc, getTBAAMetadataOpName());
-
-  return tbaaMetadataOp;
-}
-
-std::string ModuleImport::getNewTBAANodeName(StringRef basename) {
-  return (Twine("tbaa_") + Twine(basename) + Twine('_') +
-          Twine(tbaaNodeCounter++))
-      .str();
+  return globalMetadataOp = builder.create<MetadataOp>(
+             mlirModule.getLoc(), getGlobalMetadataOpName());
 }
 
 LogicalResult ModuleImport::processTBAAMetadata(const llvm::MDNode *node) {
@@ -534,10 +531,18 @@ LogicalResult ModuleImport::processTBAAMetadata(const llvm::MDNode *node) {
     return true;
   };
 
+  // Helper to compute a unique symbol name that includes the given `baseName`.
+  // Uses the size of the mapping to unique the symbol name.
+  auto getUniqueSymbolName = [&](StringRef baseName) {
+    return (Twine("tbaa_") + Twine(baseName) + Twine('_') +
+            Twine(tbaaMapping.size()))
+        .str();
+  };
+
   // Insert new operations at the end of the MetadataOp.
   OpBuilder::InsertionGuard guard(builder);
-  builder.setInsertionPointToEnd(&getTBAAMetadataOp().getBody().back());
-  StringAttr metadataOpName = SymbolTable::getSymbolName(getTBAAMetadataOp());
+  builder.setInsertionPointToEnd(&getGlobalMetadataOp().getBody().back());
+  StringAttr metadataOpName = SymbolTable::getSymbolName(getGlobalMetadataOp());
 
   // On the first walk, create SymbolRefAttr's and map them
   // to nodes in `nodesToConvert`.
@@ -550,7 +555,7 @@ LogicalResult ModuleImport::processTBAAMetadata(const llvm::MDNode *node) {
       // The root nodes do not have operands, so we can create
       // the TBAARootMetadataOp on the first walk.
       auto rootNode = builder.create<TBAARootMetadataOp>(
-          loc, getNewTBAANodeName("root"), identity.value());
+          loc, getUniqueSymbolName("root"), identity.value());
       tbaaMapping.try_emplace(current, FlatSymbolRefAttr::get(rootNode));
       continue;
     }
@@ -559,7 +564,7 @@ LogicalResult ModuleImport::processTBAAMetadata(const llvm::MDNode *node) {
         return failure();
       tbaaMapping.try_emplace(
           current, FlatSymbolRefAttr::get(builder.getContext(),
-                                          getNewTBAANodeName("type_desc")));
+                                          getUniqueSymbolName("type_desc")));
       continue;
     }
     if (std::optional<bool> isValid = isTagNode(current)) {
@@ -571,7 +576,7 @@ LogicalResult ModuleImport::processTBAAMetadata(const llvm::MDNode *node) {
           current, SymbolRefAttr::get(
                        builder.getContext(), metadataOpName,
                        FlatSymbolRefAttr::get(builder.getContext(),
-                                              getNewTBAANodeName("tag"))));
+                                              getUniqueSymbolName("tag"))));
       continue;
     }
     return emitError(loc) << "unsupported TBAA node format: "
@@ -611,21 +616,62 @@ LogicalResult ModuleImport::processTBAAMetadata(const llvm::MDNode *node) {
   return success();
 }
 
+LogicalResult
+ModuleImport::processAccessGroupMetadata(const llvm::MDNode *node) {
+  // An access group node is either access group or an access group list. Start
+  // by collecting all access groups to translate.
+  SmallVector<const llvm::MDNode *> accessGroups;
+  if (!node->getNumOperands())
+    accessGroups.push_back(node);
+  for (const llvm::MDOperand &operand : node->operands())
+    accessGroups.push_back(cast<llvm::MDNode>(operand.get()));
+
+  // Convert all entries of the access group list to access group operations.
+  for (const llvm::MDNode *accessGroup : accessGroups) {
+    if (accessGroupMapping.count(accessGroup))
+      continue;
+    // Verify the access group node is distinct and empty.
+    Location loc = mlirModule.getLoc();
+    if (accessGroup->getNumOperands() != 0 || !accessGroup->isDistinct())
+      return emitError(loc) << "unsupported access group node: "
+                            << diagMD(accessGroup, llvmModule.get());
+
+    MetadataOp metadataOp = getGlobalMetadataOp();
+    OpBuilder::InsertionGuard guard(builder);
+    builder.setInsertionPointToEnd(&metadataOp.getBody().back());
+    auto groupOp = builder.create<AccessGroupMetadataOp>(
+        loc, (Twine("group_") + Twine(accessGroupMapping.size())).str());
+    // Add a mapping from the access group node to the symbol reference pointing
+    // to the newly created operation.
+    accessGroupMapping[accessGroup] = SymbolRefAttr::get(
+        builder.getContext(), metadataOp.getSymName(),
+        FlatSymbolRefAttr::get(builder.getContext(), groupOp.getSymName()));
+  }
+  return success();
+}
+
 LogicalResult ModuleImport::convertMetadata() {
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointToEnd(mlirModule.getBody());
-  for (const llvm::Function &func : llvmModule->functions())
+  for (const llvm::Function &func : llvmModule->functions()) {
     for (const llvm::Instruction &inst : llvm::instructions(func)) {
-      llvm::AAMDNodes nodes = inst.getAAMetadata();
-      if (!nodes)
-        continue;
-
-      if (const llvm::MDNode *tbaaMD = nodes.TBAA)
-        if (failed(processTBAAMetadata(tbaaMD)))
+      // Convert access group metadata nodes.
+      if (llvm::MDNode *node =
+              inst.getMetadata(llvm::LLVMContext::MD_access_group))
+        if (failed(processAccessGroupMetadata(node)))
           return failure();
-      // TODO: only TBAA metadata is currently supported.
-    }
 
+      // Convert alias analysis metadata nodes.
+      llvm::AAMDNodes aliasAnalysisNodes = inst.getAAMetadata();
+      if (!aliasAnalysisNodes)
+        continue;
+      if (aliasAnalysisNodes.TBAA)
+        if (failed(processTBAAMetadata(aliasAnalysisNodes.TBAA)))
+          return failure();
+
+      // TODO: Support noalias and scope metadata nodes.
+    }
+  }
   return success();
 }
 
@@ -1062,6 +1108,11 @@ FailureOr<Value> ModuleImport::convertConstant(llvm::Constant *constant) {
     return root;
   }
 
+  if (isa<llvm::BlockAddress>(constant)) {
+    return emitError(loc)
+           << "blockaddress is not implemented in the LLVM dialect";
+  }
+
   return emitError(loc) << "unhandled constant: " << diag(*constant);
 }
 
@@ -1482,6 +1533,61 @@ void ModuleImport::processFunctionAttributes(llvm::Function *func,
   processPassthroughAttrs(func, funcOp);
 }
 
+DictionaryAttr
+ModuleImport::convertParameterAttribute(llvm::AttributeSet llvmParamAttrs,
+                                        OpBuilder &builder) {
+  using ElemTy = std::pair<llvm::Attribute::AttrKind, StringRef>;
+  // Mapping from llvm attribute kinds to their corresponding MLIR name.
+  static const SmallVector<ElemTy> kindNamePairs = {
+      {llvm::Attribute::AttrKind::NoAlias, LLVMDialect::getNoAliasAttrName()},
+      {llvm::Attribute::AttrKind::ReadOnly, LLVMDialect::getReadonlyAttrName()},
+      {llvm::Attribute::AttrKind::Nest, LLVMDialect::getNestAttrName()},
+      {llvm::Attribute::AttrKind::SExt, LLVMDialect::getSExtAttrName()},
+      {llvm::Attribute::AttrKind::ZExt, LLVMDialect::getZExtAttrName()},
+      {llvm::Attribute::AttrKind::NoUndef, LLVMDialect::getNoUndefAttrName()},
+      {llvm::Attribute::AttrKind::StructRet,
+       LLVMDialect::getStructRetAttrName()},
+      {llvm::Attribute::AttrKind::ByVal, LLVMDialect::getByValAttrName()},
+      {llvm::Attribute::AttrKind::ByRef, LLVMDialect::getByRefAttrName()},
+      {llvm::Attribute::AttrKind::InAlloca, LLVMDialect::getInAllocaAttrName()},
+      {llvm::Attribute::AttrKind::Alignment, LLVMDialect::getAlignAttrName()}};
+
+  SmallVector<NamedAttribute> paramAttrs;
+  for (auto [llvmKind, mlirName] : kindNamePairs) {
+    auto llvmAttr = llvmParamAttrs.getAttribute(llvmKind);
+    // Skip attributes that are not attached.
+    if (!llvmAttr.isValid())
+      continue;
+    Attribute mlirAttr;
+    if (llvmAttr.isTypeAttribute())
+      mlirAttr = TypeAttr::get(convertType(llvmAttr.getValueAsType()));
+    else if (llvmAttr.isIntAttribute())
+      mlirAttr = builder.getI64IntegerAttr(llvmAttr.getValueAsInt());
+    else if (llvmAttr.isEnumAttribute())
+      mlirAttr = builder.getUnitAttr();
+    else
+      llvm_unreachable("unexpected parameter attribute kind");
+    paramAttrs.push_back(builder.getNamedAttr(mlirName, mlirAttr));
+  }
+
+  return builder.getDictionaryAttr(paramAttrs);
+}
+
+void ModuleImport::convertParameterAttributes(llvm::Function *func,
+                                              LLVMFuncOp funcOp,
+                                              OpBuilder &builder) {
+  auto llvmAttrs = func->getAttributes();
+  for (size_t i = 0, e = funcOp.getNumArguments(); i < e; ++i) {
+    llvm::AttributeSet llvmArgAttrs = llvmAttrs.getParamAttrs(i);
+    funcOp.setArgAttrs(i, convertParameterAttribute(llvmArgAttrs, builder));
+  }
+  // Convert the result attributes and attach them wrapped in an ArrayAttribute
+  // to the funcOp.
+  llvm::AttributeSet llvmResAttr = llvmAttrs.getRetAttrs();
+  funcOp.setResAttrsAttr(
+      builder.getArrayAttr(convertParameterAttribute(llvmResAttr, builder)));
+}
+
 LogicalResult ModuleImport::processFunction(llvm::Function *func) {
   clearBlockAndValueMapping();
 
@@ -1505,35 +1611,7 @@ LogicalResult ModuleImport::processFunction(llvm::Function *func) {
   // Set the function debug information if available.
   debugImporter->translate(func, funcOp);
 
-  for (const auto &it : llvm::enumerate(functionType.getParams())) {
-    llvm::SmallVector<NamedAttribute, 1> argAttrs;
-    if (auto *type = func->getParamByValType(it.index())) {
-      Type mlirType = convertType(type);
-      argAttrs.push_back(
-          NamedAttribute(builder.getStringAttr(LLVMDialect::getByValAttrName()),
-                         TypeAttr::get(mlirType)));
-    }
-    if (auto *type = func->getParamByRefType(it.index())) {
-      Type mlirType = convertType(type);
-      argAttrs.push_back(
-          NamedAttribute(builder.getStringAttr(LLVMDialect::getByRefAttrName()),
-                         TypeAttr::get(mlirType)));
-    }
-    if (auto *type = func->getParamStructRetType(it.index())) {
-      Type mlirType = convertType(type);
-      argAttrs.push_back(NamedAttribute(
-          builder.getStringAttr(LLVMDialect::getStructRetAttrName()),
-          TypeAttr::get(mlirType)));
-    }
-    if (auto *type = func->getParamInAllocaType(it.index())) {
-      Type mlirType = convertType(type);
-      argAttrs.push_back(NamedAttribute(
-          builder.getStringAttr(LLVMDialect::getInAllocaAttrName()),
-          TypeAttr::get(mlirType)));
-    }
-
-    funcOp.setArgAttrs(it.index(), argAttrs);
-  }
+  convertParameterAttributes(func, funcOp, builder);
 
   if (FlatSymbolRefAttr personality = getPersonalityAsAttr(func))
     funcOp.setPersonalityAttr(personality);

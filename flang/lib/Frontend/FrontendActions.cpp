@@ -186,7 +186,8 @@ bool CodeGenAction::beginSourceFileAction() {
   lb.lower(parseTree, ci.getInvocation().getSemanticsContext());
 
   // run the default passes.
-  mlir::PassManager pm(mlirCtx.get(), mlir::OpPassManager::Nesting::Implicit);
+  mlir::PassManager pm((*mlirModule)->getName(),
+                       mlir::OpPassManager::Nesting::Implicit);
   pm.enableVerifier(/*verifyPasses=*/true);
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
 
@@ -537,7 +538,8 @@ void CodeGenAction::generateLLVMIR() {
   fir::support::registerLLVMTranslation(*mlirCtx);
 
   // Set-up the MLIR pass manager
-  mlir::PassManager pm(mlirCtx.get(), mlir::OpPassManager::Nesting::Implicit);
+  mlir::PassManager pm((*mlirModule)->getName(),
+                       mlir::OpPassManager::Nesting::Implicit);
 
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
   pm.enableVerifier(/*verifyPasses=*/true);
@@ -574,22 +576,6 @@ void CodeGenAction::generateLLVMIR() {
   }
 }
 
-static llvm::CodeGenOpt::Level
-getCGOptLevel(const Fortran::frontend::CodeGenOptions &opts) {
-  switch (opts.OptimizationLevel) {
-  default:
-    llvm_unreachable("Invalid optimization level!");
-  case 0:
-    return llvm::CodeGenOpt::None;
-  case 1:
-    return llvm::CodeGenOpt::Less;
-  case 2:
-    return llvm::CodeGenOpt::Default;
-  case 3:
-    return llvm::CodeGenOpt::Aggressive;
-  }
-}
-
 void CodeGenAction::setUpTargetMachine() {
   CompilerInstance &ci = this->getInstance();
 
@@ -604,7 +590,10 @@ void CodeGenAction::setUpTargetMachine() {
 
   // Create `TargetMachine`
   const auto &CGOpts = ci.getInvocation().getCodeGenOpts();
-  llvm::CodeGenOpt::Level OptLevel = getCGOptLevel(CGOpts);
+  std::optional<llvm::CodeGenOpt::Level> OptLevelOrNone =
+      llvm::CodeGenOpt::getLevel(CGOpts.OptimizationLevel);
+  assert(OptLevelOrNone && "Invalid optimization level!");
+  llvm::CodeGenOpt::Level OptLevel = *OptLevelOrNone;
   std::string featuresStr = llvm::join(targetOpts.featuresAsWritten.begin(),
                                        targetOpts.featuresAsWritten.end(), ",");
   tm.reset(theTarget->createTargetMachine(
@@ -823,7 +812,7 @@ void CodeGenAction::executeAction() {
     embedOffloadObjects();
 
   // Run LLVM's middle-end (i.e. the optimizer).
-  runOptimizationPipeline(*os);
+  runOptimizationPipeline(ci.isOutputStreamNull() ? *os : ci.getOutputStream());
 
   if (action == BackendActionTy::Backend_EmitLL) {
     llvmModule->print(ci.isOutputStreamNull() ? *os : ci.getOutputStream(),

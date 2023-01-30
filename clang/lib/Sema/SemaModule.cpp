@@ -541,7 +541,7 @@ DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
   // of the same top-level module. Until we do, make it an error rather than
   // silently ignoring the import.
   // FIXME: Should we warn on a redundant import of the current module?
-  if (Mod->getTopLevelModuleName() == getLangOpts().CurrentModule &&
+  if (Mod->isForBuilding(getLangOpts()) &&
       (getLangOpts().isCompilingModule() || !getLangOpts().ModulesTS)) {
     Diag(ImportLoc, getLangOpts().isCompilingModule()
                         ? diag::err_module_self_import
@@ -591,9 +591,6 @@ DeclResult Sema::ActOnModuleImport(SourceLocation StartLoc,
              (ModuleScopes.back().ModuleInterface ||
               (getLangOpts().CPlusPlusModules &&
                ModuleScopes.back().Module->isGlobalModule()))) {
-    assert((!ModuleScopes.back().Module->isGlobalModule() ||
-            Mod->Kind == Module::ModuleKind::ModuleHeaderUnit) &&
-           "should only be importing a header unit into the GMF");
     // Re-export the module if the imported module is exported.
     // Note that we don't need to add re-exported module to Imports field
     // since `Exports` implies the module is imported already.

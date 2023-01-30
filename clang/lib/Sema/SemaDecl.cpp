@@ -9556,6 +9556,7 @@ static bool isStdBuiltin(ASTContext &Ctx, FunctionDecl *FD,
   case Builtin::BIaddressof:
   case Builtin::BI__addressof:
   case Builtin::BIforward:
+  case Builtin::BIforward_like:
   case Builtin::BImove:
   case Builtin::BImove_if_noexcept:
   case Builtin::BIas_const: {
@@ -15254,9 +15255,15 @@ Decl *Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Decl *D,
   }
 
   // C++ [module.import/6] external definitions are not permitted in header
-  // units.
+  // units.  Deleted and Defaulted functions are implicitly inline (but the
+  // inline state is not set at this point, so check the BodyKind explicitly).
+  // FIXME: Consider an alternate location for the test where the inlined()
+  // state is complete.
   if (getLangOpts().CPlusPlusModules && currentModuleIsHeaderUnit() &&
-      FD->getFormalLinkage() == Linkage::ExternalLinkage && !FD->isInlined()) {
+      FD->getFormalLinkage() == Linkage::ExternalLinkage &&
+      !FD->isInvalidDecl() && BodyKind != FnBodyKind::Delete &&
+      BodyKind != FnBodyKind::Default && !FD->isInlined()) {
+    assert(FD->isThisDeclarationADefinition());
     Diag(FD->getLocation(), diag::err_extern_def_in_header_unit);
     FD->setInvalidDecl();
   }
@@ -16190,6 +16197,7 @@ void Sema::AddKnownFunctionAttributes(FunctionDecl *FD) {
     case Builtin::BI__builtin_addressof:
     case Builtin::BIas_const:
     case Builtin::BIforward:
+    case Builtin::BIforward_like:
     case Builtin::BImove:
     case Builtin::BImove_if_noexcept:
       if (ParmVarDecl *P = FD->getParamDecl(0u);
@@ -16610,8 +16618,7 @@ Sema::ActOnTag(Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,
                bool &IsDependent, SourceLocation ScopedEnumKWLoc,
                bool ScopedEnumUsesClassTag, TypeResult UnderlyingType,
                bool IsTypeSpecifier, bool IsTemplateParamOrArg,
-               OffsetOfKind OOK, UsingShadowDecl *&FoundUsingShadow,
-               SkipBodyInfo *SkipBody) {
+               OffsetOfKind OOK, SkipBodyInfo *SkipBody) {
   // If this is not a definition, it must have a name.
   IdentifierInfo *OrigName = Name;
   assert((Name != nullptr || TUK == TUK_Definition) &&
@@ -17046,7 +17053,6 @@ Sema::ActOnTag(Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,
     // redefinition if either context is within the other.
     if (auto *Shadow = dyn_cast<UsingShadowDecl>(DirectPrevDecl)) {
       auto *OldTag = dyn_cast<TagDecl>(PrevDecl);
-      FoundUsingShadow = Shadow;
       if (SS.isEmpty() && TUK != TUK_Reference && TUK != TUK_Friend &&
           isDeclInScope(Shadow, SearchDC, S, isMemberSpecialization) &&
           !(OldTag && isAcceptableTagRedeclContext(

@@ -254,8 +254,9 @@ public:
   }
 
   void runOnOperation() override {
-    mlir::RewritePatternSet patterns(&getContext());
-    patterns.add<InsertSameOp, ReplaceWithNewOp, EraseOp>(&getContext());
+    MLIRContext *ctx = &getContext();
+    mlir::RewritePatternSet patterns(ctx);
+    patterns.add<InsertSameOp, ReplaceWithNewOp, EraseOp>(ctx);
     SmallVector<Operation *> ops;
     getOperation()->walk([&](Operation *op) {
       StringRef opName = op->getName().getStringRef();
@@ -265,13 +266,13 @@ public:
       }
     });
 
-    GreedyRewriteStrictness mode;
+    GreedyRewriteConfig config;
     if (strictMode == "AnyOp") {
-      mode = GreedyRewriteStrictness::AnyOp;
+      config.strictMode = GreedyRewriteStrictness::AnyOp;
     } else if (strictMode == "ExistingAndNewOps") {
-      mode = GreedyRewriteStrictness::ExistingAndNewOps;
+      config.strictMode = GreedyRewriteStrictness::ExistingAndNewOps;
     } else if (strictMode == "ExistingOps") {
-      mode = GreedyRewriteStrictness::ExistingOps;
+      config.strictMode = GreedyRewriteStrictness::ExistingOps;
     } else {
       llvm_unreachable("invalid strictness option");
     }
@@ -279,7 +280,14 @@ public:
     // Check if these transformations introduce visiting of operations that
     // are not in the `ops` set (The new created ops are valid). An invalid
     // operation will trigger the assertion while processing.
-    (void)applyOpPatternsAndFold(ArrayRef(ops), std::move(patterns), mode);
+    bool changed = false;
+    bool allErased = false;
+    (void)applyOpPatternsAndFold(ArrayRef(ops), std::move(patterns), config,
+                                 &changed, &allErased);
+    Builder b(ctx);
+    getOperation()->setAttr("pattern_driver_changed", b.getBoolAttr(changed));
+    getOperation()->setAttr("pattern_driver_all_erased",
+                            b.getBoolAttr(allErased));
   }
 
   Option<std::string> strictMode{
@@ -857,7 +865,7 @@ struct TestLegalizePatternDriver
   TestLegalizePatternDriver(ConversionMode mode) : mode(mode) {}
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<func::FuncDialect>();
+    registry.insert<func::FuncDialect, test::TestDialect>();
   }
 
   void runOnOperation() override {
@@ -1625,8 +1633,7 @@ struct TestSelectiveReplacementPatternDriver
     MLIRContext *context = &getContext();
     mlir::RewritePatternSet patterns(context);
     patterns.add<TestSelectiveOpReplacementPattern>(context);
-    (void)applyPatternsAndFoldGreedily(getOperation()->getRegions(),
-                                       std::move(patterns));
+    (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
   }
 };
 } // namespace

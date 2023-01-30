@@ -1284,7 +1284,7 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
                 // We're probably decomposing an odd sized store. Try to split
                 // to the widest type. TODO: Account for alignment. As-is it
                 // should be OK, since the new parts will be further legalized.
-                unsigned FloorSize = PowerOf2Floor(DstSize);
+                unsigned FloorSize = llvm::bit_floor(DstSize);
                 return std::pair(
                     0, LLT::scalarOrVector(
                            ElementCount::getFixed(FloorSize / EltSize), EltTy));
@@ -1335,7 +1335,7 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     {G_ATOMICRMW_XCHG, G_ATOMICRMW_ADD, G_ATOMICRMW_SUB,
      G_ATOMICRMW_AND, G_ATOMICRMW_OR, G_ATOMICRMW_XOR,
      G_ATOMICRMW_MAX, G_ATOMICRMW_MIN, G_ATOMICRMW_UMAX,
-     G_ATOMICRMW_UMIN})
+     G_ATOMICRMW_UMIN, G_ATOMICRMW_UINC_WRAP, G_ATOMICRMW_UDEC_WRAP})
     .legalFor({{S32, GlobalPtr}, {S32, LocalPtr},
                {S64, GlobalPtr}, {S64, LocalPtr},
                {S32, RegionPtr}, {S64, RegionPtr}});
@@ -3259,7 +3259,7 @@ bool AMDGPULegalizerInfo::loadInputValue(Register DstReg, MachineIRBuilder &B,
     // TODO: Should we try to emit this once in the entry block?
     const LLT S32 = LLT::scalar(32);
     const unsigned Mask = Arg->getMask();
-    const unsigned Shift = countTrailingZeros<unsigned>(Mask);
+    const unsigned Shift = llvm::countr_zero<unsigned>(Mask);
 
     Register AndMaskSrc = LiveIn;
 
@@ -3356,7 +3356,7 @@ bool AMDGPULegalizerInfo::legalizeWorkitemIDIntrinsic(
     Register TmpReg = MRI.createGenericVirtualRegister(LLT::scalar(32));
     if (!loadInputValue(TmpReg, B, ArgType))
       return false;
-    B.buildAssertZExt(DstReg, TmpReg, 32 - countLeadingZeros(MaxID));
+    B.buildAssertZExt(DstReg, TmpReg, llvm::bit_width(MaxID));
   }
 
   MI.eraseFromParent();
@@ -4627,8 +4627,8 @@ bool AMDGPULegalizerInfo::legalizeBufferLoad(MachineInstr &MI,
 bool AMDGPULegalizerInfo::legalizeAtomicIncDec(MachineInstr &MI,
                                                MachineIRBuilder &B,
                                                bool IsInc) const {
-  unsigned Opc = IsInc ? AMDGPU::G_AMDGPU_ATOMIC_INC :
-                         AMDGPU::G_AMDGPU_ATOMIC_DEC;
+  unsigned Opc = IsInc ? AMDGPU::G_ATOMICRMW_UINC_WRAP :
+                         AMDGPU::G_ATOMICRMW_UDEC_WRAP;
   B.buildInstr(Opc)
     .addDef(MI.getOperand(0).getReg())
     .addUse(MI.getOperand(2).getReg())
@@ -4906,7 +4906,7 @@ bool AMDGPULegalizerInfo::legalizeImageIntrinsic(
     if (BaseOpcode->Gather4) {
       DMaskLanes = 4;
     } else if (DMask != 0) {
-      DMaskLanes = countPopulation(DMask);
+      DMaskLanes = llvm::popcount(DMask);
     } else if (!IsTFE && !BaseOpcode->Store) {
       // If dmask is 0, this is a no-op load. This can be eliminated.
       B.buildUndef(MI.getOperand(0));

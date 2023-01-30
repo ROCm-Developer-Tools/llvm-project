@@ -22,7 +22,7 @@ define i32 @unhandled_value(i32 %arg1) {
 ; // -----
 
 ; CHECK:      import-failure.ll
-; CHECK-SAME: error: unhandled constant: ptr blockaddress(@unhandled_constant, %bb1)
+; CHECK-SAME: error: blockaddress is not implemented in the LLVM dialect
 ; CHECK:      import-failure.ll
 ; CHECK-SAME: error: unhandled instruction: ret ptr blockaddress(@unhandled_constant, %bb1)
 define ptr @unhandled_constant() {
@@ -33,7 +33,7 @@ bb1:
 ; // -----
 
 ; CHECK:      import-failure.ll
-; CHECK-SAME: error: unhandled constant: ptr blockaddress(@unhandled_global, %bb1)
+; CHECK-SAME: error: blockaddress is not implemented in the LLVM dialect
 ; CHECK:      import-failure.ll
 ; CHECK-SAME: error: unhandled global variable: @private = private global ptr blockaddress(@unhandled_global, %bb1)
 @private = private global ptr blockaddress(@unhandled_global, %bb1)
@@ -239,3 +239,26 @@ define dso_local void @tbaa(ptr %0) {
 !3 = !{!4, i64 4, !"int"}
 !4 = !{!5, i64 1, !"omnipotent char"}
 !5 = !{!"Simple C++ TBAA"}
+
+; // -----
+
+; CHECK:      import-failure.ll
+; CHECK-SAME: error: unsupported access group node: !0 = !{}
+define void @access_group(ptr %arg1) {
+  %1 = load i32, ptr %arg1, !llvm.access.group !0
+  ret void
+}
+
+!0 = !{}
+
+; // -----
+
+; CHECK:      import-failure.ll
+; CHECK-SAME: error: unsupported access group node: !1 = distinct !{!"unsupported access group"}
+define void @access_group(ptr %arg1) {
+  %1 = load i32, ptr %arg1, !llvm.access.group !0
+  ret void
+}
+
+!0 = !{!1}
+!1 = distinct !{!"unsupported access group"}

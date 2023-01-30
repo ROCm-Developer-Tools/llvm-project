@@ -78,39 +78,6 @@ gentbl_cc_library(
 )
 
 td_library(
-    name = "SubElementInterfacesTdFiles",
-    srcs = ["include/mlir/IR/SubElementInterfaces.td"],
-    includes = ["include"],
-    deps = [":OpBaseTdFiles"],
-)
-
-gentbl_cc_library(
-    name = "SubElementInterfacesIncGen",
-    strip_include_prefix = "include",
-    tbl_outs = [
-        (
-            ["-gen-attr-interface-decls"],
-            "include/mlir/IR/SubElementAttrInterfaces.h.inc",
-        ),
-        (
-            ["-gen-attr-interface-defs"],
-            "include/mlir/IR/SubElementAttrInterfaces.cpp.inc",
-        ),
-        (
-            ["-gen-type-interface-decls"],
-            "include/mlir/IR/SubElementTypeInterfaces.h.inc",
-        ),
-        (
-            ["-gen-type-interface-defs"],
-            "include/mlir/IR/SubElementTypeInterfaces.cpp.inc",
-        ),
-    ],
-    tblgen = ":mlir-tblgen",
-    td_file = "include/mlir/IR/SubElementInterfaces.td",
-    deps = [":SubElementInterfacesTdFiles"],
-)
-
-td_library(
     name = "BuiltinDialectTdFiles",
     srcs = [
         "include/mlir/IR/BuiltinAttributeInterfaces.td",
@@ -128,7 +95,6 @@ td_library(
         ":DataLayoutInterfacesTdFiles",
         ":OpBaseTdFiles",
         ":SideEffectInterfacesTdFiles",
-        ":SubElementInterfacesTdFiles",
     ],
 )
 
@@ -323,7 +289,6 @@ cc_library(
         ":OpAsmInterfaceIncGen",
         ":RegionKindInterfaceIncGen",
         ":SideEffectInterfacesIncGen",
-        ":SubElementInterfacesIncGen",
         ":Support",
         ":SymbolInterfacesIncGen",
         ":TensorEncodingIncGen",
@@ -2975,6 +2940,20 @@ cc_library(
 )
 
 cc_library(
+    name = "InferIntRangeCommon",
+    srcs = [
+        "lib/Interfaces/Utils/InferIntRangeCommon.cpp",
+    ],
+    hdrs = ["include/mlir/Interfaces/Utils/InferIntRangeCommon.h"],
+    includes = ["include"],
+    deps = [
+        ":IR",
+        ":InferIntRangeInterface",
+        "//llvm:Support",
+    ],
+)
+
+cc_library(
     name = "DataLayoutInterfaces",
     srcs = ["lib/Interfaces/DataLayoutInterfaces.cpp"],
     hdrs = ["include/mlir/Interfaces/DataLayoutInterfaces.h"],
@@ -3580,7 +3559,7 @@ cc_library(
     ),
     hdrs = glob(
         [
-            "lib/Tools/lsp-server-support/*.h",
+            "include/mlir/Tools/lsp-server-support/*.h",
         ],
     ),
     deps = [
@@ -4128,7 +4107,6 @@ td_library(
         ":InferTypeOpInterfaceTdFiles",
         ":OpBaseTdFiles",
         ":SideEffectInterfacesTdFiles",
-        ":SubElementInterfacesTdFiles",
     ],
 )
 
@@ -4301,6 +4279,7 @@ cc_library(
     deps = [
         ":AMDGPUToROCDL",
         ":ArithToLLVM",
+        ":ControlFlowDialect",
         ":ControlFlowToLLVM",
         ":ConversionPassIncGen",
         ":FuncDialect",
@@ -4313,6 +4292,7 @@ cc_library(
         ":LLVMCommonConversion",
         ":LLVMDialect",
         ":MathDialect",
+        ":MemRefDialect",
         ":MemRefToLLVM",
         ":Pass",
         ":ROCDLDialect",
@@ -4365,9 +4345,8 @@ cc_library(
         ":IR",
         ":LLVMCommonConversion",
         ":LLVMDialect",
+        ":MemRefDialect",
         ":MemRefToLLVM",
-        ":NVVMToLLVMIRTranslation",
-        ":Pass",
         ":Support",
         ":VectorToLLVM",
         "//llvm:Support",
@@ -7710,6 +7689,7 @@ cc_library(
         ":OpenMPInterfacesIncGen",
         ":OpenMPOpsIncGen",
         ":OpenMPTypeInterfacesIncGen",
+        "//llvm:FrontendOpenMP",
         "//llvm:Support",
     ],
 )
@@ -7875,6 +7855,7 @@ td_library(
     includes = ["include"],
     deps = [
         ":CastInterfacesTdFiles",
+        ":InferIntRangeInterfaceTdFiles",
         ":InferTypeOpInterfaceTdFiles",
         ":OpBaseTdFiles",
         ":SideEffectInterfacesTdFiles",
@@ -7987,6 +7968,8 @@ cc_library(
         ":IR",
         ":IndexEnumsIncGen",
         ":IndexOpsIncGen",
+        ":InferIntRangeCommon",
+        ":InferIntRangeInterface",
         ":InferTypeOpInterface",
         "//llvm:Support",
     ],
@@ -8360,6 +8343,7 @@ cc_library(
         ":Parser",
         ":SCFTransforms",
         ":SideEffectInterfaces",
+        ":Support",
         ":TensorDialect",
         ":TilingInterface",
         ":TransformDialect",
@@ -8401,25 +8385,6 @@ gentbl_cc_library(
 )
 
 cc_library(
-    name = "LinalgAnalysis",
-    srcs = glob([
-        "lib/Dialect/Linalg/Analysis/*.cpp",
-        "lib/Dialect/Linalg/Analysis/*.h",
-    ]),
-    hdrs = glob([
-        "include/mlir/Dialect/Linalg/Analysis/*.h",
-    ]),
-    includes = ["include"],
-    deps = [
-        ":BufferizationDialect",
-        ":FuncDialect",
-        ":IR",
-        ":LinalgDialect",
-        "//llvm:Support",
-    ],
-)
-
-cc_library(
     name = "LinalgUtils",
     srcs = glob([
         "lib/Dialect/Linalg/Utils/*.cpp",
@@ -8438,7 +8403,6 @@ cc_library(
         ":DialectUtils",
         ":FuncDialect",
         ":IR",
-        ":LinalgAnalysis",
         ":LinalgDialect",
         ":MemRefDialect",
         ":Pass",
@@ -8478,7 +8442,6 @@ cc_library(
         ":FuncDialect",
         ":FuncTransforms",
         ":IR",
-        ":LinalgAnalysis",
         ":LinalgDialect",
         ":LinalgPassIncGen",
         ":LinalgStructuredOpsIncGen",
@@ -9586,6 +9549,7 @@ cc_library(
         ":ArithOpsInterfacesIncGen",
         ":CommonFolders",
         ":IR",
+        ":InferIntRangeCommon",
         ":InferIntRangeInterface",
         ":InferTypeOpInterface",
         ":SideEffectInterfaces",

@@ -24,7 +24,6 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/ConstantFolding.h"
-#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -67,6 +66,7 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/EHPersonalities.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/InlineAsm.h"
@@ -182,8 +182,7 @@ getCopyFromParts(SelectionDAG &DAG, const SDLoc &DL, const SDValue *Parts,
       unsigned ValueBits = ValueVT.getSizeInBits();
 
       // Assemble the power of 2 part.
-      unsigned RoundParts =
-          (NumParts & (NumParts - 1)) ? 1 << Log2_32(NumParts) : NumParts;
+      unsigned RoundParts = llvm::bit_floor(NumParts);
       unsigned RoundBits = PartBits * RoundParts;
       EVT RoundVT = RoundBits == ValueBits ?
         ValueVT : EVT::getIntegerVT(*DAG.getContext(), RoundBits);
@@ -568,7 +567,7 @@ getCopyToParts(SelectionDAG &DAG, const SDLoc &DL, SDValue Val, SDValue *Parts,
     // The number of parts is not a power of 2.  Split off and copy the tail.
     assert(PartVT.isInteger() && ValueVT.isInteger() &&
            "Do not know what to expand to!");
-    unsigned RoundParts = 1 << Log2_32(NumParts);
+    unsigned RoundParts = llvm::bit_floor(NumParts);
     unsigned RoundBits = RoundParts * PartBits;
     unsigned OddParts = NumParts - RoundParts;
     SDValue OddVal = DAG.getNode(ISD::SRL, DL, ValueVT, Val,
@@ -2895,21 +2894,20 @@ void SelectionDAGBuilder::visitBitTestCase(BitTestBlock &BB,
   MVT VT = BB.RegVT;
   SDValue ShiftOp = DAG.getCopyFromReg(getControlRoot(), dl, Reg, VT);
   SDValue Cmp;
-  unsigned PopCount = countPopulation(B.Mask);
+  unsigned PopCount = llvm::popcount(B.Mask);
   const TargetLowering &TLI = DAG.getTargetLoweringInfo();
   if (PopCount == 1) {
     // Testing for a single bit; just compare the shift count with what it
     // would need to be to shift a 1 bit in that position.
     Cmp = DAG.getSetCC(
         dl, TLI.getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(), VT),
-        ShiftOp, DAG.getConstant(countTrailingZeros(B.Mask), dl, VT),
+        ShiftOp, DAG.getConstant(llvm::countr_zero(B.Mask), dl, VT),
         ISD::SETEQ);
   } else if (PopCount == BB.Range) {
     // There is only one zero bit in the range, test for it directly.
     Cmp = DAG.getSetCC(
         dl, TLI.getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(), VT),
-        ShiftOp, DAG.getConstant(countTrailingOnes(B.Mask), dl, VT),
-        ISD::SETNE);
+        ShiftOp, DAG.getConstant(llvm::countr_one(B.Mask), dl, VT), ISD::SETNE);
   } else {
     // Make desired shift
     SDValue SwitchVal = DAG.getNode(ISD::SHL, dl, VT,
@@ -4672,6 +4670,12 @@ void SelectionDAGBuilder::visitAtomicRMW(const AtomicRMWInst &I) {
   case AtomicRMWInst::FSub: NT = ISD::ATOMIC_LOAD_FSUB; break;
   case AtomicRMWInst::FMax: NT = ISD::ATOMIC_LOAD_FMAX; break;
   case AtomicRMWInst::FMin: NT = ISD::ATOMIC_LOAD_FMIN; break;
+  case AtomicRMWInst::UIncWrap:
+    NT = ISD::ATOMIC_LOAD_UINC_WRAP;
+    break;
+  case AtomicRMWInst::UDecWrap:
+    NT = ISD::ATOMIC_LOAD_UDEC_WRAP;
+    break;
   }
   AtomicOrdering Ordering = I.getOrdering();
   SyncScope::ID SSID = I.getSyncScopeID();
@@ -5938,6 +5942,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         /* AlwaysInline */ false, isTC, MachinePointerInfo(I.getArgOperand(0)),
         MachinePointerInfo(I.getArgOperand(1)), I.getAAMetadata(), AA);
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memcpy_inline: {
@@ -5959,6 +5964,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         /* AlwaysInline */ true, isTC, MachinePointerInfo(I.getArgOperand(0)),
         MachinePointerInfo(I.getArgOperand(1)), I.getAAMetadata(), AA);
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memset: {
@@ -5975,6 +5981,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         Root, sdl, Op1, Op2, Op3, Alignment, isVol, /* AlwaysInline */ false,
         isTC, MachinePointerInfo(I.getArgOperand(0)), I.getAAMetadata());
     updateDAGForMaybeTailCall(MS);
+    setValue(&I, MS);
     return;
   }
   case Intrinsic::memset_inline: {
@@ -5993,6 +6000,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                                MachinePointerInfo(I.getArgOperand(0)),
                                I.getAAMetadata());
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memmove: {
@@ -6014,6 +6022,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                                 MachinePointerInfo(I.getArgOperand(1)),
                                 I.getAAMetadata(), AA);
     updateDAGForMaybeTailCall(MM);
+    setValue(&I, MM);
     return;
   }
   case Intrinsic::memcpy_element_unordered_atomic: {
@@ -6030,6 +6039,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                             isTC, MachinePointerInfo(MI.getRawDest()),
                             MachinePointerInfo(MI.getRawSource()));
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memmove_element_unordered_atomic: {
@@ -6046,6 +6056,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                              isTC, MachinePointerInfo(MI.getRawDest()),
                              MachinePointerInfo(MI.getRawSource()));
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::memset_element_unordered_atomic: {
@@ -6061,6 +6072,7 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
         DAG.getAtomicMemset(getRoot(), sdl, Dst, Val, Length, LengthTy, ElemSz,
                             isTC, MachinePointerInfo(MI.getRawDest()));
     updateDAGForMaybeTailCall(MC);
+    setValue(&I, MC);
     return;
   }
   case Intrinsic::call_preallocated_setup: {
@@ -8364,9 +8376,9 @@ void SelectionDAGBuilder::visitCall(const CallInst &I) {
     return;
   }
 
-  if (Function *F = I.getCalledFunction()) {
-    diagnoseDontCall(I);
+  diagnoseDontCall(I);
 
+  if (Function *F = I.getCalledFunction()) {
     if (F->isDeclaration()) {
       // Is this an LLVM intrinsic or a target-specific intrinsic?
       unsigned IID = F->getIntrinsicID();

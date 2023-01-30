@@ -2772,6 +2772,8 @@ as follows:
     This specifies the alignment for an integer type of a given bit
     ``<size>``. The value of ``<size>`` must be in the range [1,2^23).
     ``<pref>`` is optional and defaults to ``<abi>``.
+    For ``i8``, the ``<abi>`` value must equal 8,
+    that is, ``i8`` must be naturally aligned.
 ``v<size>:<abi>[:<pref>]``
     This specifies the alignment for a vector type of a given bit
     ``<size>``. The value of ``<size>`` must be in the range [1,2^23).
@@ -2839,7 +2841,7 @@ specifications are given in this list:
    same as the default address space.
 -  ``S0`` - natural stack alignment is unspecified
 -  ``i1:8:8`` - i1 is 8-bit (byte) aligned
--  ``i8:8:8`` - i8 is 8-bit (byte) aligned
+-  ``i8:8:8`` - i8 is 8-bit (byte) aligned as mandated
 -  ``i16:16:16`` - i16 is 16-bit aligned
 -  ``i32:32:32`` - i32 is 32-bit aligned
 -  ``i64:32:64`` - i64 has ABI alignment of 32-bits but preferred
@@ -10161,18 +10163,16 @@ alignment is not set to a value which is at least the size in bytes of the
 pointee. ``!nontemporal`` does not have any defined semantics for atomic loads.
 
 The optional constant ``align`` argument specifies the alignment of the
-operation (that is, the alignment of the memory address). A value of 0
-or an omitted ``align`` argument means that the operation has the ABI
-alignment for the target. It is the responsibility of the code emitter
-to ensure that the alignment information is correct. Overestimating the
-alignment results in undefined behavior. Underestimating the alignment
-may produce less efficient code. An alignment of 1 is always safe. The
-maximum possible alignment is ``1 << 32``. An alignment value higher
-than the size of the loaded type implies memory up to the alignment
-value bytes can be safely loaded without trapping in the default
-address space. Access of the high bytes can interfere with debugging
-tools, so should not be accessed if the function has the
-``sanitize_thread`` or ``sanitize_address`` attributes.
+operation (that is, the alignment of the memory address). An omitted ``align``
+argument means that the operation has the ABI alignment for the target. It is
+the responsibility of the code emitter to ensure that the alignment information
+is correct. Overestimating the alignment results in undefined behavior.
+Underestimating the alignment may produce less efficient code. An alignment of 1 is
+always safe. The maximum possible alignment is ``1 << 32``. An alignment value higher
+than the size of the loaded type implies memory up to the alignment value bytes can
+be safely loaded without trapping in the default address space. Access of the high
+bytes can interfere with debugging tools, so should not be  accessed if the function
+has the ``sanitize_thread`` or ``sanitize_address`` attributes.
 
 The optional ``!nontemporal`` metadata must reference a single
 metadata name ``<nontemp_node>`` corresponding to a metadata node with one
@@ -10299,17 +10299,16 @@ the alignment is not set to a value which is at least the size in bytes of the
 pointee. ``!nontemporal`` does not have any defined semantics for atomic stores.
 
 The optional constant ``align`` argument specifies the alignment of the
-operation (that is, the alignment of the memory address). A value of 0
-or an omitted ``align`` argument means that the operation has the ABI
-alignment for the target. It is the responsibility of the code emitter
-to ensure that the alignment information is correct. Overestimating the
-alignment results in undefined behavior. Underestimating the
-alignment may produce less efficient code. An alignment of 1 is always
-safe. The maximum possible alignment is ``1 << 32``. An alignment
-value higher than the size of the stored type implies memory up to the
-alignment value bytes can be stored to without trapping in the default
-address space. Storing to the higher bytes however may result in data
-races if another thread can access the same address. Introducing a
+operation (that is, the alignment of the memory address). An omitted ``align``
+argument means that the operation has the ABI alignment for the target.
+It is the responsibility of the code emitter to ensure that the alignment
+information is correct. Overestimating the alignment results in undefined
+behavior. Underestimating the alignment may produce less efficient code.
+An alignment of 1 is always safe. The maximum possible alignment is ``1 << 32``.
+An alignment value higher than the size of the stored type implies memory
+up to the alignment value bytes can be stored to without trapping in
+the default address space. Storing to the higher bytes however may result in
+data races if another thread can access the same address. Introducing a
 data race is not allowed. Storing to the extra bytes is not allowed
 even in situations where a data race is known to not exist if the
 function has the ``sanitize_address`` attribute.
@@ -10534,6 +10533,8 @@ operation. The operation must be one of the following keywords:
 -  fsub
 -  fmax
 -  fmin
+-  uinc_wrap
+-  udec_wrap
 
 For most of these operations, the type of '<value>' must be an integer
 type whose bit width is a power of two greater than or equal to eight
@@ -10578,6 +10579,9 @@ operation argument:
 - fsub: ``*ptr = *ptr - val`` (using floating point arithmetic)
 -  fmax: ``*ptr = maxnum(*ptr, val)`` (match the `llvm.maxnum.*`` intrinsic)
 -  fmin: ``*ptr = minnum(*ptr, val)`` (match the `llvm.minnum.*`` intrinsic)
+-  uinc_wrap: ``*ptr = (*ptr u>= val) ? 0 : (*ptr + 1)`` (increment value with wraparound to zero when incremented above input value)
+-  udec_wrap: ``*ptr = ((*ptr == 0) || (*ptr u> val)) ? val : (*ptr - 1)`` (decrement with wraparound to input value when decremented below zero).
+
 
 Example:
 """"""""
