@@ -1346,6 +1346,24 @@ LogicalResult CancellationPointOp::verify() {
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// Verifier for TargetDeclareOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult TargetDeclareOp::verify() {
+  auto toOps = getToOperands();
+  auto linkOps = getLinkOperands();
+
+  // The operation should have at least one item in either operand list (there
+  // should be at least one implicit capture), otherwise the op is essentially a
+  // no-op
+  if ((!toOps || toOps->empty()) && (!linkOps || linkOps->empty()))
+    return emitOpError()
+           << "The TargetDeclareOp must have ToOperands or LinkOperands";
+
+  return success();
+}
+
 #define GET_ATTRDEF_CLASSES
 #include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.cpp.inc"
 

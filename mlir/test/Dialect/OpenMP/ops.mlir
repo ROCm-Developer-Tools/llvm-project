@@ -1860,3 +1860,39 @@ func.func @omp_taskloop(%lb: i32, %ub: i32, %step: i32) -> () {
   // CHECK: return
   return
 }
+
+// CHECK-LABEL: omp_target_declare
+func.func @omp_target_declare () -> () {
+  // CHECK: omp.target.declare to([@omp_target_declare, @add_f32]) link([@add_f32, @omp_target_declare]) device_type(devicetypehost)
+  omp.target.declare to([@omp_target_declare, @add_f32]) link([@add_f32, @omp_target_declare]) device_type(devicetypehost)
+  // CHECK: omp.target.declare to([@omp_target_declare, @add_f32]) link([@add_f32, @omp_target_declare]) device_type(devicetypeany)
+  omp.target.declare to([@omp_target_declare, @add_f32]) link([@add_f32, @omp_target_declare]) device_type(devicetypeany)
+  // CHECK: omp.target.declare to([@omp_target_declare, @add_f32]) link([@add_f32, @omp_target_declare]) device_type(devicetypenohost)
+  omp.target.declare to([@omp_target_declare, @add_f32]) link([@add_f32, @omp_target_declare]) device_type(devicetypenohost)
+  // CHECK: omp.target.declare to([@omp_target_declare, @add_f32]) device_type(devicetypehost)
+  omp.target.declare to([@omp_target_declare, @add_f32]) device_type(devicetypehost)
+  // CHECK: omp.target.declare to([@omp_target_declare, @add_f32]) device_type(devicetypeany)
+  omp.target.declare to([@omp_target_declare, @add_f32]) device_type(devicetypeany)
+    // CHECK: omp.target.declare to([@omp_target_declare, @add_f32]) device_type(devicetypenohost)
+  omp.target.declare to([@omp_target_declare, @add_f32]) device_type(devicetypenohost)
+  // CHECK: omp.target.declare link([@omp_target_declare, @add_f32]) device_type(devicetypehost)
+  omp.target.declare link([@omp_target_declare, @add_f32]) device_type(devicetypehost)
+  // CHECK: omp.target.declare link([@omp_target_declare, @add_f32]) device_type(devicetypeany)
+  omp.target.declare link([@omp_target_declare, @add_f32]) device_type(devicetypeany)
+  // CHECK: omp.target.declare link([@omp_target_declare, @add_f32]) device_type(devicetypenohost)
+  omp.target.declare link([@omp_target_declare, @add_f32]) device_type(devicetypenohost)
+  // CHECK: omp.target.declare to([@omp_target_declare]) device_type(devicetypehost)
+  omp.target.declare to([@omp_target_declare]) device_type(devicetypehost)
+  // CHECK: omp.target.declare to([@omp_target_declare]) device_type(devicetypeany)
+  omp.target.declare to([@omp_target_declare]) device_type(devicetypeany)
+    // CHECK: omp.target.declare to([@omp_target_declare]) device_type(devicetypenohost)
+  omp.target.declare to([@omp_target_declare]) device_type(devicetypenohost)
+  // CHECK: omp.target.declare link([@omp_target_declare]) device_type(devicetypehost)
+  omp.target.declare link([@omp_target_declare]) device_type(devicetypehost)
+  // CHECK: omp.target.declare link([@omp_target_declare]) device_type(devicetypeany)
+  omp.target.declare link([@omp_target_declare]) device_type(devicetypeany)
+  // CHECK: omp.target.declare link([@omp_target_declare]) device_type(devicetypenohost)
+  omp.target.declare link([@omp_target_declare]) device_type(devicetypenohost)
+
+  return
+}

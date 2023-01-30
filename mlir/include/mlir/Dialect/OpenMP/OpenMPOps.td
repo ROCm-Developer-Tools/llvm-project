@@ -818,6 +818,7 @@ def FlushOp : OpenMP_Op<"flush"> {
   }];
 }
 
+<<<<<<< HEAD
 //===---------------------------------------------------------------------===//
 // 2.14.2 target data Construct
 //===---------------------------------------------------------------------===//
@@ -965,6 +966,59 @@ def Target_ExitDataOp: OpenMP_Op<"target_exit_data",
     `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types) `)`
     attr-dict
    }];
+
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// 2.12.7 declare target directive
+//===----------------------------------------------------------------------===//
+
+def ClauseDeviceTypeAny : I32EnumAttrCase<"devicetypeany", 0>;
+def ClauseDeviceTypeHost   : I32EnumAttrCase<"devicetypehost",   1>;
+def ClauseDeviceTypeNoHost   : I32EnumAttrCase<"devicetypenohost",   2>;
+
+def ClauseDeviceType : I32EnumAttr<
+    "ClauseDeviceType",
+    "device_type clause",
+    [ClauseDeviceTypeAny, ClauseDeviceTypeHost, ClauseDeviceTypeNoHost]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::omp";
+}
+def ClauseDeviceTypeAttr : EnumAttr<OpenMP_Dialect, ClauseDeviceType, "clause_device_type"> {
+  let assemblyFormat = "`(` $value `)`";
+}
+
+def TargetDeclareOp : OpenMP_Op<"target.declare"> {
+  let summary = "declare target directive";
+  let description = [{
+    The declare target directive specifies that variables, functions (C, C++ and Fortran), 
+    and subroutines (Fortran) are mapped to a device. The declare target directive is a 
+    declarative directive.
+
+    The $device_type argument contains an integer from 0 to 2, which specifies 
+    one of the three options that can be given to the device_type clause (e.g. 
+    host | nohost | any).
+    
+    The $to_operands argument contains symbol references for functions and 
+    global variables captured by the "to" clause of declare target or explicitly 
+    captured via brackets e.g: declare target(var1, var2), the device type is 
+    implicitly expected to be any.
+
+    The $link_operands argument contains symbol references for functions and global 
+    variables captured by the "link" clause of declare target e.g: declare target 
+    link(var1, var2). The device type is explicitly specified by the link clause.
+  }];
+
+  let arguments = (ins ClauseDeviceTypeAttr:$device_type,
+                       OptionalAttr<SymbolRefArrayAttr>:$to_operands,
+                       OptionalAttr<SymbolRefArrayAttr>:$link_operands);
+  
+  let assemblyFormat = [{
+    oilist( `to` `(` $to_operands `)`
+          | `link` `(` $link_operands `)`
+    ) `device_type` `` $device_type attr-dict
+  }];
 
   let hasVerifier = 1;
 }
