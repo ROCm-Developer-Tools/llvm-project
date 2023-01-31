@@ -16,6 +16,7 @@ func.func @_QPfoo() {
   fir.call @_QPbar2(%7) : (!fir.ref<f32>) -> ()
   return
 }
+
 fir.global common @_QBa(dense<0> : vector<4xi8>) : !fir.array<4xi8>
 fir.global common @_QB(dense<0> : vector<4xi8>) : !fir.array<4xi8>
 func.func private @_QPbar(!fir.ref<i32>)
@@ -39,3 +40,23 @@ func.func private @_QPbar2(!fir.ref<f32>)
 // LLVMIR: llvm.mlir.global common @__BLNK__(dense<0> : vector<4xi8>) {{.*}}  : !llvm.array<4 x i8>
 // LLVMIR: llvm.func @bar_(!llvm.ptr<i32>) attributes {sym_visibility = "private"}
 // LLVMIR: llvm.func @bar2_(!llvm.ptr<f32>) attributes {sym_visibility = "private"}
+
+// ----- 
+
+func.func @_QPcallee() {
+  func.call @_QPcallee() : () -> ()
+  return
+}
+
+func.func @_QPcaller() {
+  func.call @_QPcallee() : () -> ()
+  return 
+}
+
+// CHECK: func @callee_
+// CHECK: call @callee_
+// CHECK: func @caller_
+// CHECK: call @callee_
+
+// LLVMIR: llvm.call @callee_() : () -> ()
+// LLVMIR: llvm.call @callee_() : () -> ()
