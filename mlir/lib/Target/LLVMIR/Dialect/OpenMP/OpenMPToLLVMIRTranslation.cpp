@@ -11,7 +11,11 @@
 //
 //===----------------------------------------------------------------------===//
 #include "mlir/Target/LLVMIR/Dialect/OpenMP/OpenMPToLLVMIRTranslation.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
@@ -20,8 +24,11 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Frontend/OpenMP/OMPIRBuilder.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
 
@@ -332,7 +339,85 @@ convertOmpMaster(Operation &opInst, llvm::IRBuilderBase &builder,
   return success();
 }
 
-/// Converts an OpenMP 'critical' operation into LLVM IR using OpenMPIRBuilder.
+static LogicalResult
+convertOmpTargetDeclare(Operation &opInst, llvm::IRBuilderBase &builder,
+                        LLVM::ModuleTranslation &moduleTranslation) {
+  ::ModuleOp mod = opInst.getParentOfType<::ModuleOp>();
+  Attribute modTargetAttr = mod->getAttr("omp.targettype");
+  auto tarDecOp = cast<omp::TargetDeclareOp>(opInst);
+  llvm::LLVMContext &llvmContext = moduleTranslation.getLLVMContext();
+
+  //  if (modTargetAttr.isa<mlir::BoolAttr>()) {
+  //   BoolAttr compilationIsDevice = modTargetAttr.dyn_cast<BoolAttr>();
+
+  // Can I take the device function I find, remove it and re-codegen it with
+  // relevant address spaces? or is it possible to tag the LLVMFuncOp with
+  // something to make it do some kind of codegen
+
+  bool isDevice = true;
+  // Remove functions directly that we know are not requried for this
+  // compilation phase
+  if ((tarDecOp.getDeviceType() ==
+           ::mlir::omp::ClauseDeviceType::devicetypenohost &&
+       /*!compilationIsDevice.getValue()*/ !isDevice) ||
+      (tarDecOp.getDeviceType() ==
+           ::mlir::omp::ClauseDeviceType::devicetypehost &&
+       /*compilationIsDevice.getValue()*/ isDevice)) {
+    /// TODO: Handle Link Operands
+    /// TODO: Handle data, not just functions, this will possibly require code
+    /// generation
+    auto toIter = tarDecOp.getToOperands()->getAsRange<FlatSymbolRefAttr>();
+    for (auto symRef : toIter) {
+      auto *llvmFunc = moduleTranslation.lookupFunction(symRef.getValue());
+
+      auto fOp = mod.lookupSymbol<::LLVM::LLVMFuncOp>(symRef.getValue());
+      if (fOp) {
+        fOp->dropAllUses();
+        fOp->dropAllReferences();
+        fOp->dropAllDefinedValueUses();
+        fOp.erase();
+      }
+
+      if (llvmFunc) {
+        llvmFunc->replaceAllUsesWith(
+            llvm::UndefValue::get(llvmFunc->getType()));
+        llvmFunc->eraseFromParent();
+      }
+    }
+  }
+
+  // Tag the rest with LLVM IR Attributes so we can remove everything else not
+  // tagged with the attribute (or a kernel attribute) in a later LLVM IR pass
+  if ((tarDecOp.getDeviceType() ==
+       ::mlir::omp::ClauseDeviceType::devicetypeany) ||
+      (tarDecOp.getDeviceType() ==
+           ::mlir::omp::ClauseDeviceType::devicetypenohost &&
+       /*!compilationIsDevice.getValue()*/ isDevice) ||
+      (tarDecOp.getDeviceType() ==
+           ::mlir::omp::ClauseDeviceType::devicetypehost &&
+       /*compilationIsDevice.getValue()*/ !isDevice)) {
+
+    auto toIter = tarDecOp.getToOperands()->getAsRange<FlatSymbolRefAttr>();
+    for (auto symRef : toIter) {
+      auto *llvmFunc = moduleTranslation.lookupFunction(symRef.getValue());
+
+      if (llvmFunc) {
+        // llvm::CallingConv::SPIR_FUNC or SPIR_KERNEL, could in theory use
+        // something like this to indicate device
+        llvmFunc->addMetadata(
+            "target.declare.required",
+            *llvm::MDNode::get(llvmContext,
+                               llvm::MDString::get(llvmContext, "1")));
+      }
+    }
+  }
+  //} else {
+  //  assert(false && "unexpected module targettype information");
+  //}
+
+  return success();
+}
+
 static LogicalResult
 convertOmpCritical(Operation &opInst, llvm::IRBuilderBase &builder,
                    LLVM::ModuleTranslation &moduleTranslation) {
@@ -1451,6 +1536,9 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
       })
       .Case([&](omp::ThreadprivateOp) {
         return convertOmpThreadprivate(*op, builder, moduleTranslation);
+      })
+      .Case([&](omp::TargetDeclareOp) {
+        return convertOmpTargetDeclare(*op, builder, moduleTranslation);
       })
       .Default([&](Operation *inst) {
         return inst->emitError("unsupported OpenMP operation: ")

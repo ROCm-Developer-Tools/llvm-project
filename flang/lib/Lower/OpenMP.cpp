@@ -20,11 +20,14 @@
 #include "flang/Optimizer/Builder/BoxValue.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
 #include "flang/Optimizer/Builder/Todo.h"
+#include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Parser/parse-tree.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
+#include <mlir/Dialect/Func/IR/FuncOps.h>
+#include <mlir/IR/BuiltinAttributes.h>
 
 using namespace mlir;
 
@@ -1922,7 +1925,6 @@ void Fortran::lower::genOpenMPDeclarativeConstruct(
     Fortran::lower::AbstractConverter &converter,
     Fortran::lower::pft::Evaluation &eval,
     const Fortran::parser::OpenMPDeclarativeConstruct &ompDeclConstruct) {
-
   std::visit(
       common::visitors{
           [&](const Fortran::parser::OpenMPDeclarativeAllocate
@@ -1940,8 +1942,105 @@ void Fortran::lower::genOpenMPDeclarativeConstruct(
           },
           [&](const Fortran::parser::OpenMPDeclareTargetConstruct
                   &declareTargetConstruct) {
-            TODO(converter.getCurrentLocation(),
-                 "OpenMPDeclareTargetConstruct");
+            // The beginning of what I think is some infrastructure that could
+            // be used for data retrieval for the clauses, currently the parser
+            // doesn't seem to like the TO clause, the rest need to be tested
+            auto findFuncAndVar = [&](const parser::OmpObjectList &objList) {
+              for (const auto &ompObject : objList.v) {
+                common::visit(common::visitors{
+                                  [&](const parser::Designator &) {},
+                                  [&](const parser::Name &) {}, // common block
+                              },
+                              ompObject.u);
+              }
+            };
+            // useful helper function for the future, used by privatize, grabs a
+            // symbol ref:
+            // getOmpObjectSymbol()
+
+            const auto &spec{std::get<parser::OmpDeclareTargetSpecifier>(
+                declareTargetConstruct.t)};
+            if (const auto *objectList{
+                    parser::Unwrap<parser::OmpObjectList>(spec.u)}) {
+              findFuncAndVar(*objectList);
+            } else if (const auto *clauseList{
+                           parser::Unwrap<parser::OmpClauseList>(spec.u)}) {
+              for (const auto &clause : clauseList->v) {
+                if (const auto *toClause{
+                        std::get_if<parser::OmpClause::To>(&clause.u)}) {
+                  findFuncAndVar(toClause->v);
+                } else if (const auto *linkClause{
+                               std::get_if<parser::OmpClause::Link>(
+                                   &clause.u)}) {
+                  findFuncAndVar(linkClause->v);
+                }
+              }
+            }
+
+            auto firOpBuilder = converter.getFirOpBuilder();
+
+            // Currently assuming the Fortran pragma is placed like this:
+            //
+            // FUNCTION FUNC() RESULT(X)
+            // !$omp declare target
+            //     INTEGER :: X
+            //     X = 1
+            // END FUNCTION FUNC
+            //
+            // So one of the implicit capture cases, where target applies to the
+            // containing function and type is assumed to be any. So, the fall
+            // through case if no link or to clauses are specified.
+            auto deviceTypeAttr = mlir::omp::ClauseDeviceTypeAttr::get(
+                &converter.getMLIRContext(),
+                mlir::omp::ClauseDeviceType::devicetypehost);
+
+            std::string globalName = converter.mangleName(
+                eval.getOwningProcedure()->getSubprogramSymbol());
+            auto funcSym =
+                firOpBuilder.getModule().lookupSymbol<mlir::func::FuncOp>(
+                    globalName);
+
+            // Mangle the name with gfortran convention, this is taken from
+            // ExternalNameConversion.cpp. At some point between the phases
+            // that occur between -emit-mlir (or -emit-fir) and -emit-llvm
+            // the FuncOp symbol mangling gets converted by a rewrtie rule
+            // (MangleNameOnFuncOp). This then gets carried on down to the
+            // LLVM Dialects LLVMFuncOp. This results in an inconsistency
+            // between symbols retrieved by the frontend and the
+            // OpenMPTOLLVMIRTranslation stage of the lowering. This block of
+            // code aims to fix this and give us a symbol conversion from the
+            // Frontend symbol to it's rewritten form. This unfortunately does
+            // result in an inconsistency between the data in the operation
+            // and the FIR FuncOp name when -emit-mlir/-emit-fir are used.
+            // However, including FIR dependencies or replicating the code
+            // inside of the OpenMPTOLLVMIRTranslation.cpp file may be worse to
+            // do, although possible.
+            // NOTE: There may be a better method of keeping track of functions
+            // in MLIR than via symbols, this just seemed the obvious choice,
+            // the fir.allocas appear to keep the same mangled uniq_name binding
+            // in their operator all the way down, so there might be a way to
+            // map between them, or it suffers from a similar issue
+            // auto firSymbolMangle = [](auto symRefStr) {
+            //   auto result = fir::NameUniquer::deconstruct(symRefStr);
+            //   if (fir::NameUniquer::isExternalFacingUniquedName(result)) {
+            //     if (result.first == fir::NameUniquer::NameKind::COMMON &&
+            //         result.second.name.empty())
+            //       return llvm::StringRef("__BLNK__");
+            //     return llvm::StringRef(result.second.name + "_");
+            //   }
+            //   return symRefStr;
+            // };
+
+            auto funcSymRef = mlir::FlatSymbolRefAttr::get(
+                firOpBuilder.getContext(), funcSym.getSymName());
+
+            auto toSymbols = mlir::ArrayAttr::get(
+                firOpBuilder.getContext(),
+                llvm::ArrayRef<mlir::Attribute>{funcSymRef});
+
+            firOpBuilder.create<mlir::omp::TargetDeclareOp>(
+                converter.getCurrentLocation(), deviceTypeAttr, toSymbols,
+                nullptr);
           },
           [&](const Fortran::parser::OpenMPRequiresConstruct
                   &requiresConstruct) {
