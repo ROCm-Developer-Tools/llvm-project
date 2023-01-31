@@ -11,7 +11,8 @@
 #include "CommonArgs.h"
 
 #include "clang/Driver/Options.h"
-
+#include "llvm/ADT/StringMap.h"
+#include "llvm/TargetParser/TargetParser.h"
 #include <cassert>
 
 using namespace clang::driver;
@@ -96,6 +97,22 @@ void Flang::addTargetOptions(const ArgList &Args,
   switch (TC.getArch()) {
   default:
     break;
+  case llvm::Triple::r600:
+    [[fallthrough]];
+  case llvm::Triple::amdgcn: {
+    llvm::StringMap<bool> Features;
+    std::string ErrorMsg;
+    llvm::AMDGPU::fillAMDGPUFeatureMap(CPU, Triple, Features);
+    if (!llvm::AMDGPU::insertWaveSizeFeature(CPU, Triple, Features, ErrorMsg)) {
+      D.Diag(diag::err_invalid_feature_combination) << ErrorMsg;
+    }
+    for (auto &Feature : Features) {
+      CmdArgs.push_back("-target-feature");
+      CmdArgs.push_back(Args.MakeArgString(
+          (Twine(Feature.second ? "+" : "-") + Feature.first().str()).str()));
+    }
+    break;
+  }
   case llvm::Triple::aarch64:
     [[fallthrough]];
   case llvm::Triple::x86_64:

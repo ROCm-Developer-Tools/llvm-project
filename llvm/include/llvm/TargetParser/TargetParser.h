@@ -14,6 +14,7 @@
 #ifndef LLVM_TARGETPARSER_TARGETPARSER_H
 #define LLVM_TARGETPARSER_TARGETPARSER_H
 
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include <cstdint>
 // FIXME: vector is used because that's what clang uses for subtarget feature
@@ -152,6 +153,11 @@ void fillValidArchListAMDGCN(SmallVectorImpl<StringRef> &Values);
 void fillValidArchListR600(SmallVectorImpl<StringRef> &Values);
 
 IsaVersion getIsaVersion(StringRef GPU);
+
+void fillAMDGPUFeatureMap(StringRef CPU, const Triple &T,
+                          StringMap<bool> &Features);
+bool insertWaveSizeFeature(StringRef CPU, const Triple &T,
+                           StringMap<bool> &Features, StringRef ErrorMsg);
 
 } // namespace AMDGPU
 } // namespace llvm
