@@ -1298,8 +1298,6 @@ void clang::EmbedObject(llvm::Module *M, const CodeGenOptions &CGOpts,
     return;
 
   for (StringRef OffloadObject : CGOpts.OffloadObjects) {
-    printf("===== clang::EmbedObject Embedding object %s\n",
-           OffloadObject.str().c_str());
     llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> ObjectOrErr =
         llvm::MemoryBuffer::getFileOrSTDIN(OffloadObject);
     if (std::error_code EC = ObjectOrErr.getError()) {
