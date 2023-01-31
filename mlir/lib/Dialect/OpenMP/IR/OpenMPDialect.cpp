@@ -1359,7 +1359,7 @@ LogicalResult TargetDeclareOp::verify() {
   // no-op
   if ((!toOps || toOps->empty()) && (!linkOps || linkOps->empty()))
     return emitOpError()
-           << "The TargetDeclareOp must have ToOperands or LinkOperands";
+           << "the TargetDeclareOp must have ToOperands or LinkOperands";
 
   return success();
 }

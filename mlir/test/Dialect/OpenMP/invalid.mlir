@@ -1551,3 +1551,59 @@ func.func @omp_threadprivate() {
 }
 
 llvm.mlir.global internal @_QFsubEx() : i32
+
+// -----
+
+func.func @omp_target_declare() -> () {
+  // expected-error @below {{op the TargetDeclareOp must have ToOperands or LinkOperands}}
+  omp.target.declare to([]) link([]) device_type(devicetypeany)
+  return
+}
+
+// -----
+
+func.func @omp_target_declare() -> () {
+  // expected-error @below {{op the TargetDeclareOp must have ToOperands or LinkOperands}}
+  omp.target.declare to() link() device_type(devicetypeany)
+  return
+}
+
+// -----
+
+func.func @omp_target_declare() -> () {
+  // expected-error @below {{op the TargetDeclareOp must have ToOperands or LinkOperands}}
+  omp.target.declare to() device_type(devicetypeany)
+  return
+}
+
+// -----
+
+func.func @omp_target_declare() -> () {
+  // expected-error @below {{op the TargetDeclareOp must have ToOperands or LinkOperands}}
+  omp.target.declare link() device_type(devicetypeany)
+  return
+}
+
+// -----
+
+func.func @omp_target_declare() -> () {
+  // expected-error @below {{op the TargetDeclareOp must have ToOperands or LinkOperands}}
+  omp.target.declare to([]) device_type(devicetypeany)
+  return
+}
+
+// -----
+
+func.func @omp_target_declare() -> () {
+  // expected-error @below {{op the TargetDeclareOp must have ToOperands or LinkOperands}}
+  omp.target.declare link([]) device_type(devicetypeany) 
+  return
+}
+
+// -----
+
+func.func @omp_target_declare() -> () {
+  // expected-error @below {{op the TargetDeclareOp must have ToOperands or LinkOperands}}
+  omp.target.declare device_type(devicetypeany)
+  return
+}
