@@ -737,18 +737,19 @@ void CodeGenAction::runOptimizationPipeline(llvm::raw_pwrite_stream &os) {
 
 void CodeGenAction::embedOffloadObjects() {
   CompilerInstance &ci = this->getInstance();
-  const auto &CGOpts = ci.getInvocation().getCodeGenOpts();
+  const auto &cgOpts = ci.getInvocation().getCodeGenOpts();
 
-  for (llvm::StringRef OffloadObject : CGOpts.OffloadObjects) {
-    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> ObjectOrErr =
-        llvm::MemoryBuffer::getFileOrSTDIN(OffloadObject);
-    if (std::error_code EC = ObjectOrErr.getError()) {
-      auto DiagID = ci.getDiagnostics().getCustomDiagID(
+  for (llvm::StringRef offloadObject : cgOpts.OffloadObjects) {
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> objectOrErr =
+        llvm::MemoryBuffer::getFileOrSTDIN(offloadObject);
+    if (std::error_code ec = objectOrErr.getError()) {
+      auto diagID = ci.getDiagnostics().getCustomDiagID(
           clang::DiagnosticsEngine::Error, "could not open '%0' for embedding");
-      ci.getDiagnostics().Report(DiagID) << OffloadObject;
+      ci.getDiagnostics().Report(diagID) << offloadObject;
+      return;
     }
     llvm::embedBufferInModule(
-        *llvmModule, **ObjectOrErr, ".llvm.offloading",
+        *llvmModule, **objectOrErr, ".llvm.offloading",
         llvm::Align(llvm::object::OffloadBinary::getAlignment()));
   }
 }
