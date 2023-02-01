@@ -59,11 +59,11 @@ public:
       auto newSymbol = rewriter.getStringAttr(mangleExternalName(result));
 
       // Try to update all SymbolRef's in the module that match the current op
-      if (ModuleOp mod = op->getParentOfType<ModuleOp>())
+      if (mlir::ModuleOp mod = op->getParentOfType<mlir::ModuleOp>())
         ret = op.replaceAllSymbolUses(newSymbol, mod);
 
       op.setSymNameAttr(newSymbol);
-      SymbolTable::setSymbolName(op, newSymbol);
+      mlir::SymbolTable::setSymbolName(op, newSymbol);
     }
 
     rewriter.finalizeRootUpdate(op);
