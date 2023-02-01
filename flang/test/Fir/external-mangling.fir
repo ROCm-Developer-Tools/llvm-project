@@ -44,19 +44,19 @@ func.func private @_QPbar2(!fir.ref<f32>)
 // ----- 
 
 func.func @_QPcallee() {
-  func.call @_QPcallee() : () -> ()
+  fir.call @_QPcallee() : () -> ()
   return
 }
 
 func.func @_QPcaller() {
-  func.call @_QPcallee() : () -> ()
+  fir.call @_QPcallee() : () -> ()
   return 
 }
 
 // CHECK: func @callee_
-// CHECK: call @callee_
+// CHECK: fir.call @callee_
 // CHECK: func @caller_
-// CHECK: call @callee_
+// CHECK: fir.call @callee_
 
 // LLVMIR: llvm.call @callee_() : () -> ()
 // LLVMIR: llvm.call @callee_() : () -> ()
