@@ -1954,8 +1954,8 @@ void Fortran::lower::genOpenMPDeclarativeConstruct(
                               ompObject.u);
               }
             };
-            // useful helper function for the future, used by privatize, grabs a
-            // symbol ref:
+            // possible useful helper function for the future that resides in
+            // this file, used by privatize, grabs a symbol ref:
             // getOmpObjectSymbol()
 
             const auto &spec{std::get<parser::OmpDeclareTargetSpecifier>(
@@ -1973,11 +1973,30 @@ void Fortran::lower::genOpenMPDeclarativeConstruct(
                                std::get_if<parser::OmpClause::Link>(
                                    &clause.u)}) {
                   findFuncAndVar(linkClause->v);
+                } else if (const auto *deviceClause{
+                               std::get_if<parser::OmpClause::DeviceType>(
+                                   &clause.u)}) {
+                  // do something for device_type, such as get a number or enum
+                  // from it and convert it to an ClauseDeviceTypeAttr
                 }
               }
             }
 
             auto firOpBuilder = converter.getFirOpBuilder();
+            auto mod = firOpBuilder.getModule();
+
+            // doesn't work at the moment as there is no module information till
+            // we decide on a direction, it will remain as set
+            bool isOpenMPDevice = true;
+            if (Attribute modTargetAttr = mod->getAttr("omp.targettype"))
+              if (modTargetAttr.isa<mlir::BoolAttr>()) {
+                BoolAttr targetType = modTargetAttr.dyn_cast<BoolAttr>();
+                isOpenMPDevice = targetType.getValue();
+              }
+
+            // FIXME: This should be found from the pragma directive once the
+            // clause is supported.
+            auto deviceType = mlir::omp::ClauseDeviceType::devicetypeany;
 
             // Currently assuming the Fortran pragma is placed like this:
             //
@@ -1990,57 +2009,57 @@ void Fortran::lower::genOpenMPDeclarativeConstruct(
             // So one of the implicit capture cases, where target applies to the
             // containing function and type is assumed to be any. So, the fall
             // through case if no link or to clauses are specified.
-            auto deviceTypeAttr = mlir::omp::ClauseDeviceTypeAttr::get(
-                &converter.getMLIRContext(),
-                mlir::omp::ClauseDeviceType::devicetypehost);
+            auto fOp =
+                mod.lookupSymbol<mlir::func::FuncOp>(converter.mangleName(
+                    eval.getOwningProcedure()->getSubprogramSymbol()));
 
-            std::string globalName = converter.mangleName(
-                eval.getOwningProcedure()->getSubprogramSymbol());
-            auto funcSym =
-                firOpBuilder.getModule().lookupSymbol<mlir::func::FuncOp>(
-                    globalName);
-
-            // Mangle the name with gfortran convention, this is taken from
-            // ExternalNameConversion.cpp. At some point between the phases
-            // that occur between -emit-mlir (or -emit-fir) and -emit-llvm
-            // the FuncOp symbol mangling gets converted by a rewrtie rule
-            // (MangleNameOnFuncOp). This then gets carried on down to the
-            // LLVM Dialects LLVMFuncOp. This results in an inconsistency
-            // between symbols retrieved by the frontend and the
-            // OpenMPTOLLVMIRTranslation stage of the lowering. This block of
-            // code aims to fix this and give us a symbol conversion from the
-            // Frontend symbol to it's rewritten form. This unfortunately does
-            // result in an inconsistency between the data in the operation
-            // and the FIR FuncOp name when -emit-mlir/-emit-fir are used.
-            // However, including FIR dependencies or replicating the code
-            // inside of the OpenMPTOLLVMIRTranslation.cpp file may be worse to
-            // do, although possible.
-            // NOTE: There may be a better method of keeping track of functions
-            // in MLIR than via symbols, this just seemed the obvious choice,
-            // the fir.allocas appear to keep the same mangled uniq_name binding
-            // in their operator all the way down, so there might be a way to
-            // map between them, or it suffers from a similar issue
-            // auto firSymbolMangle = [](auto symRefStr) {
-            //   auto result = fir::NameUniquer::deconstruct(symRefStr);
-            //   if (fir::NameUniquer::isExternalFacingUniquedName(result)) {
-            //     if (result.first == fir::NameUniquer::NameKind::COMMON &&
-            //         result.second.name.empty())
-            //       return llvm::StringRef("__BLNK__");
-            //     return llvm::StringRef(result.second.name + "_");
-            //   }
-            //   return symRefStr;
-            // };
-
-            auto funcSymRef = mlir::FlatSymbolRefAttr::get(
-                firOpBuilder.getContext(), funcSym.getSymName());
-
-            auto toSymbols = mlir::ArrayAttr::get(
-                firOpBuilder.getContext(),
-                llvm::ArrayRef<mlir::Attribute>{funcSymRef});
-
-            firOpBuilder.create<mlir::omp::TargetDeclareOp>(
-                converter.getCurrentLocation(), deviceTypeAttr, toSymbols,
-                nullptr);
+            // delete function early if we know it is going to be discared, if
+            // it is device_type any we keep it. This feels a little
+            // inconsistent as we can only remove things we know are unneeded at
+            // this stage, so we'll still end up with a module of mixed
+            // functions with some needing removal at a later stage in either
+            // case.
+            if ((deviceType ==
+                     ::mlir::omp::ClauseDeviceType::devicetypenohost &&
+                 !isOpenMPDevice) ||
+                (deviceType == ::mlir::omp::ClauseDeviceType::devicetypehost &&
+                 isOpenMPDevice)) {
+              fOp->dropAllUses();
+              fOp->dropAllReferences();
+              fOp->dropAllDefinedValueUses();
+              fOp->remove();
+            } else {
+              // Method 1: Remove function here if not desired and add adhoc
+              // attribute to the MLIR Funcs for special handling later
+              // if (deviceType ==
+              //     ::mlir::omp::ClauseDeviceType::devicetypenohost) {
+              //   fOp->setAttr(
+              //       "device_type",
+              //       mlir::StringAttr::get(firOpBuilder.getContext(),
+              //       "nohost"));
+              // } else if (deviceType ==
+              //            ::mlir::omp::ClauseDeviceType::devicetypehost) {
+              //   fOp->setAttr(
+              //       "device_type",
+              //       mlir::StringAttr::get(firOpBuilder.getContext(),
+              //       "host"));
+              // } else {
+              //   fOp->setAttr(
+              //       "device_type",
+              //       mlir::StringAttr::get(firOpBuilder.getContext(), "any"));
+              // }
+              // Method 2: Generate an Op for the backend to find and deal with:
+              auto deviceTypeAttr = mlir::omp::ClauseDeviceTypeAttr::get(
+                  &converter.getMLIRContext(), deviceType);
+              auto funcSymRef = mlir::FlatSymbolRefAttr::get(
+                  firOpBuilder.getContext(), fOp.getSymName());
+              auto toSymbols = mlir::ArrayAttr::get(
+                  firOpBuilder.getContext(),
+                  llvm::ArrayRef<mlir::Attribute>{funcSymRef});
+              firOpBuilder.create<mlir::omp::TargetDeclareOp>(
+                  converter.getCurrentLocation(), deviceTypeAttr, toSymbols,
+                  nullptr);
+            }
           },
           [&](const Fortran::parser::OpenMPRequiresConstruct
                   &requiresConstruct) {
