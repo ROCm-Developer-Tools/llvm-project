@@ -26,15 +26,19 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/OptTable.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Triple.h"
+#include <clang/Basic/Visibility.h>
 #include <memory>
 #include <optional>
 
@@ -165,6 +169,21 @@ static void parseCodeGenArgs(Fortran::frontend::CodeGenOptions &opts,
     opts.PICLevel = PICLevel;
     if (args.hasArg(clang::driver::options::OPT_pic_is_pie))
       opts.IsPIE = 1;
+  }
+
+  if (args.hasArg(clang::driver::options::OPT_disable_llvm_passes))
+    opts.DisableLLVMPasses = 1;
+
+  for (auto *a :
+       args.filtered(clang::driver::options::OPT_mlink_builtin_bitcode)) {
+    CodeGenOptions::BitcodeFileToLink file;
+    file.Filename = a->getValue();
+    file.LinkFlags = llvm::Linker::Flags::LinkOnlyNeeded;
+    // When linking CUDA bitcode, propagate function attributes so that
+    // e.g. libdevice gets fast-math attrs if we're building with fast-math.
+    file.PropagateAttrs = true;
+    file.Internalize = true;
+    opts.LinkBitcodeFiles.push_back(file);
   }
 }
 
@@ -347,6 +366,8 @@ static bool parseFrontendArgs(FrontendOptions &opts, llvm::opt::ArgList &args,
   opts.outputFile = args.getLastArgValue(clang::driver::options::OPT_o);
   opts.showHelp = args.hasArg(clang::driver::options::OPT_help);
   opts.showVersion = args.hasArg(clang::driver::options::OPT_version);
+
+  opts.auxTriple = args.getLastArgValue(clang::driver::options::OPT_aux_triple);
 
   // Get the input kind (from the value passed via `-x`)
   InputKind dashX(Language::Unknown);
@@ -532,6 +553,16 @@ static void parsePreprocessorArgs(Fortran::frontend::PreprocessorOptions &opts,
   for (const auto *currentArg : args.filtered(clang::driver::options::OPT_I))
     opts.searchDirectoriesFromDashI.emplace_back(currentArg->getValue());
 
+  // Add the ordered list of -internal-isystem's after -I's.
+  for (const auto *currentArg :
+       args.filtered(clang::driver::options::OPT_internal_isystem))
+    opts.searchDirectoriesFromDashI.emplace_back(currentArg->getValue());
+
+  // Add the ordered list of -includes.
+  for (const auto *currentArg :
+       args.filtered(clang::driver::options::OPT_include))
+    opts.includes.emplace_back(currentArg->getValue());
+
   // Prepend the ordered list of -intrinsic-modules-path
   // to the default location to search.
   for (const auto *currentArg :
@@ -623,6 +654,24 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
                              clang::DiagnosticsEngine &diags) {
   unsigned numErrorsBefore = diags.getNumErrors();
 
+  if (llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_fvisibility_EQ)) {
+    clang::Visibility visibility;
+    llvm::StringRef visibilityStr = a->getValue();
+    if (visibilityStr.equals("hidden")) {
+      visibility = clang::HiddenVisibility;
+    } else if (visibilityStr.equals("protected")) {
+      visibility = clang::ProtectedVisibility;
+    } else if (visibilityStr.equals("default")) {
+      visibility = clang::DefaultVisibility;
+    } else {
+      diags.Report(clang::diag::err_drv_invalid_value)
+          << a->getAsString(args) << visibilityStr;
+      return false;
+    }
+    res.getLangOpts().setValueVisibilityMode(visibility);
+  }
+
   // -fdefault* family
   if (args.hasArg(clang::driver::options::OPT_fdefault_real_8)) {
     res.getDefaultKinds().set_defaultRealKind(8);
@@ -656,7 +705,58 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
   if (args.hasArg(clang::driver::options::OPT_fopenmp)) {
     res.getFrontendOpts().features.Enable(
         Fortran::common::LanguageFeature::OpenMP);
+
+    if (args.hasArg(clang::driver::options::OPT_fopenmp_is_device)) {
+      res.getLangOpts().OpenMPIsDevice = 1;
+    }
   }
+
+  // Get OpenMP host file path if any and report if a non existent file is
+  // found
+  if (llvm::opt::Arg *a = args.getLastArg(
+          clang::driver::options::OPT_fopenmp_host_ir_file_path)) {
+    const char *irPath = a->getValue();
+    res.getLangOpts().ompHostIRFile = irPath;
+    if (!llvm::sys::fs::exists(irPath))
+      diags.Report(clang::diag::err_drv_omp_host_ir_file_not_found) << irPath;
+  }
+
+  // Get the OpenMP target triples if any.
+  llvm::Triple triple(res.getTargetOpts().triple);
+  if (llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_fopenmp_targets_EQ)) {
+    enum ArchPtrSize { Arch16Bit, Arch32Bit, Arch64Bit };
+    auto getArchPtrSize = [](const llvm::Triple &T) {
+      if (T.isArch16Bit())
+        return Arch16Bit;
+      if (T.isArch32Bit())
+        return Arch32Bit;
+      assert(T.isArch64Bit() && "Expected 64-bit architecture");
+      return Arch64Bit;
+    };
+
+    for (unsigned i = 0; i < a->getNumValues(); ++i) {
+      llvm::Triple targetTriple(a->getValue(i));
+      const auto targetArch = targetTriple.getArch();
+
+      if (targetArch == llvm::Triple::UnknownArch ||
+          !(targetArch == llvm::Triple::aarch64 || targetTriple.isPPC() ||
+            targetArch == llvm::Triple::nvptx ||
+            targetArch == llvm::Triple::nvptx64 ||
+            targetArch == llvm::Triple::amdgcn ||
+            targetArch == llvm::Triple::x86 ||
+            targetArch == llvm::Triple::x86_64))
+        diags.Report(clang::diag::err_drv_invalid_omp_target) << a->getValue(i);
+      else if (getArchPtrSize(triple) != getArchPtrSize(targetTriple))
+        diags.Report(clang::diag::err_drv_incompatible_omp_arch)
+            << a->getValue(i) << triple.str();
+      else
+        res.getLangOpts().ompTargetTriples.push_back(targetTriple);
+    }
+  }
+
+  if (args.hasArg(clang::driver::options::OPT_fcuda_is_device))
+    res.getLangOpts().CUDAIsDevice = 1;
 
   // -pedantic
   if (args.hasArg(clang::driver::options::OPT_pedantic)) {
@@ -803,6 +903,9 @@ bool CompilerInvocation::createFromArgs(
 
   success &= parseFloatingPointArgs(res, args, diags);
 
+  if (res.getLangOpts().OpenMPIsDevice)
+    res.getTargetOpts().hostTriple = res.getFrontendOpts().auxTriple;
+
   return success;
 }
 
@@ -908,6 +1011,11 @@ void CompilerInvocation::setFortranOpts() {
       fortranOptions.searchDirectories.end(),
       preprocessorOptions.searchDirectoriesFromIntrModPath.begin(),
       preprocessorOptions.searchDirectoriesFromIntrModPath.end());
+
+  // Adding includes specified by -include
+  fortranOptions.includes.insert(fortranOptions.includes.end(),
+                                 preprocessorOptions.includes.begin(),
+                                 preprocessorOptions.includes.end());
 
   //  Add the default intrinsic module directory
   fortranOptions.intrinsicModuleDirectories.emplace_back(getIntrinsicDir());

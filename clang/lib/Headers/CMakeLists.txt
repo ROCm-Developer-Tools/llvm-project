@@ -280,6 +280,7 @@ set(openmp_wrapper_files
   openmp_wrappers/complex
   openmp_wrappers/__clang_openmp_device_functions.h
   openmp_wrappers/complex_cmath.h
+  openmp_wrappers/__flang_openmp_device_functions.f90
   openmp_wrappers/new
 )
 

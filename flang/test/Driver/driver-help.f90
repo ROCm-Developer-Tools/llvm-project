@@ -75,7 +75,9 @@
 ! HELP-FC1:USAGE: flang
 ! HELP-FC1-EMPTY:
 ! HELP-FC1-NEXT:OPTIONS:
+! HELP-FC1-NEXT: -aux-triple <value>    Auxiliary target triple.
 ! HELP-FC1-NEXT: -cpp                   Enable predefined and command line preprocessor macros
+! HELP-FC1-NEXT: -disable-llvm-passes   Use together with -emit-llvm to get pristine LLVM IR from the frontend by not running any LLVM passes at all
 ! HELP-FC1-NEXT: -D <macro>=<value>     Define <macro> to <value> (or 1 if <value> omitted)
 ! HELP-FC1-NEXT: -emit-llvm-bc          Build ASTs then convert to LLVM, emit .bc file
 ! HELP-FC1-NEXT: -emit-llvm Use the LLVM representation for assembler and object files
@@ -88,6 +90,7 @@
 ! HELP-FC1-NEXT: -fbackslash            Specify that backslash in string introduces an escape character
 ! HELP-FC1-NEXT: -fcolor-diagnostics     Enable colors in diagnostics
 ! HELP-FC1-NEXT: -fconvert=<value>      Set endian conversion of data for unformatted files
+! HELP-FC1-NEXT: -fcuda-is-device       Generate code for CUDA device
 ! HELP-FC1-NEXT: -fdebug-dump-all       Dump symbols and the parse tree after the semantic checks
 ! HELP-FC1-NEXT: -fdebug-dump-parse-tree-no-sema
 ! HELP-FC1-NEXT:                        Dump the parse tree (skips the semantic checks)
@@ -133,17 +136,28 @@
 ! HELP-FC1-NEXT: -fno-reformat          Dump the cooked character stream in -E mode
 ! HELP-FC1-NEXT: -fno-signed-zeros      Allow optimizations that ignore the sign of floating point zeros
 ! HELP-FC1-NEXT: -fopenacc              Enable OpenACC
+! HELP-FC1-NEXT: -fopenmp-host-ir-file-path
+! HELP-FC1-NEXT:                        Path to the IR file produced by the frontend for the host.
+! HELP-FC1-NEXT: -fopenmp-is-device     Generate code only for an OpenMP target device.
+! HELP-FC1-NEXT: -fopenmp-targets=<value>
+! HELP-FC1-NEXT:                        Specify comma-separated list of triples OpenMP offloading targets to be supported
 ! HELP-FC1-NEXT: -fopenmp               Parse OpenMP pragmas and generate parallel code.
 ! HELP-FC1-NEXT: -fpass-plugin=<dsopath> Load pass plugin from a dynamic shared object file (only with new pass manager).
 ! HELP-FC1-NEXT: -freciprocal-math      Allow division operations to be reassociated
 ! HELP-FC1-NEXT: -fsyntax-only          Run the preprocessor, parser and semantic analysis stages
+! HELP-FC1-NEXT: -fvisibility=<value>   Set the default symbol visibility for all global definitions
 ! HELP-FC1-NEXT: -fxor-operator         Enable .XOR. as a synonym of .NEQV.
 ! HELP-FC1-NEXT: -help                  Display available options
+! HELP-FC1-NEXT: -include <file>        Include file before parsing
 ! HELP-FC1-NEXT: -init-only             Only execute frontend initialization
+! HELP-FC1-NEXT: -internal-isystem <directory>
+! HELP-FC1-NEXT:                        Add directory to the internal system include search path; these are assumed to not be user-provided and are used to model system and standard headers' paths.
 ! HELP-FC1-NEXT: -I <dir>               Add directory to the end of the list of include search paths
 ! HELP-FC1-NEXT: -load <dsopath>        Load the named plugin (dynamic shared object)
 ! HELP-FC1-NEXT: -menable-no-infs       Allow optimization to assume there are no infinities.
 ! HELP-FC1-NEXT: -menable-no-nans       Allow optimization to assume there are no NaNs.
+! HELP-FC1-NEXT: -mlink-builtin-bitcode <value>
+! HELP-FC1-NEXT:                        Link and internalize needed symbols from the given bitcode file before performing optimizations.
 ! HELP-FC1-NEXT: -mllvm <value>         Additional arguments to forward to LLVM's option processing
 ! HELP-FC1-NEXT: -mmlir <value>         Additional arguments to forward to MLIR's option processing
 ! HELP-FC1-NEXT: -module-dir <dir>      Put MODULE files in <dir>
