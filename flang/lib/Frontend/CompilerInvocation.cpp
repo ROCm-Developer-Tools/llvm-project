@@ -538,6 +538,11 @@ static void parsePreprocessorArgs(Fortran::frontend::PreprocessorOptions &opts,
        args.filtered(clang::driver::options::OPT_fintrinsic_modules_path))
     opts.searchDirectoriesFromIntrModPath.emplace_back(currentArg->getValue());
 
+  // Add the ordered list of -include's
+  for (const auto *currentArg :
+       args.filtered(clang::driver::options::OPT_include))
+    opts.includes.emplace_back(currentArg->getValue());
+
   // -cpp/-nocpp
   if (const auto *currentArg = args.getLastArg(
           clang::driver::options::OPT_cpp, clang::driver::options::OPT_nocpp))
@@ -908,6 +913,11 @@ void CompilerInvocation::setFortranOpts() {
       fortranOptions.searchDirectories.end(),
       preprocessorOptions.searchDirectoriesFromIntrModPath.begin(),
       preprocessorOptions.searchDirectoriesFromIntrModPath.end());
+
+  // Adding includes specified by -include
+  fortranOptions.includes.insert(fortranOptions.includes.end(),
+                                 preprocessorOptions.includes.begin(),
+                                 preprocessorOptions.includes.end());
 
   //  Add the default intrinsic module directory
   fortranOptions.intrinsicModuleDirectories.emplace_back(getIntrinsicDir());

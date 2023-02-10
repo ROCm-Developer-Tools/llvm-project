@@ -34,6 +34,7 @@ struct Options {
   std::vector<std::string> searchDirectories;
   std::vector<std::string> intrinsicModuleDirectories;
   std::vector<Predefinition> predefinitions;
+  std::vector<std::string> includes;
   bool instrumentedParse{false};
   bool isModuleFile{false};
   bool needProvenanceRangeToCharBlockMappings{false};

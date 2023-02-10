@@ -47,6 +47,8 @@ struct PreprocessorOptions {
   std::vector<std::string> searchDirectoriesFromDashI;
   // Search directories specified by the user with -fintrinsic-modules-path
   std::vector<std::string> searchDirectoriesFromIntrModPath;
+  // Includes specified by the user with -include
+  std::vector<std::string> includes;
 
   PPMacrosFlag macrosFlag = PPMacrosFlag::Unknown;
 

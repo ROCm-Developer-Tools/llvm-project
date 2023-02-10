@@ -84,6 +84,24 @@ const SourceFile *Parsing::Prescan(const std::string &path, Options options) {
     prescanner.AddCompilerDirectiveSentinel("$omp");
     prescanner.AddCompilerDirectiveSentinel("$"); // OMP conditional line
   }
+
+  // Prescan -include's
+  for (auto include : options.includes) {
+    const SourceFile *includeFile =
+        allSources.Open(include, fileError, "."s /*prepend to search path*/);
+
+    if (!fileError.str().empty()) {
+      ProvenanceRange range{allSources.AddCompilerInsertion(include)};
+      messages_.Say(range, "%s"_err_en_US, fileError.str());
+      return sourceFile;
+    }
+    CHECK(includeFile);
+
+    ProvenanceRange range{
+        allSources.AddIncludedFile(*includeFile, ProvenanceRange{})};
+    prescanner.Prescan(range);
+  }
+
   ProvenanceRange range{allSources.AddIncludedFile(
       *sourceFile, ProvenanceRange{}, options.isModuleFile)};
   prescanner.Prescan(range);

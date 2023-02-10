@@ -3326,7 +3326,7 @@ def imacros : JoinedOrSeparate<["-", "--"], "imacros">, Group<clang_i_Group>, Fl
   MarshallingInfoStringVector<PreprocessorOpts<"MacroIncludes">>;
 def image__base : Separate<["-"], "image_base">;
 def include_ : JoinedOrSeparate<["-", "--"], "include">, Group<clang_i_Group>, EnumName<"include">,
-    MetaVarName<"<file>">, HelpText<"Include file before parsing">, Flags<[CC1Option]>;
+    MetaVarName<"<file>">, HelpText<"Include file before parsing">, Flags<[CC1Option, FC1Option]>;
 def include_pch : Separate<["-"], "include-pch">, Group<clang_i_Group>, Flags<[CC1Option]>,
   HelpText<"Include precompiled header file">, MetaVarName<"<file>">,
   MarshallingInfoString<PreprocessorOpts<"ImplicitPCHInclude">>;
