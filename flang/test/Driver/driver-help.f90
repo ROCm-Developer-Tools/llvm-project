@@ -140,6 +140,8 @@
 ! HELP-FC1-NEXT: -fxor-operator         Enable .XOR. as a synonym of .NEQV.
 ! HELP-FC1-NEXT: -help                  Display available options
 ! HELP-FC1-NEXT: -init-only             Only execute frontend initialization
+! HELP-FC1-NEXT: -internal-isystem <directory>
+! HELP-FC1-NEXT:                        Add directory to the internal system include search path; these are assumed to not be user-provided and are used to model system and standard headers' paths.
 ! HELP-FC1-NEXT: -I <dir>               Add directory to the end of the list of include search paths
 ! HELP-FC1-NEXT: -load <dsopath>        Load the named plugin (dynamic shared object)
 ! HELP-FC1-NEXT: -menable-no-infs       Allow optimization to assume there are no infinities.

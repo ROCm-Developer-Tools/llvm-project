@@ -32,6 +32,7 @@ struct Options {
   int fixedFormColumns{72};
   common::LanguageFeatureControl features;
   std::vector<std::string> searchDirectories;
+  std::vector<std::string> systemSearchDirectories;
   std::vector<std::string> intrinsicModuleDirectories;
   std::vector<Predefinition> predefinitions;
   bool instrumentedParse{false};

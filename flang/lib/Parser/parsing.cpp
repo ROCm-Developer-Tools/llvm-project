@@ -14,6 +14,30 @@
 #include "flang/Parser/provenance.h"
 #include "flang/Parser/source.h"
 #include "llvm/Support/raw_ostream.h"
+#include <algorithm>
+
+static void populateSearchPaths(Fortran::parser::AllSources &allSources,
+    const Fortran::parser::Options &options, const std::string &path) {
+  // User search directories are explored first, and then system search
+  // directories. If a directory is present in both, process as system
+  // directory.
+  std::vector<std::string> userSearchDirectories;
+  for (const auto &dir : options.searchDirectories) {
+    if (std::find(options.systemSearchDirectories.begin(),
+            options.systemSearchDirectories.end(),
+            dir) == options.systemSearchDirectories.end()) {
+      userSearchDirectories.push_back(dir);
+    }
+  }
+
+  for (const auto &dir : userSearchDirectories) {
+    allSources.AppendSearchPathDirectory(dir);
+  }
+
+  for (const auto &dir : options.systemSearchDirectories) {
+    allSources.AppendSearchPathDirectory(dir);
+  }
+}
 
 namespace Fortran::parser {
 
@@ -25,9 +49,7 @@ const SourceFile *Parsing::Prescan(const std::string &path, Options options) {
   AllSources &allSources{allCooked_.allSources()};
   allSources.ClearSearchPath();
   if (options.isModuleFile) {
-    for (const auto &path : options.searchDirectories) {
-      allSources.AppendSearchPathDirectory(path);
-    }
+    populateSearchPaths(allSources, options, path);
   }
 
   std::string buf;
@@ -55,9 +77,7 @@ const SourceFile *Parsing::Prescan(const std::string &path, Options options) {
     // source file has been opened.  If foo.f is missing from the current
     // working directory, we don't want to accidentally read another foo.f
     // from another directory that's on the search path.
-    for (const auto &path : options.searchDirectories) {
-      allSources.AppendSearchPathDirectory(path);
-    }
+    populateSearchPaths(allSources, options, path);
   }
 
   Preprocessor preprocessor{allSources};

@@ -45,6 +45,8 @@ struct PreprocessorOptions {
   // consider collecting them in a separate aggregate. For now we keep it here
   // as there is no point creating a class for just one field.
   std::vector<std::string> searchDirectoriesFromDashI;
+  // Search directories specified by the user with -internal-isystem
+  std::vector<std::string> searchDirectoriesFromInternalIsystem;
   // Search directories specified by the user with -fintrinsic-modules-path
   std::vector<std::string> searchDirectoriesFromIntrModPath;
 

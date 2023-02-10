@@ -6352,6 +6352,16 @@ def fexperimental_max_bitint_width_EQ:
 // Header Search Options
 //===----------------------------------------------------------------------===//
 
+let Flags = [CC1Option, FC1Option, NoDriverOption] in {
+
+def internal_isystem : Separate<["-"], "internal-isystem">,
+  MetaVarName<"<directory>">,
+  HelpText<"Add directory to the internal system include search path; these "
+           "are assumed to not be user-provided and are used to model system "
+           "and standard headers' paths.">;
+           
+} // let Flags = [CC1Option, FC1Option, NoDriverOption]
+
 let Flags = [CC1Option, NoDriverOption] in {
 
 def nostdsysteminc : Flag<["-"], "nostdsysteminc">,
@@ -6375,11 +6385,6 @@ def objc_isystem : Separate<["-"], "objc-isystem">,
 def objcxx_isystem : Separate<["-"], "objcxx-isystem">,
   MetaVarName<"<directory>">,
   HelpText<"Add directory to the ObjC++ SYSTEM include search path">;
-def internal_isystem : Separate<["-"], "internal-isystem">,
-  MetaVarName<"<directory>">,
-  HelpText<"Add directory to the internal system include search path; these "
-           "are assumed to not be user-provided and are used to model system "
-           "and standard headers' paths.">;
 def internal_externc_isystem : Separate<["-"], "internal-externc-isystem">,
   MetaVarName<"<directory>">,
   HelpText<"Add directory to the internal system include search path with "

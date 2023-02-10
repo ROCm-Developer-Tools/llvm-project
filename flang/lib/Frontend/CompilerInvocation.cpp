@@ -532,6 +532,12 @@ static void parsePreprocessorArgs(Fortran::frontend::PreprocessorOptions &opts,
   for (const auto *currentArg : args.filtered(clang::driver::options::OPT_I))
     opts.searchDirectoriesFromDashI.emplace_back(currentArg->getValue());
 
+  // Add the ordered list of -internal-isystem's.
+  for (const auto *currentArg :
+       args.filtered(clang::driver::options::OPT_internal_isystem))
+    opts.searchDirectoriesFromInternalIsystem.emplace_back(
+        currentArg->getValue());
+
   // Prepend the ordered list of -intrinsic-modules-path
   // to the default location to search.
   for (const auto *currentArg :
@@ -903,6 +909,12 @@ void CompilerInvocation::setFortranOpts() {
       preprocessorOptions.searchDirectoriesFromDashI.begin(),
       preprocessorOptions.searchDirectoriesFromDashI.end());
 
+  // Add system search directories specified by -internal-isystem
+  fortranOptions.systemSearchDirectories.insert(
+      fortranOptions.systemSearchDirectories.end(),
+      preprocessorOptions.searchDirectoriesFromInternalIsystem.begin(),
+      preprocessorOptions.searchDirectoriesFromInternalIsystem.end());
+
   // Add the ordered list of -intrinsic-modules-path
   fortranOptions.searchDirectories.insert(
       fortranOptions.searchDirectories.end(),
@@ -938,9 +950,17 @@ void CompilerInvocation::setSemanticsOpts(
   semanticsContext = std::make_unique<semantics::SemanticsContext>(
       getDefaultKinds(), fortranOptions.features, allCookedSources);
 
+  // Add system header directories to the list of intrinsic module directories
+  std::vector<std::string> intrinsicModuleDirectories =
+      fortranOptions.intrinsicModuleDirectories;
+  intrinsicModuleDirectories.insert(
+      intrinsicModuleDirectories.end(),
+      fortranOptions.systemSearchDirectories.begin(),
+      fortranOptions.systemSearchDirectories.end());
+
   semanticsContext->set_moduleDirectory(getModuleDir())
       .set_searchDirectories(fortranOptions.searchDirectories)
-      .set_intrinsicModuleDirectories(fortranOptions.intrinsicModuleDirectories)
+      .set_intrinsicModuleDirectories(intrinsicModuleDirectories)
       .set_warnOnNonstandardUsage(getEnableConformanceChecks())
       .set_warningsAreErrors(getWarnAsErr())
       .set_moduleFileSuffix(getModuleFileSuffix());
