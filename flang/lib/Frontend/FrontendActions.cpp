@@ -813,7 +813,10 @@ void CodeGenAction::executeAction() {
     embedOffloadObjects();
 
   // Run LLVM's middle-end (i.e. the optimizer).
-  runOptimizationPipeline(ci.isOutputStreamNull() ? *os : ci.getOutputStream());
+  if (!ci.getInvocation().getCodeGenOpts().DisableLLVMPasses) {
+    runOptimizationPipeline(ci.isOutputStreamNull() ? *os
+                                                    : ci.getOutputStream());
+  }
 
   if (action == BackendActionTy::Backend_EmitLL) {
     llvmModule->print(ci.isOutputStreamNull() ? *os : ci.getOutputStream(),

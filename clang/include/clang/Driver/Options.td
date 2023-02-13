@@ -5367,6 +5367,17 @@ def migrator_no_finalize_removal : Flag<["-"], "no-finalize-removal">,
 // CodeGen Options
 //===----------------------------------------------------------------------===//
 
+let Flags = [CC1Option, FC1Option, NoDriverOption] in {
+
+def disable_llvm_passes : Flag<["-"], "disable-llvm-passes">,
+  HelpText<"Use together with -emit-llvm to get pristine LLVM IR from the "
+           "frontend by not running any LLVM passes at all">,
+  MarshallingInfoFlag<CodeGenOpts<"DisableLLVMPasses">>;
+def disable_llvm_optzns : Flag<["-"], "disable-llvm-optzns">,
+  Alias<disable_llvm_passes>;
+
+} // let Flags = [CC1Option, FC1Option, NoDriverOption]
+
 let Flags = [CC1Option, CC1AsOption, FC1Option, NoDriverOption] in {
 
 def mrelocation_model : Separate<["-"], "mrelocation-model">,
@@ -5442,12 +5453,6 @@ let Flags = [CC1Option, NoDriverOption] in {
 def disable_llvm_verifier : Flag<["-"], "disable-llvm-verifier">,
   HelpText<"Don't run the LLVM IR verifier pass">,
   MarshallingInfoNegativeFlag<CodeGenOpts<"VerifyModule">>;
-def disable_llvm_passes : Flag<["-"], "disable-llvm-passes">,
-  HelpText<"Use together with -emit-llvm to get pristine LLVM IR from the "
-           "frontend by not running any LLVM passes at all">,
-  MarshallingInfoFlag<CodeGenOpts<"DisableLLVMPasses">>;
-def disable_llvm_optzns : Flag<["-"], "disable-llvm-optzns">,
-  Alias<disable_llvm_passes>;
 def disable_lifetimemarkers : Flag<["-"], "disable-lifetime-markers">,
   HelpText<"Disable lifetime-markers emission even when optimizations are "
            "enabled">,

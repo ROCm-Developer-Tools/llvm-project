@@ -76,6 +76,7 @@
 ! HELP-FC1-EMPTY:
 ! HELP-FC1-NEXT:OPTIONS:
 ! HELP-FC1-NEXT: -cpp                   Enable predefined and command line preprocessor macros
+! HELP-FC1-NEXT: -disable-llvm-passes   Use together with -emit-llvm to get pristine LLVM IR from the frontend by not running any LLVM passes at all
 ! HELP-FC1-NEXT: -D <macro>=<value>     Define <macro> to <value> (or 1 if <value> omitted)
 ! HELP-FC1-NEXT: -emit-llvm-bc          Build ASTs then convert to LLVM, emit .bc file
 ! HELP-FC1-NEXT: -emit-llvm Use the LLVM representation for assembler and object files

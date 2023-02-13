@@ -166,6 +166,9 @@ static void parseCodeGenArgs(Fortran::frontend::CodeGenOptions &opts,
     if (args.hasArg(clang::driver::options::OPT_pic_is_pie))
       opts.IsPIE = 1;
   }
+
+  if (args.hasArg(clang::driver::options::OPT_disable_llvm_passes))
+    opts.DisableLLVMPasses = 1;
 }
 
 /// Parses all target input arguments and populates the target
