@@ -35,9 +35,11 @@ private:
   /// Extract preprocessing options from the driver arguments and add them to
   /// the preprocessor command arguments.
   ///
+  /// \param [in] JA The job action
   /// \param [in] Args The list of input driver arguments
   /// \param [out] CmdArgs The list of output command arguments
-  void addPreprocessingOptions(const llvm::opt::ArgList &Args,
+  void addPreprocessingOptions(const JobAction &JA,
+                               const llvm::opt::ArgList &Args,
                                llvm::opt::ArgStringList &CmdArgs) const;
 
   /// Extract PIC options from the driver arguments and add them to

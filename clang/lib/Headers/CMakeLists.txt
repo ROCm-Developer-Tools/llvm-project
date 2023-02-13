@@ -281,6 +281,7 @@ set(openmp_wrapper_files
   openmp_wrappers/__clang_openmp_device_functions.h
   openmp_wrappers/complex_cmath.h
   openmp_wrappers/new
+  openmp_wrappers/__flang_openmp_device_functions.f90
 )
 
 set(output_dir ${LLVM_LIBRARY_OUTPUT_INTDIR}/clang/${CLANG_VERSION_MAJOR}/include)

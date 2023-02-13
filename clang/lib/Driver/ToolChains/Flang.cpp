@@ -11,6 +11,7 @@
 #include "CommonArgs.h"
 
 #include "clang/Driver/Options.h"
+#include "llvm/Support/Path.h"
 
 #include <cassert>
 
@@ -44,8 +45,26 @@ void Flang::addFortranDialectOptions(const ArgList &Args,
                 options::OPT_fno_automatic});
 }
 
-void Flang::addPreprocessingOptions(const ArgList &Args,
+void Flang::addPreprocessingOptions(const JobAction &JA, const ArgList &Args,
                                     ArgStringList &CmdArgs) const {
+  const ToolChain &TC = getToolChain();
+  const Driver &D = TC.getDriver();
+
+  // If we are offloading to a target via OpenMP we need to include the
+  // openmp_wrappers folder which contains alternative system headers.
+  if (JA.isDeviceOffloading(Action::OFK_OpenMP) &&
+      (TC.getTriple().isNVPTX() || TC.getTriple().isAMDGCN())) {
+    // Add openmp_wrappers/* to our system include path.  This lets us wrap
+    // standard library headers.
+    SmallString<128> P(D.ResourceDir);
+    llvm::sys::path::append(P, "include");
+    llvm::sys::path::append(P, "openmp_wrappers");
+    CmdArgs.push_back("-internal-isystem");
+    CmdArgs.push_back(Args.MakeArgString(P));
+    CmdArgs.push_back("-include");
+    CmdArgs.push_back("__flang_openmp_device_functions.f90");
+  }
+
   Args.AddAllArgs(CmdArgs,
                   {options::OPT_P, options::OPT_D, options::OPT_U,
                    options::OPT_I, options::OPT_cpp, options::OPT_nocpp});
@@ -282,7 +301,7 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
   // Add preprocessing options like -I, -D, etc. if we are using the
   // preprocessor (i.e. skip when dealing with e.g. binary files).
   if (types::getPreprocessedType(InputType) != types::TY_INVALID)
-    addPreprocessingOptions(Args, CmdArgs);
+    addPreprocessingOptions(JA, Args, CmdArgs);
 
   addFortranDialectOptions(Args, CmdArgs);
 
