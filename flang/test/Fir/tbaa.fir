@@ -1,5 +1,5 @@
-// RUN: fir-opt %s --split-input-file --fir-to-llvm-ir="target=x86_64-unknown-linux-gnu apply-tbaa=true" | FileCheck %s
-// RUN: fir-opt %s --split-input-file --fir-to-llvm-ir="target=aarch64-unknown-linux-gnu apply-tbaa=true" | FileCheck %s
+// RUN: fir-opt %s --no-implicit-module=false --split-input-file --fir-to-llvm-ir="target=x86_64-unknown-linux-gnu apply-tbaa=true" | FileCheck %s
+// RUN: fir-opt %s --no-implicit-module=false --split-input-file --fir-to-llvm-ir="target=aarch64-unknown-linux-gnu apply-tbaa=true" | FileCheck %s
 
 module {
   func.func @tbaa(%arg0: !fir.class<!fir.array<?xnone>> {fir.bindc_name = "a"}) {

@@ -1,5 +1,5 @@
-! RUN: bbc -emit-fir %s -o - | fir-opt --canonicalize | FileCheck %s
-! RUN: %flang_fc1 -emit-fir %s -o - | fir-opt --canonicalize | FileCheck %s
+! RUN: bbc -emit-fir %s -o - | fir-opt --no-implicit-module=false --canonicalize | FileCheck %s
+! RUN: %flang_fc1 -emit-fir %s -o - | fir-opt --no-implicit-module=false --canonicalize | FileCheck %s
 
 ! CHECK-LABEL: test1
 ! CHECK-SAME: (%[[XREF:.*]]: !fir.ref<i32> {{.*}}, %[[CBOX:.*]]: !fir.boxchar<1> {{.*}})

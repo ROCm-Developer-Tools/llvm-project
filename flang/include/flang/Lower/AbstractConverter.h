@@ -18,6 +18,7 @@
 #include "flang/Lower/PFTDefs.h"
 #include "flang/Optimizer/Builder/BoxValue.h"
 #include "flang/Semantics/symbol.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
@@ -226,7 +227,9 @@ public:
   /// Get the OpBuilder
   virtual fir::FirOpBuilder &getFirOpBuilder() = 0;
   /// Get the ModuleOp
-  virtual mlir::ModuleOp &getModuleOp() = 0;
+  virtual std::variant<std::unique_ptr<mlir::ModuleOp>,
+                       std::unique_ptr<mlir::omp::ModuleOp>> *
+  getModuleOp() = 0;
   /// Get the MLIRContext
   virtual mlir::MLIRContext &getMLIRContext() = 0;
   /// Unique a symbol

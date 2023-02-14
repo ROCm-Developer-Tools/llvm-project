@@ -15,6 +15,7 @@ add_mlir_conversion_library(MLIRMathToFuncs
   MLIRControlFlowDialect
   MLIRFuncDialect
   MLIRLLVMDialect
+  MLIROpenMPDialect
   MLIRMathDialect
   MLIRPass
   MLIRTransforms

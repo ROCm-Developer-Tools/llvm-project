@@ -1,11 +1,11 @@
-// RUN: fir-opt --target-rewrite="target=i386-unknown-linux-gnu" %s | FileCheck %s --check-prefix=I32
-// RUN: fir-opt --target-rewrite="target=x86_64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=X64
-// RUN: fir-opt --target-rewrite="target=aarch64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=AARCH64
-// RUN: fir-opt --target-rewrite="target=powerpc64le-unknown-linux-gnu" %s | FileCheck %s --check-prefix=PPC64le
-// RUN: fir-opt --target-rewrite="target=sparc64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=SPARCV9
-// RUN: fir-opt --target-rewrite="target=sparcv9-sun-solaris2.11" %s | FileCheck %s --check-prefix=SPARCV9
-// RUN: fir-opt --target-rewrite="target=riscv64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=RISCV64
-// RUN: fir-opt --target-rewrite="target=powerpc64-ibm-aix7.2.0.0" %s | FileCheck %s --check-prefix=PPC64
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=i386-unknown-linux-gnu" %s | FileCheck %s --check-prefix=I32
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=x86_64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=X64
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=aarch64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=AARCH64
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=powerpc64le-unknown-linux-gnu" %s | FileCheck %s --check-prefix=PPC64le
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=sparc64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=SPARCV9
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=sparcv9-sun-solaris2.11" %s | FileCheck %s --check-prefix=SPARCV9
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=riscv64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=RISCV64
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=powerpc64-ibm-aix7.2.0.0" %s | FileCheck %s --check-prefix=PPC64
 
 // Test that we rewrite the signature and body of a function that returns a
 // complex<4>.

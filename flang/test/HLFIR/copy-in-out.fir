@@ -1,7 +1,7 @@
 // Test hlfir.copy_in and hlfir.copy_out operation parse, verify (no errors),
 // and unparse.
 
-// RUN: fir-opt %s | fir-opt | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false %s | fir-opt --no-implicit-module=false | FileCheck %s
 
 func.func @test_copy_in(%box: !fir.box<!fir.array<?xf64>>, %is_present: i1) {
   %0:2 = hlfir.copy_in %box : (!fir.box<!fir.array<?xf64>>) -> (!fir.box<!fir.array<?xf64>>, i1)

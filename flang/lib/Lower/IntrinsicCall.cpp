@@ -1554,8 +1554,16 @@ static mlir::FunctionType getFunctionType(std::optional<mlir::Type> resultType,
   llvm::SmallVector<mlir::Type> resTypes;
   if (resultType)
     resTypes.push_back(*resultType);
-  return mlir::FunctionType::get(builder.getModule().getContext(), argTypes,
-                                 resTypes);
+
+  mlir::MLIRContext *ctx;
+  auto modVar = builder.getModule();
+  if (std::holds_alternative<mlir::ModuleOp>(modVar))
+    ctx = std::get<mlir::ModuleOp>(modVar)->getContext();
+
+  if (std::holds_alternative<mlir::omp::ModuleOp>(modVar))
+    ctx = std::get<mlir::omp::ModuleOp>(modVar)->getContext();
+
+  return mlir::FunctionType::get(ctx, argTypes, resTypes);
 }
 
 /// fir::ExtendedValue to mlir::Value translation layer

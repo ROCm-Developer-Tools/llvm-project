@@ -20,6 +20,7 @@
 #include "flang/Lower/StatementContext.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
 #include "flang/Optimizer/Support/KindMapping.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 
 namespace Fortran {
@@ -70,8 +71,13 @@ public:
 
   mlir::MLIRContext &getMLIRContext() { return context; }
 
-  /// Get the ModuleOp. It can never be null, which is asserted in the ctor.
-  mlir::ModuleOp &getModule() { return *module.get(); }
+  /// Get the ModuleOp. At least one Module type must exist, otherwise the
+  /// ctor should have asserted.
+  std::variant<std::unique_ptr<mlir::ModuleOp>,
+               std::unique_ptr<mlir::omp::ModuleOp>> *
+  getModule() {
+    return &module;
+  }
 
   const Fortran::common::IntrinsicTypeDefaultKinds &getDefaultKinds() const {
     return defaultKinds;
@@ -108,7 +114,18 @@ public:
 
   Fortran::lower::StatementContext &fctCtx() { return functionContext; }
 
-  bool validModule() { return getModule(); }
+  bool validModule() {
+    auto *module = getModule();
+    if (std::holds_alternative<std::unique_ptr<mlir::ModuleOp>>(*module)) {
+      return std::get<std::unique_ptr<mlir::ModuleOp>>(*module).get();
+    }
+
+    if (std::holds_alternative<std::unique_ptr<mlir::omp::ModuleOp>>(*module)) {
+      return std::get<std::unique_ptr<mlir::omp::ModuleOp>>(*module).get();
+    }
+
+    return false;
+  }
 
   //===--------------------------------------------------------------------===//
   // Perform the creation of an mlir::ModuleOp
@@ -143,7 +160,9 @@ private:
   const Fortran::evaluate::TargetCharacteristics &targetCharacteristics;
   const Fortran::parser::AllCookedSources *cooked;
   mlir::MLIRContext &context;
-  std::unique_ptr<mlir::ModuleOp> module;
+  std::variant<std::unique_ptr<mlir::ModuleOp>,
+               std::unique_ptr<mlir::omp::ModuleOp>>
+      module;
   fir::KindMapping &kindMap;
   const Fortran::lower::LoweringOptions &loweringOptions;
   const std::vector<Fortran::lower::EnvironmentDefault> &envDefaults;

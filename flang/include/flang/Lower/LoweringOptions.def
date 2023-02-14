@@ -13,11 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #ifndef LOWERINGOPT
-#  error Define the LOWERINGOPT macro to handle lowering options
+#error Define the LOWERINGOPT macro to handle lowering options
 #endif
 
 #ifndef ENUM_LOWERINGOPT
-#  define ENUM_LOWERINGOPT(Name, Type, Bits, Default) \
+#define ENUM_LOWERINGOPT(Name, Type, Bits, Default)                            \
 LOWERINGOPT(Name, Bits, Default)
 #endif
 
@@ -30,6 +30,14 @@ ENUM_LOWERINGOPT(PolymorphicTypeImpl, unsigned, 1, 0)
 /// If true, lower to High level FIR before lowering to FIR.
 /// Off by default until fully ready.
 ENUM_LOWERINGOPT(LowerToHighLevelFIR, unsigned, 1, 0)
+
+/// If true, perform OpenMP specific handling during lowering.
+/// Off by default unless -fopenmp is provided
+ENUM_LOWERINGOPT(IsOpenMP, unsigned, 1, 0)
+
+/// If true, perform OpenMP specific device handling during lowering.
+/// Off by default unless -fopenmp and relevant offload flags are provided
+ENUM_LOWERINGOPT(IsOpenMPDevice, unsigned, 1, 0)
 
 #undef LOWERINGOPT
 #undef ENUM_LOWERINGOPT

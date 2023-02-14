@@ -171,13 +171,14 @@ void ConvertOpenMPToLLVMPass::runOnOperation() {
   populateOpenMPToLLVMConversionPatterns(converter, patterns);
 
   LLVMConversionTarget target(getContext());
-  target.addLegalOp<omp::TerminatorOp, omp::TaskyieldOp, omp::FlushOp,
-                    omp::BarrierOp, omp::TaskwaitOp>();
+  target.addLegalOp<omp::ModuleOp, omp::TerminatorOp, omp::TaskyieldOp,
+                    omp::FlushOp, omp::BarrierOp, omp::TaskwaitOp>();
   configureOpenMPToLLVMConversionLegality(target, converter);
   if (failed(applyPartialConversion(module, target, std::move(patterns))))
     signalPassFailure();
 }
 
-std::unique_ptr<OperationPass<ModuleOp>> mlir::createConvertOpenMPToLLVMPass() {
+std::unique_ptr<OperationPass<omp::ModuleOp>>
+mlir::createConvertOpenMPToLLVMPass() {
   return std::make_unique<ConvertOpenMPToLLVMPass>();
 }

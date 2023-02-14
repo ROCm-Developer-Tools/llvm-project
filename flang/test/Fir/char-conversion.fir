@@ -1,4 +1,4 @@
-// RUN: fir-opt --character-conversion %s | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false --character-conversion %s | FileCheck %s
 
 func.func @char_convert() {
   %1 = fir.undefined i32

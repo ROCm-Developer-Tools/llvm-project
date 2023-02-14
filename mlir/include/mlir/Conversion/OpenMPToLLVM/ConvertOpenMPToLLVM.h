@@ -11,6 +11,9 @@
 #include <memory>
 
 namespace mlir {
+namespace omp {
+class ModuleOp;
+}
 class LLVMTypeConverter;
 class ConversionTarget;
 class MLIRContext;
@@ -32,7 +35,7 @@ void populateOpenMPToLLVMConversionPatterns(LLVMTypeConverter &converter,
                                             RewritePatternSet &patterns);
 
 /// Create a pass to convert OpenMP operations to the LLVMIR dialect.
-std::unique_ptr<OperationPass<ModuleOp>> createConvertOpenMPToLLVMPass();
+std::unique_ptr<OperationPass<omp::ModuleOp>> createConvertOpenMPToLLVMPass();
 
 } // namespace mlir
 

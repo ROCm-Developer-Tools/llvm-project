@@ -11,8 +11,8 @@
 
 #include "flang/Optimizer/Dialect/FIROps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/BuiltinOps.h"
-
 namespace fir {
 
 /// Return true iff the Operation is a non-volatile LoadOp or ArrayLoadOp.
@@ -54,14 +54,17 @@ inline bool pureCall(mlir::Operation *op) {
 /// If `module` already contains FuncOp `name`, it is returned. Otherwise, a new
 /// FuncOp is created, and that new FuncOp is returned.
 mlir::func::FuncOp
-createFuncOp(mlir::Location loc, mlir::ModuleOp module, llvm::StringRef name,
-             mlir::FunctionType type,
+createFuncOp(mlir::Location loc,
+             std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+             llvm::StringRef name, mlir::FunctionType type,
              llvm::ArrayRef<mlir::NamedAttribute> attrs = {});
 
 /// Get or create a GlobalOp in a module.
-fir::GlobalOp createGlobalOp(mlir::Location loc, mlir::ModuleOp module,
-                             llvm::StringRef name, mlir::Type type,
-                             llvm::ArrayRef<mlir::NamedAttribute> attrs = {});
+fir::GlobalOp
+createGlobalOp(mlir::Location loc,
+               std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+               llvm::StringRef name, mlir::Type type,
+               llvm::ArrayRef<mlir::NamedAttribute> attrs = {});
 
 /// Attribute to mark Fortran entities with the CONTIGUOUS attribute.
 constexpr llvm::StringRef getContiguousAttrName() { return "fir.contiguous"; }

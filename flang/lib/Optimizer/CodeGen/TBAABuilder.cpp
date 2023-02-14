@@ -12,6 +12,7 @@
 
 #include "TBAABuilder.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
@@ -42,8 +43,8 @@ std::string TBAABuilder::getNewTBAANodeName(llvm::StringRef basename) {
       .str();
 }
 
-TBAABuilder::TBAABuilder(mlir::ModuleOp module, bool applyTBAA)
-    : enableTBAA(applyTBAA && !disableTBAA) {
+template <typename ModType>
+void TBAABuilder::constructTBAAForModule(ModType module) {
   if (!enableTBAA)
     return;
 
@@ -56,7 +57,7 @@ TBAABuilder::TBAABuilder(mlir::ModuleOp module, bool applyTBAA)
   // we just disable all TBAABuilder actions (e.g. attachTBAATag()
   // is a no-op).
   if (llvm::any_of(
-          module.getBodyRegion().getOps<LLVM::MetadataOp>(),
+          module.getBodyRegion().template getOps<LLVM::MetadataOp>(),
           [&](auto metaOp) { return metaOp.getSymName() == tbaaMetaOpName; })) {
     enableTBAA = false;
     return;
@@ -97,6 +98,16 @@ TBAABuilder::TBAABuilder(mlir::ModuleOp module, bool applyTBAA)
       StringAttr::get(context, boxMemberTypeDescId),
       ArrayAttr::get(context, anyAccessTypeDesc), ArrayRef<int64_t>{0});
   boxMemberTypeDesc = FlatSymbolRefAttr::get(boxMemberOp);
+}
+
+TBAABuilder::TBAABuilder(mlir::omp::ModuleOp module, bool applyTBAA)
+    : enableTBAA(applyTBAA && !disableTBAA) {
+  constructTBAAForModule(module);
+}
+
+TBAABuilder::TBAABuilder(mlir::ModuleOp module, bool applyTBAA)
+    : enableTBAA(applyTBAA && !disableTBAA) {
+  constructTBAAForModule(module);
 }
 
 SymbolRefAttr TBAABuilder::getAccessTag(SymbolRefAttr baseTypeDesc,

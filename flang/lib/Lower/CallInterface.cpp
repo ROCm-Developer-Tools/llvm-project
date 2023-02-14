@@ -481,7 +481,10 @@ void Fortran::lower::CallInterface<T>::declare() {
   // holding the indirection is used when creating the fir::CallOp.
   if (!side().isIndirectCall()) {
     std::string name = side().getMangledName();
-    mlir::ModuleOp module = converter.getModuleOp();
+    if (std::holds_alternative<std::unique_ptr<mlir::omp::ModuleOp>>(
+            *converter.getModuleOp())) {
+      auto module = *std::get<std::unique_ptr<mlir::omp::ModuleOp>>(
+          *converter.getModuleOp());
     func = fir::FirOpBuilder::getNamedFunction(module, name);
     if (!func) {
       mlir::Location loc = side().getCalleeLocation();
@@ -491,8 +494,26 @@ void Fortran::lower::CallInterface<T>::declare() {
         addSymbolAttribute(func, *sym, converter.getMLIRContext());
       for (const auto &placeHolder : llvm::enumerate(inputs))
         if (!placeHolder.value().attributes.empty())
-          func.setArgAttrs(placeHolder.index(), placeHolder.value().attributes);
+            func.setArgAttrs(placeHolder.index(),
+                             placeHolder.value().attributes);
       side().setFuncAttrs(func);
+    }
+    } else {
+      auto module =
+          *std::get<std::unique_ptr<mlir::ModuleOp>>(*converter.getModuleOp());
+      func = fir::FirOpBuilder::getNamedFunction(module, name);
+      if (!func) {
+        mlir::Location loc = side().getCalleeLocation();
+        mlir::FunctionType ty = genFunctionType();
+        func = fir::FirOpBuilder::createFunction(loc, module, name, ty);
+        if (const Fortran::semantics::Symbol *sym = side().getProcedureSymbol())
+          addSymbolAttribute(func, *sym, converter.getMLIRContext());
+        for (const auto &placeHolder : llvm::enumerate(inputs))
+          if (!placeHolder.value().attributes.empty())
+            func.setArgAttrs(placeHolder.index(),
+                             placeHolder.value().attributes);
+        side().setFuncAttrs(func);
+      }
     }
   }
 }
@@ -1304,7 +1325,37 @@ mlir::FunctionType Fortran::lower::translateSignature(
 mlir::func::FuncOp Fortran::lower::getOrDeclareFunction(
     llvm::StringRef name, const Fortran::evaluate::ProcedureDesignator &proc,
     Fortran::lower::AbstractConverter &converter) {
-  mlir::ModuleOp module = converter.getModuleOp();
+  if (std::holds_alternative<std::unique_ptr<mlir::omp::ModuleOp>>(
+          *converter.getModuleOp())) {
+    auto module = *std::get<std::unique_ptr<mlir::omp::ModuleOp>>(
+        *converter.getModuleOp());
+
+    mlir::func::FuncOp func = fir::FirOpBuilder::getNamedFunction(module, name);
+    if (func)
+      return func;
+
+    const Fortran::semantics::Symbol *symbol = proc.GetSymbol();
+    assert(symbol && "non user function in getOrDeclareFunction");
+    // getOrDeclareFunction is only used for functions not defined in the
+    // current program unit, so use the location of the procedure designator
+    // symbol, which is the first occurrence of the procedure in the program
+    // unit.
+    mlir::Location loc = converter.genLocation(symbol->name());
+    std::optional<Fortran::evaluate::characteristics::Procedure>
+        characteristics =
+            Fortran::evaluate::characteristics::Procedure::Characterize(
+                proc, converter.getFoldingContext());
+    mlir::FunctionType ty = SignatureBuilder{characteristics.value(), converter,
+                                             /*forceImplicit=*/false}
+                                .getFunctionType();
+    mlir::func::FuncOp newFunc =
+        fir::FirOpBuilder::createFunction(loc, module, name, ty);
+    addSymbolAttribute(newFunc, *symbol, converter.getMLIRContext());
+    return newFunc;
+  }
+
+  auto module =
+      *std::get<std::unique_ptr<mlir::ModuleOp>>(*converter.getModuleOp());
   mlir::func::FuncOp func = fir::FirOpBuilder::getNamedFunction(module, name);
   if (func)
     return func;

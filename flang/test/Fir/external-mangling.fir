@@ -1,4 +1,4 @@
-// RUN: fir-opt --external-name-interop %s | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false --external-name-interop %s | FileCheck %s
 // RUN: tco --external-name-interop %s | FileCheck %s
 // RUN: tco --external-name-interop %s | tco --fir-to-llvm-ir | FileCheck %s --check-prefix=LLVMIR
 

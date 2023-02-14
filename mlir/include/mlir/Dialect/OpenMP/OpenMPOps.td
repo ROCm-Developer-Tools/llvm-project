@@ -18,6 +18,8 @@ include "mlir/IR/EnumAttr.td"
 include "mlir/IR/OpBase.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
+include "mlir/IR/OpAsmInterface.td"
+include "mlir/IR/RegionKindInterface.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
 include "mlir/Dialect/OpenMP/OpenMPOpsInterfaces.td"
@@ -42,6 +44,70 @@ def IntLikeType : AnyTypeOf<[AnyInteger, Index]>;
 
 def OpenMP_PointerLikeType : TypeAlias<OpenMP_PointerLikeTypeInterface,
 	"OpenMP-compatible variable type">;
+
+// Add arguments for device / host flag to carry down, alongside other device 
+// dependent flags
+def OpenMP_ModuleOp : OpenMP_Op<"module", [
+    AffineScope, IsolatedFromAbove, NoRegionArguments, SymbolTable, Symbol,
+    OpAsmOpInterface
+  ] # GraphRegionNoTerminator.traits> {
+  let summary = "A top-level operation that defines an OpenMP module";
+  let description = [{
+    An OpenMP `module` represents a top-level container operation. It is
+    similar to an MLIR builtin `module` with additional extensions for 
+    information utilised within OpenMP code generation. For example, the 
+    compilation mode  during offloading for the current module i.e. device 
+    or host. 
+
+    Example:
+
+    ```omp.module {
+      func.func @foo()
+    }
+    ```
+  }];
+
+  let arguments = (ins OptionalAttr<SymbolNameAttr>:$sym_name,
+                       OptionalAttr<StrAttr>:$sym_visibility,
+                       DefaultValuedAttr<BoolAttr, "0">:$is_device);
+  let regions = (region SizedRegion<1>:$bodyRegion);
+
+  let assemblyFormat = "($sym_name^)? `(` `device_module` `:` $is_device `)` attr-dict-with-keyword $bodyRegion";
+  let builders = [OpBuilder<(ins CArg<"std::optional<StringRef>", "{}">:$name)>];
+  let extraClassDeclaration = [{
+    /// Construct a module from the given location with an optional name.
+    static ModuleOp create(Location loc, std::optional<StringRef> name = std::nullopt);
+
+    /// Return the name of this module if present.
+    std::optional<StringRef> getName() { return getSymName(); }
+
+    //===------------------------------------------------------------------===//
+    // SymbolOpInterface Methods
+    //===------------------------------------------------------------------===//
+
+    /// A ModuleOp may optionally define a symbol.
+    bool isOptionalSymbol() { return true; }
+
+    //===------------------------------------------------------------------===//
+    // DataLayoutOpInterface Methods
+    //===------------------------------------------------------------------===//
+
+    DataLayoutSpecInterface getDataLayoutSpec();
+
+    //===------------------------------------------------------------------===//
+    // OpAsmOpInterface Methods
+    //===------------------------------------------------------------------===//
+
+    static ::llvm::StringRef getDefaultDialect() {
+      return "omp";
+    }
+  }];
+  let hasVerifier = 1;
+
+  // We need to ensure the block inside the region is properly terminated;
+  // the auto-generated builders do not guarantee that.
+  let skipDefaultBuilders = 1;
+}
 
 //===----------------------------------------------------------------------===//
 // 2.6 parallel Construct

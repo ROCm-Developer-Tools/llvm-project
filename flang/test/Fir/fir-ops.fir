@@ -1,6 +1,6 @@
 // Test the FIR operations
 
-// RUN: fir-opt %s | fir-opt | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false %s | fir-opt --no-implicit-module=false | FileCheck %s
 
 // CHECK-LABEL: func private @it1() -> !fir.int<4>
 // CHECK: func private @box1() -> !fir.boxchar<2>

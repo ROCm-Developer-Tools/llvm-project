@@ -656,6 +656,17 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
   if (args.hasArg(clang::driver::options::OPT_fopenmp)) {
     res.getFrontendOpts().features.Enable(
         Fortran::common::LanguageFeature::OpenMP);
+
+    // Triggers OpenMP specific lowering such as omp.module
+    // rather than a builtin module
+    res.getLoweringOpts().setIsOpenMP(true);
+  }
+
+  // Should be specified by driver during offloading, but specifies that we
+  // are in target offloading mode for a target device, so we are not
+  // compiling for the host.
+  if (args.hasArg(clang::driver::options::OPT_fopenmp_is_device)) {
+    res.getLoweringOpts().setIsOpenMPDevice(true);
   }
 
   // -pedantic

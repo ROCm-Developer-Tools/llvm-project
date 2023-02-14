@@ -46,7 +46,8 @@ namespace fir {
 /// This converts FIR types to LLVM types (for now)
 class LLVMTypeConverter : public mlir::LLVMTypeConverter {
 public:
-  LLVMTypeConverter(mlir::ModuleOp module, bool applyTBAA)
+  template <typename T>
+  LLVMTypeConverter(T module, bool applyTBAA)
       : mlir::LLVMTypeConverter(module.getContext()),
         kindMapping(getKindMapping(module)),
         specifics(CodeGenSpecifics::get(module.getContext(),

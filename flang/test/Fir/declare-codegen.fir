@@ -1,5 +1,5 @@
 // Test rewrite of fir.declare. The result is replaced by the memref operand.
-// RUN: fir-opt --cg-rewrite %s -o - | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false --cg-rewrite %s -o - | FileCheck %s
 
 
 func.func @test(%arg0: !fir.ref<!fir.array<12x23xi32>>) {

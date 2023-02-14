@@ -1346,6 +1346,58 @@ LogicalResult CancellationPointOp::verify() {
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// Verifier for OpenMP ModuleOp
+//===----------------------------------------------------------------------===//
+
+void mlir::omp::ModuleOp::build(OpBuilder &builder, OperationState &state,
+                                std::optional<StringRef> name) {
+  state.addRegion()->emplaceBlock();
+  if (name) {
+    state.attributes.push_back(builder.getNamedAttr(
+        mlir::SymbolTable::getSymbolAttrName(), builder.getStringAttr(*name)));
+  }
+}
+
+/// Construct a module from the given context.
+mlir::omp::ModuleOp mlir::omp::ModuleOp::create(Location loc,
+                                                std::optional<StringRef> name) {
+  OpBuilder builder(loc->getContext());
+  return builder.create<mlir::omp::ModuleOp>(loc, name);
+}
+
+DataLayoutSpecInterface mlir::omp::ModuleOp::getDataLayoutSpec() {
+  // Take the first and only (if present) attribute that implements the
+  // interface. This needs a linear search, but is called only once per data
+  // layout object construction that is used for repeated queries.
+  for (NamedAttribute attr : getOperation()->getAttrs())
+    if (auto spec = attr.getValue().dyn_cast<DataLayoutSpecInterface>())
+      return spec;
+  return {};
+}
+
+LogicalResult mlir::omp::ModuleOp::verify() {
+  // Check that there is at most one data layout spec attribute.
+  StringRef layoutSpecAttrName;
+  DataLayoutSpecInterface layoutSpec;
+  for (const NamedAttribute &na : (*this)->getAttrs()) {
+    if (auto spec = na.getValue().dyn_cast<DataLayoutSpecInterface>()) {
+      if (layoutSpec) {
+        InFlightDiagnostic diag =
+            emitOpError() << "expects at most one data layout attribute";
+        diag.attachNote() << "'" << layoutSpecAttrName
+                          << "' is a data layout attribute";
+        diag.attachNote() << "'" << na.getName().getValue()
+                          << "' is a data layout attribute";
+      }
+      layoutSpecAttrName = na.getName().strref();
+      layoutSpec = spec;
+    }
+  }
+
+  return success();
+}
+
 #define GET_ATTRDEF_CLASSES
 #include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.cpp.inc"
 

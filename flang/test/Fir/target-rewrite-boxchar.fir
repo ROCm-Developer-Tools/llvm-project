@@ -1,7 +1,7 @@
-// RUN: fir-opt --target-rewrite="target=i386-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT32
-// RUN: fir-opt --target-rewrite="target=x86_64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT64
-// RUN: fir-opt --target-rewrite="target=aarch64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT64
-// RUN: fir-opt --target-rewrite="target=powerpc64le-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT64
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=i386-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT32
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=x86_64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT64
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=aarch64-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT64
+// RUN: fir-opt --no-implicit-module=false --target-rewrite="target=powerpc64le-unknown-linux-gnu" %s | FileCheck %s --check-prefix=INT64
 
 // Test that we rewrite the signatures and bodies of functions that take boxchar
 // parameters.

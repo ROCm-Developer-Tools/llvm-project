@@ -51,6 +51,7 @@
 #include "flang/Semantics/runtime-type-info.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Transforms/RegionUtils.h"
@@ -720,7 +721,11 @@ public:
 
   fir::FirOpBuilder &getFirOpBuilder() override final { return *builder; }
 
-  mlir::ModuleOp &getModuleOp() override final { return bridge.getModule(); }
+  std::variant<std::unique_ptr<mlir::ModuleOp>,
+               std::unique_ptr<mlir::omp::ModuleOp>> *
+  getModuleOp() override final {
+    return bridge.getModule();
+  }
 
   mlir::MLIRContext &getMLIRContext() override final {
     return bridge.getMLIRContext();
@@ -3468,10 +3473,23 @@ private:
     // FIXME: get rid of the bogus function context and instantiate the
     // globals directly into the module.
     mlir::MLIRContext *context = &getMLIRContext();
-    mlir::func::FuncOp func = fir::FirOpBuilder::createFunction(
-        mlir::UnknownLoc::get(context), getModuleOp(),
+    mlir::func::FuncOp func;
+
+    if (std::holds_alternative<std::unique_ptr<mlir::omp::ModuleOp>>(
+            *getModuleOp())) {
+      func = fir::FirOpBuilder::createFunction(
+          mlir::UnknownLoc::get(context),
+          *std::get<std::unique_ptr<mlir::omp::ModuleOp>>(*getModuleOp()).get(),
         fir::NameUniquer::doGenerated("Sham"),
         mlir::FunctionType::get(context, std::nullopt, std::nullopt));
+    } else {
+      func = fir::FirOpBuilder::createFunction(
+          mlir::UnknownLoc::get(context),
+          *std::get<std::unique_ptr<mlir::ModuleOp>>(*getModuleOp()).get(),
+          fir::NameUniquer::doGenerated("Sham"),
+          mlir::FunctionType::get(context, std::nullopt, std::nullopt));
+    }
+
     func.addEntryBlock();
     builder = new fir::FirOpBuilder(func, bridge.getKindMap());
     assert(builder && "FirOpBuilder did not instantiate");
@@ -3830,10 +3848,19 @@ void Fortran::lower::LoweringBridge::lower(
 }
 
 void Fortran::lower::LoweringBridge::parseSourceFile(llvm::SourceMgr &srcMgr) {
+  if (getLoweringOptions().getIsOpenMP()) {
+    mlir::OwningOpRef<mlir::omp::ModuleOp> owningRef =
+        mlir::parseSourceFile<mlir::omp::ModuleOp>(srcMgr, &context);
+    std::get<std::unique_ptr<mlir::omp::ModuleOp>>(module).reset(
+        new mlir::omp::ModuleOp(owningRef.get().getOperation()));
+    owningRef.release();
+  } else {
   mlir::OwningOpRef<mlir::ModuleOp> owningRef =
       mlir::parseSourceFile<mlir::ModuleOp>(srcMgr, &context);
-  module.reset(new mlir::ModuleOp(owningRef.get().getOperation()));
+    std::get<std::unique_ptr<mlir::ModuleOp>>(module).reset(
+        new mlir::ModuleOp(owningRef.get().getOperation()));
   owningRef.release();
+}
 }
 
 Fortran::lower::LoweringBridge::LoweringBridge(
@@ -3895,9 +3922,22 @@ Fortran::lower::LoweringBridge::LoweringBridge(
   };
 
   // Create the module and attach the attributes.
-  module = std::make_unique<mlir::ModuleOp>(
-      mlir::ModuleOp::create(getPathLocation()));
-  assert(module.get() && "module was not created");
-  fir::setTargetTriple(*module.get(), triple);
-  fir::setKindMapping(*module.get(), kindMap);
+  if (getLoweringOptions().getIsOpenMP()) {
+    auto mod = mlir::omp::ModuleOp::create(getPathLocation());
+    if (getLoweringOptions().getIsOpenMPDevice())
+      mod.setIsDevice(true);
+
+    fir::setTargetTriple(mod, triple);
+    fir::setKindMapping(mod, kindMap);
+    module = std::make_unique<mlir::omp::ModuleOp>(mod);
+    assert(std::get<std::unique_ptr<mlir::omp::ModuleOp>>(module).get() &&
+           "module was not created");
+  } else {
+    auto mod = mlir::ModuleOp::create(getPathLocation());
+    fir::setTargetTriple(mod, triple);
+    fir::setKindMapping(mod, kindMap);
+    module = std::make_unique<mlir::ModuleOp>(mod);
+    assert(std::get<std::unique_ptr<mlir::ModuleOp>>(module).get() &&
+           "module was not created");
+  }
 }

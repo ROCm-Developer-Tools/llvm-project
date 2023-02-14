@@ -45,6 +45,14 @@ public:
     return failure();
   }
 
+  /// Hook for derived dialect interface to provide translation of module
+  /// type operations to LLVM IR where special handling is neccessary.
+  virtual LogicalResult
+  convertModuleOperation(Operation *op, llvm::IRBuilderBase &builder,
+                         LLVM::ModuleTranslation &moduleTranslation) const {
+    return success();
+  }
+
   /// Hook for derived dialect interface to act on an operation that has dialect
   /// attributes from the derived dialect (the operation itself may be from a
   /// different dialect). This gets called after the operation has been
@@ -73,6 +81,17 @@ public:
     if (const LLVMTranslationDialectInterface *iface = getInterfaceFor(op))
       return iface->convertOperation(op, builder, moduleTranslation);
     return failure();
+  }
+
+  /// Translates the given module operation to LLVM IR using the interface
+  /// implemented by the op's dialect. This is invoked after all operations
+  /// within the module have been processed.
+  virtual LogicalResult
+  convertModuleOperation(Operation *op, llvm::IRBuilderBase &builder,
+                         LLVM::ModuleTranslation &moduleTranslation) const {
+    if (const LLVMTranslationDialectInterface *iface = getInterfaceFor(op))
+      return iface->convertModuleOperation(op, builder, moduleTranslation);
+    return success();
   }
 
   /// Acts on the given operation using the interface implemented by the dialect

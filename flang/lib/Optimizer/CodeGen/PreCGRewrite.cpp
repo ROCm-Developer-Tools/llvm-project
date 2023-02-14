@@ -282,6 +282,11 @@ public:
 
 class CodeGenRewrite : public fir::impl::CodeGenRewriteBase<CodeGenRewrite> {
 public:
+  bool canScheduleOn(mlir::RegisteredOperationName opInfo) const override {
+    return opInfo.getStringRef() == "builtin.module" ||
+           opInfo.getStringRef() == "omp.module";
+  }
+
   void runOn(mlir::Operation *op, mlir::Region &region) {
     auto &context = getContext();
     mlir::OpBuilder rewriter(&context);
@@ -310,13 +315,22 @@ public:
     simplifyRegion(region);
   }
 
-  void runOnOperation() override final {
+  template <typename T>
+  void runOperationOnModule(T mod) {
     // Call runOn on all top level regions that may contain emboxOp/arrayCoorOp.
-    auto mod = getOperation();
-    for (auto func : mod.getOps<mlir::func::FuncOp>())
+    for (auto func : mod.template getOps<mlir::func::FuncOp>())
       runOn(func, func.getBody());
-    for (auto global : mod.getOps<fir::GlobalOp>())
+    for (auto global : mod.template getOps<fir::GlobalOp>())
       runOn(global, global.getRegion());
+  }
+
+  void runOnOperation() override final {
+    if (mlir::ModuleOp mod = mlir::dyn_cast<mlir::ModuleOp>(getOperation())) {
+      runOperationOnModule<mlir::ModuleOp>(mod);
+    } else if (mlir::omp::ModuleOp mod =
+                   mlir::dyn_cast<mlir::omp::ModuleOp>(getOperation())) {
+      runOperationOnModule<mlir::omp::ModuleOp>(mod);
+    }
   }
 
   // Clean up the region.

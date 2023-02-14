@@ -16,7 +16,7 @@
 
 include "mlir/Pass/PassBase.td"
 
-def FIRToLLVMLowering : Pass<"fir-to-llvm-ir", "mlir::ModuleOp"> {
+def FIRToLLVMLowering : Pass<"fir-to-llvm-ir"> {
   let summary = "Convert FIR dialect to LLVM-IR dialect";
   let description = [{
     Convert the FIR dialect to the LLVM-IR dialect of MLIR. This conversion
@@ -32,7 +32,7 @@ def FIRToLLVMLowering : Pass<"fir-to-llvm-ir", "mlir::ModuleOp"> {
   ];
 }
 
-def CodeGenRewrite : Pass<"cg-rewrite", "mlir::ModuleOp"> {
+def CodeGenRewrite : Pass<"cg-rewrite"> {
   let summary = "Rewrite some FIR ops into their code-gen forms.";
   let description = [{
     Fuse specific subgraphs into single Ops for code generation.
@@ -46,7 +46,7 @@ def CodeGenRewrite : Pass<"cg-rewrite", "mlir::ModuleOp"> {
   ];
 }
 
-def TargetRewritePass : Pass<"target-rewrite", "mlir::ModuleOp"> {
+def TargetRewritePass : Pass<"target-rewrite"> {
   let summary = "Rewrite some FIR dialect into target specific forms.";
   let description = [{
       Certain abstractions in the FIR dialect need to be rewritten to reflect
@@ -66,7 +66,7 @@ def TargetRewritePass : Pass<"target-rewrite", "mlir::ModuleOp"> {
   ];
 }
 
-def BoxedProcedurePass : Pass<"boxed-procedure", "mlir::ModuleOp"> {
+def BoxedProcedurePass : Pass<"boxed-procedure"> {
   let constructor = "::fir::createBoxedProcedurePass()";
   let options = [
     Option<"useThunks", "use-thunks",

@@ -23,6 +23,8 @@
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/ToolUtilities.h"
+#include "mlir/Tools/ParseUtilities.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Support/CommandLine.h"
@@ -60,7 +62,8 @@ static cl::opt<bool> codeGenLLVM(
 
 #include "flang/Tools/CLOptions.inc"
 
-static void printModuleBody(mlir::ModuleOp mod, raw_ostream &output) {
+template <typename ModType>
+static void printModuleBody(ModType mod, raw_ostream &output) {
   for (auto &op : *mod.getBody())
     output << op << '\n';
 }
@@ -78,69 +81,89 @@ compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
   }
 
   // load the file into a module
-  SourceMgr sourceMgr;
-  sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), SMLoc());
+  auto sourceMgr = std::make_shared<SourceMgr>();
+  sourceMgr->AddNewSourceBuffer(std::move(*fileOrErr), SMLoc());
   mlir::DialectRegistry registry;
   fir::support::registerDialects(registry);
   mlir::MLIRContext context(registry);
   fir::support::loadDialects(context);
   fir::support::registerLLVMTranslation(context);
-  auto owningRef = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
 
-  if (!owningRef) {
+  auto owningRef = mlir::parseSourceFileForTool(sourceMgr, &context,
+                                                false /*implicitModule*/);
+
+  auto handleCompilation = [](auto mod, auto context, auto passPipeline) {
+    if (mlir::failed(mod.verifyInvariants())) {
+      errs() << "Error verifying FIR module\n";
+      return mlir::failure();
+    }
+
+    std::error_code ec;
+    ToolOutputFile out(outputFilename, ec, sys::fs::OF_None);
+
+    // run passes
+    fir::KindMapping kindMap{context};
+    fir::setTargetTriple(mod, targetTriple);
+    fir::setKindMapping(mod, kindMap);
+    mlir::PassManager pm(mod->getName(),
+                         mlir::OpPassManager::Nesting::Implicit);
+    pm.enableVerifier(/*verifyPasses=*/true);
+    mlir::applyPassManagerCLOptions(pm);
+    if (emitFir) {
+      // parse the input and pretty-print it back out
+      // -emit-fir intentionally disables all the passes
+    } else if (passPipeline->hasAnyOccurrences()) {
+      auto errorHandler = [&](const Twine &msg) {
+        mlir::emitError(mlir::UnknownLoc::get(pm.getContext())) << msg;
+        return mlir::failure();
+      };
+      if (mlir::failed(passPipeline->addToPipeline(pm, errorHandler)))
+        return mlir::failure();
+    } else {
+      if (codeGenLLVM) {
+        // Run only CodeGen passes.
+        fir::createDefaultFIRCodeGenPassPipeline(pm);
+      } else {
+        // Run tco with O2 by default.
+        fir::createMLIRToLLVMPassPipeline(pm, llvm::OptimizationLevel::O2);
+      }
+      fir::addLLVMDialectToLLVMPass(pm, out.os());
+    }
+
+    // run the pass manager
+    if (mlir::succeeded(pm.run(mod))) {
+      // passes ran successfully, so keep the output
+      if ((emitFir || passPipeline->hasAnyOccurrences()) && !codeGenLLVM)
+        printModuleBody(mod, out.os());
+      out.keep();
+      return mlir::success();
+    }
+
+    // pass manager failed
+    printModuleBody(mod, errs());
+    errs() << "\n\nFAILED: " << inputFilename << '\n';
+    return mlir::failure();
+  };
+
+  if (owningRef) {
+    if (mlir::omp::ModuleOp mod = dyn_cast<mlir::omp::ModuleOp>(*owningRef))
+      return handleCompilation(mod, &context, &passPipeline);
+
+    if (mlir::ModuleOp mod = dyn_cast<mlir::ModuleOp>(*owningRef))
+      return handleCompilation(mod, &context, &passPipeline);
+  }
+
+  //  The prior default behaviour, if no module, we wrap it implicitly
+  //  in a builtin.module
+  auto wrapModule =
+      mlir::parseSourceFile<mlir::ModuleOp>(*sourceMgr.get(), &context);
+
+  if (!wrapModule) {
     errs() << "Error can't load file " << inputFilename << '\n';
     return mlir::failure();
   }
-  if (mlir::failed(owningRef->verifyInvariants())) {
-    errs() << "Error verifying FIR module\n";
-    return mlir::failure();
-  }
 
-  std::error_code ec;
-  ToolOutputFile out(outputFilename, ec, sys::fs::OF_None);
-
-  // run passes
-  fir::KindMapping kindMap{&context};
-  fir::setTargetTriple(*owningRef, targetTriple);
-  fir::setKindMapping(*owningRef, kindMap);
-  mlir::PassManager pm((*owningRef)->getName(),
-                       mlir::OpPassManager::Nesting::Implicit);
-  pm.enableVerifier(/*verifyPasses=*/true);
-  mlir::applyPassManagerCLOptions(pm);
-  if (emitFir) {
-    // parse the input and pretty-print it back out
-    // -emit-fir intentionally disables all the passes
-  } else if (passPipeline.hasAnyOccurrences()) {
-    auto errorHandler = [&](const Twine &msg) {
-      mlir::emitError(mlir::UnknownLoc::get(pm.getContext())) << msg;
-      return mlir::failure();
-    };
-    if (mlir::failed(passPipeline.addToPipeline(pm, errorHandler)))
-      return mlir::failure();
-  } else {
-    if (codeGenLLVM) {
-      // Run only CodeGen passes.
-      fir::createDefaultFIRCodeGenPassPipeline(pm);
-    } else {
-      // Run tco with O2 by default.
-      fir::createMLIRToLLVMPassPipeline(pm, llvm::OptimizationLevel::O2);
-    }
-    fir::addLLVMDialectToLLVMPass(pm, out.os());
-  }
-
-  // run the pass manager
-  if (mlir::succeeded(pm.run(*owningRef))) {
-    // passes ran successfully, so keep the output
-    if ((emitFir || passPipeline.hasAnyOccurrences()) && !codeGenLLVM)
-      printModuleBody(*owningRef, out.os());
-    out.keep();
-    return mlir::success();
-  }
-
-  // pass manager failed
-  printModuleBody(*owningRef, errs());
-  errs() << "\n\nFAILED: " << inputFilename << '\n';
-  return mlir::failure();
+  return handleCompilation(*wrapModule, &context, &passPipeline);
 }
 
 int main(int argc, char **argv) {

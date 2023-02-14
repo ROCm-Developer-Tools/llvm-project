@@ -1,4 +1,4 @@
-// RUN: fir-opt --split-input-file --pass-pipeline="builtin.module(cg-rewrite,cse)" %s | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false --split-input-file --pass-pipeline="builtin.module(cg-rewrite,cse)" %s | FileCheck %s
 
 // CHECK-LABEL: func @codegen(
 // CHECK-SAME: %[[arg:.*]]: !fir

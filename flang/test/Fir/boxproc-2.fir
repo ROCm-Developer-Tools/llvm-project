@@ -1,5 +1,5 @@
 // Test fir.boxproc type conversion in the boxed-procedure pass.
-// RUN: fir-opt --boxed-procedure %s | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false --boxed-procedure %s | FileCheck %s
 
 //CHECK-LABEL:  func.func private @test1(!fir.type<a{x:i32,y:f64}>, () -> ()) -> none
 func.func private @test1(!fir.type<a{x:i32, y:f64}>, !fir.boxproc<() -> ()>) -> none

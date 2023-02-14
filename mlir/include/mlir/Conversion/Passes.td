@@ -538,7 +538,7 @@ def ConvertMathToSPIRV : Pass<"convert-math-to-spirv"> {
 // MathToFuncs
 //===----------------------------------------------------------------------===//
 
-def ConvertMathToFuncs : Pass<"convert-math-to-funcs", "ModuleOp"> {
+def ConvertMathToFuncs : Pass<"convert-math-to-funcs"> {
   let summary = "Convert Math operations to calls of outlined implementations.";
   let description = [{
     This pass converts supported Math ops to calls of compiler generated
@@ -651,7 +651,7 @@ def ConvertOpenACCToLLVM : Pass<"convert-openacc-to-llvm", "ModuleOp"> {
 // OpenMPToLLVM
 //===----------------------------------------------------------------------===//
 
-def ConvertOpenMPToLLVM : Pass<"convert-openmp-to-llvm", "ModuleOp"> {
+def ConvertOpenMPToLLVM : Pass<"convert-openmp-to-llvm", "omp::ModuleOp"> {
   let summary = "Convert the OpenMP ops to OpenMP ops with LLVM dialect";
   let constructor = "mlir::createConvertOpenMPToLLVMPass()";
   let dependentDialects = ["LLVM::LLVMDialect"];

@@ -81,7 +81,8 @@ LogicalResult MlirOptMain(
 ///   deprecated and will be removed soon.
 LogicalResult MlirOptMain(int argc, char **argv, llvm::StringRef toolName,
                           DialectRegistry &registry,
-                          bool preloadDialectsInContext = false);
+                          bool preloadDialectsInContext = false,
+                          bool noImplicitModule = false);
 
 /// Helper wrapper to return the result of MlirOptMain directly from main.
 ///

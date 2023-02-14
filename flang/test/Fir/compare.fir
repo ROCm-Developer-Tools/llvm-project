@@ -1,4 +1,4 @@
-// RUN: fir-opt %s | tco --target=x86_64-unknown-linux-gnu | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false %s | tco --target=x86_64-unknown-linux-gnu | FileCheck %s
 
 // CHECK-LABEL: define i1 @cmp3(<2 x float> %0, <2 x float> %1)
 func.func @cmp3(%a : !fir.complex<4>, %b : !fir.complex<4>) -> i1 {

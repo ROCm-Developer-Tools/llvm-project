@@ -3508,24 +3508,56 @@ fir::parseSelector(mlir::OpAsmParser &parser, mlir::OperationState &result,
 }
 
 mlir::func::FuncOp
-fir::createFuncOp(mlir::Location loc, mlir::ModuleOp module,
+fir::createFuncOp(mlir::Location loc,
+                  std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
                   llvm::StringRef name, mlir::FunctionType type,
                   llvm::ArrayRef<mlir::NamedAttribute> attrs) {
-  if (auto f = module.lookupSymbol<mlir::func::FuncOp>(name))
-    return f;
-  mlir::OpBuilder modBuilder(module.getBodyRegion());
-  modBuilder.setInsertionPointToEnd(module.getBody());
+  mlir::Region *reg;
+  mlir::Block *body;
+  if (std::holds_alternative<mlir::ModuleOp>(module)) {
+    auto mod = std::get<mlir::ModuleOp>(module);
+    if (auto f = mod.lookupSymbol<mlir::func::FuncOp>(name))
+      return f;
+    body = mod.getBody();
+    reg = &mod.getBodyRegion();
+  }
+
+  if (std::holds_alternative<mlir::omp::ModuleOp>(module)) {
+    auto mod = std::get<mlir::omp::ModuleOp>(module);
+    if (auto f = mod.lookupSymbol<mlir::func::FuncOp>(name))
+      return f;
+    body = mod.getBody();
+    reg = &mod.getBodyRegion();
+  }
+
+  mlir::OpBuilder modBuilder(reg);
+  modBuilder.setInsertionPointToEnd(body);
   auto result = modBuilder.create<mlir::func::FuncOp>(loc, name, type, attrs);
   result.setVisibility(mlir::SymbolTable::Visibility::Private);
   return result;
 }
 
-fir::GlobalOp fir::createGlobalOp(mlir::Location loc, mlir::ModuleOp module,
-                                  llvm::StringRef name, mlir::Type type,
-                                  llvm::ArrayRef<mlir::NamedAttribute> attrs) {
-  if (auto g = module.lookupSymbol<fir::GlobalOp>(name))
-    return g;
-  mlir::OpBuilder modBuilder(module.getBodyRegion());
+fir::GlobalOp
+fir::createGlobalOp(mlir::Location loc,
+                    std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+                    llvm::StringRef name, mlir::Type type,
+                    llvm::ArrayRef<mlir::NamedAttribute> attrs) {
+  mlir::Region *reg;
+  if (std::holds_alternative<mlir::ModuleOp>(module)) {
+    auto mod = std::get<mlir::ModuleOp>(module);
+    if (auto g = mod.lookupSymbol<fir::GlobalOp>(name))
+      return g;
+    reg = &mod.getBodyRegion();
+  }
+
+  if (std::holds_alternative<mlir::omp::ModuleOp>(module)) {
+    auto mod = std::get<mlir::omp::ModuleOp>(module);
+    if (auto g = mod.lookupSymbol<fir::GlobalOp>(name))
+      return g;
+    reg = &mod.getBodyRegion();
+  }
+
+  mlir::OpBuilder modBuilder(reg);
   auto result = modBuilder.create<fir::GlobalOp>(loc, name, type, attrs);
   result.setVisibility(mlir::SymbolTable::Visibility::Private);
   return result;
@@ -3614,10 +3646,17 @@ valueCheckFirAttributes(mlir::Value value,
     if (auto addressOfOp = mlir::dyn_cast<fir::AddrOfOp>(definingOp)) {
       if (testAttributeSets(addressOfOp->getAttrs(), attributeNames))
         return true;
-      if (auto module = definingOp->getParentOfType<mlir::ModuleOp>())
+
+      if (auto module = definingOp->getParentOfType<mlir::ModuleOp>()) {
         if (auto globalOp =
                 module.lookupSymbol<fir::GlobalOp>(addressOfOp.getSymbol()))
           return testAttributeSets(globalOp->getAttrs(), attributeNames);
+      } else if (auto module =
+                     definingOp->getParentOfType<mlir::omp::ModuleOp>()) {
+        if (auto globalOp =
+                module.lookupSymbol<fir::GlobalOp>(addressOfOp.getSymbol()))
+          return testAttributeSets(globalOp->getAttrs(), attributeNames);
+      }
     }
   }
   // TODO: Construct associated entities attributes. Decide where the fir
@@ -3675,9 +3714,12 @@ mlir::Type fir::applyPathToType(mlir::Type eleTy, mlir::ValueRange path) {
                 .Case<fir::ComplexType>([&](fir::ComplexType ty) {
                   auto x = *i;
                   if (auto *op = (*i++).getDefiningOp())
-                    if (fir::isa_integer(x.getType()))
-                      return ty.getEleType(fir::getKindMapping(
-                          op->getParentOfType<mlir::ModuleOp>()));
+                    if (fir::isa_integer(x.getType())) {
+                      if (auto mod = op->getParentOfType<mlir::omp::ModuleOp>())
+                        return ty.getEleType(fir::getKindMapping(mod));
+                      else if (auto mod = op->getParentOfType<mlir::ModuleOp>())
+                        return ty.getEleType(fir::getKindMapping(mod));
+                    }
                   return mlir::Type{};
                 })
                 .Case<mlir::ComplexType>([&](mlir::ComplexType ty) {

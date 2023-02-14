@@ -1,5 +1,5 @@
 // Test hlfir.set_length operation parse, verify (no errors), and unparse.
-// RUN: fir-opt %s | fir-opt | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false %s | fir-opt --no-implicit-module=false | FileCheck %s
 
 func.func @test_cst_len(%str : !fir.boxchar<1>) {
   %c10 = arith.constant 10 : index

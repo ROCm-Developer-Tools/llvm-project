@@ -13,6 +13,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/Dialect/Utils/IndexingUtils.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Dialect/Vector/Utils/VectorUtils.h"
@@ -160,7 +161,8 @@ static FunctionType getElementalFuncTypeForOp(Operation *op) {
 ///     b *= b;
 ///   }
 /// }
-static func::FuncOp createElementIPowIFunc(ModuleOp *module, Type elementType) {
+template <typename ModType>
+static func::FuncOp createElementIPowIFunc(ModType *module, Type elementType) {
   assert(elementType.isa<IntegerType>() &&
          "non-integer element type for IPowIOp");
 
@@ -387,7 +389,8 @@ IPowIOpLowering::matchAndRewrite(math::IPowIOp op,
 ///   }
 ///   return result;
 /// }
-static func::FuncOp createElementFPowIFunc(ModuleOp *module,
+template <typename ModType>
+static func::FuncOp createElementFPowIFunc(ModType *module,
                                            FunctionType funcType) {
   auto baseType = funcType.getInput(0).cast<FloatType>();
   auto powType = funcType.getInput(1).cast<IntegerType>();
@@ -586,6 +589,11 @@ struct ConvertMathToFuncsPass
   ConvertMathToFuncsPass(const ConvertMathToFuncsOptions &options)
       : impl::ConvertMathToFuncsBase<ConvertMathToFuncsPass>(options) {}
 
+  bool canScheduleOn(mlir::RegisteredOperationName opInfo) const override {
+    return opInfo.getStringRef() == "builtin.module" ||
+           opInfo.getStringRef() == "omp.module";
+  }
+
   void runOnOperation() override;
 
 private:
@@ -596,7 +604,13 @@ private:
 
   // Generate outlined implementations for power operations
   // and store them in powerFuncs map.
-  void preprocessPowOperations();
+  template <typename ModType>
+  void preprocessPowOperations(ModType mod);
+
+  // Allows convert math to funcs pass to work on a wider variety of
+  // modules, provided they conform to builtin.module
+  template <typename ModType>
+  void runOperationOnModule(ModType mod);
 
   // A map between function types deduced from power operations
   // and the corresponding outlined software implementations
@@ -611,21 +625,20 @@ bool ConvertMathToFuncsPass::isFPowIConvertible(math::FPowIOp op) {
   return (expTy && expTy.getWidth() >= minWidthOfFPowIExponent);
 }
 
-void ConvertMathToFuncsPass::preprocessPowOperations() {
-  ModuleOp module = getOperation();
-
-  module.walk([&](Operation *op) {
+template <typename ModType>
+void ConvertMathToFuncsPass::preprocessPowOperations(ModType mod) {
+  mod.walk([&](Operation *op) {
     TypeSwitch<Operation *>(op)
-        .Case<math::IPowIOp>([&](math::IPowIOp op) {
+        .template Case<math::IPowIOp>([&](math::IPowIOp op) {
           Type resultType = getElementTypeOrSelf(op.getResult().getType());
 
           // Generate the software implementation of this operation,
           // if it has not been generated yet.
           auto entry = powerFuncs.try_emplace(resultType, func::FuncOp{});
           if (entry.second)
-            entry.first->second = createElementIPowIFunc(&module, resultType);
+            entry.first->second = createElementIPowIFunc(&mod, resultType);
         })
-        .Case<math::FPowIOp>([&](math::FPowIOp op) {
+        .template Case<math::FPowIOp>([&](math::FPowIOp op) {
           if (!isFPowIConvertible(op))
             return;
 
@@ -637,16 +650,15 @@ void ConvertMathToFuncsPass::preprocessPowOperations() {
           // created from the operation's result and operands.
           auto entry = powerFuncs.try_emplace(funcType, func::FuncOp{});
           if (entry.second)
-            entry.first->second = createElementFPowIFunc(&module, funcType);
+            entry.first->second = createElementFPowIFunc(&mod, funcType);
         });
   });
 }
 
-void ConvertMathToFuncsPass::runOnOperation() {
-  ModuleOp module = getOperation();
-
+template <typename ModType>
+void ConvertMathToFuncsPass::runOperationOnModule(ModType mod) {
   // Create outlined implementations for power operations.
-  preprocessPowOperations();
+  preprocessPowOperations(mod);
 
   RewritePatternSet patterns(&getContext());
   patterns.add<VecOpToScalarOp<math::IPowIOp>, VecOpToScalarOp<math::FPowIOp>>(
@@ -669,6 +681,15 @@ void ConvertMathToFuncsPass::runOnOperation() {
   target.addIllegalOp<math::IPowIOp>();
   target.addDynamicallyLegalOp<math::FPowIOp>(
       [this](math::FPowIOp op) { return !isFPowIConvertible(op); });
-  if (failed(applyPartialConversion(module, target, std::move(patterns))))
+  if (failed(applyPartialConversion(mod, target, std::move(patterns))))
     signalPassFailure();
+}
+
+void ConvertMathToFuncsPass::runOnOperation() {
+  if (mlir::ModuleOp mod = mlir::dyn_cast<mlir::ModuleOp>(getOperation())) {
+    runOperationOnModule<mlir::ModuleOp>(mod);
+  } else if (mlir::omp::ModuleOp mod =
+                 mlir::dyn_cast<mlir::omp::ModuleOp>(getOperation())) {
+    runOperationOnModule<mlir::omp::ModuleOp>(mod);
+  }
 }

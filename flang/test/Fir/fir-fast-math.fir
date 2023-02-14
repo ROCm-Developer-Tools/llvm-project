@@ -1,4 +1,4 @@
-// RUN: fir-opt %s | fir-opt | FileCheck %s
+// RUN: fir-opt --no-implicit-module=false %s | fir-opt | FileCheck %s
 
 // CHECK-LABEL: @test_callop
 func.func @test_callop(%arg0 : f32) {

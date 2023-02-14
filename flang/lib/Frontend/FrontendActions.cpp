@@ -31,6 +31,7 @@
 #include "flang/Semantics/semantics.h"
 #include "flang/Semantics/unparse-with-symbols.h"
 
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
@@ -89,14 +90,83 @@ bool PrescanAndSemaDebugAction::beginSourceFileAction() {
          (generateRtTypeTables() || true);
 }
 
-static void setMLIRDataLayout(mlir::ModuleOp &mlirModule,
-                              const llvm::DataLayout &dl) {
+template <typename Mod>
+static void setMLIRDataLayout(Mod &mlirModule, const llvm::DataLayout &dl) {
   mlir::MLIRContext *context = mlirModule.getContext();
   mlirModule->setAttr(
       mlir::LLVM::LLVMDialect::getDataLayoutAttrName(),
       mlir::StringAttr::get(context, dl.getStringRepresentation()));
   mlir::DataLayoutSpecInterface dlSpec = mlir::translateDataLayout(dl, context);
   mlirModule->setAttr(mlir::DLTIDialect::kDataLayoutAttrName, dlSpec);
+}
+
+template <typename Mod>
+bool CodeGenAction::parseLowerAndOptimiseModule() {
+  CompilerInstance &ci = this->getInstance();
+  // Create a LoweringBridge
+  const common::IntrinsicTypeDefaultKinds &defKinds =
+      ci.getInvocation().getSemanticsContext().defaultKinds();
+  fir::KindMapping kindMap(mlirCtx.get(), llvm::ArrayRef<fir::KindTy>{
+                                              fir::fromDefaultKinds(defKinds)});
+  lower::LoweringBridge lb = Fortran::lower::LoweringBridge::create(
+      *mlirCtx, ci.getInvocation().getSemanticsContext(), defKinds,
+      ci.getInvocation().getSemanticsContext().intrinsics(),
+      ci.getInvocation().getSemanticsContext().targetCharacteristics(),
+      ci.getParsing().allCooked(), ci.getInvocation().getTargetOpts().triple,
+      kindMap, ci.getInvocation().getLoweringOpts(),
+      ci.getInvocation().getFrontendOpts().envDefaults);
+
+  // Fetch module from lb, so we can set
+  mlirModule = std::make_unique<Mod>(
+      *std::get<std::unique_ptr<Mod>>(*lb.getModule()).get());
+  setUpTargetMachine();
+  const llvm::DataLayout &dl = tm->createDataLayout();
+  setMLIRDataLayout(*std::get<std::unique_ptr<Mod>>(mlirModule).get(), dl);
+
+  // Create a parse tree and lower it to FIR
+  Fortran::parser::Program &parseTree{*ci.getParsing().parseTree()};
+  lb.lower(parseTree, ci.getInvocation().getSemanticsContext());
+
+  // run the default passes.
+  mlir::PassManager pm(
+      (*std::get<std::unique_ptr<Mod>>(mlirModule).get())->getName(),
+      mlir::OpPassManager::Nesting::Implicit);
+  pm.enableVerifier(/*verifyPasses=*/true);
+  pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
+
+  if (mlir::failed(pm.run(*std::get<std::unique_ptr<Mod>>(mlirModule).get()))) {
+    unsigned diagID = ci.getDiagnostics().getCustomDiagID(
+        clang::DiagnosticsEngine::Error,
+        "verification of lowering to FIR failed");
+    ci.getDiagnostics().Report(diagID);
+    return false;
+  }
+  return true;
+}
+
+template <typename Mod>
+bool CodeGenAction::parseMLIRFileToModule() {
+  llvm::SourceMgr sourceMgr;
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
+      llvm::MemoryBuffer::getFileOrSTDIN(getCurrentInput().getFile());
+  sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
+
+  mlir::OwningOpRef<Mod> module =
+      mlir::parseSourceFile<Mod>(sourceMgr, mlirCtx.get());
+
+  if (!module || mlir::failed(module->verifyInvariants())) {
+    unsigned diagID = this->getInstance().getDiagnostics().getCustomDiagID(
+        clang::DiagnosticsEngine::Error, "Could not parse FIR");
+    this->getInstance().getDiagnostics().Report(diagID);
+    return false;
+  }
+
+  mlirModule = std::make_unique<Mod>(module.release());
+  setUpTargetMachine();
+  const llvm::DataLayout &dl = tm->createDataLayout();
+  setMLIRDataLayout(*std::get<std::unique_ptr<Mod>>(mlirModule).get(), dl);
+
+  return true;
 }
 
 bool CodeGenAction::beginSourceFileAction() {
@@ -128,25 +198,10 @@ bool CodeGenAction::beginSourceFileAction() {
 
   // If the input is an MLIR file, just parse it and return.
   if (this->getCurrentInput().getKind().getLanguage() == Language::MLIR) {
-    llvm::SourceMgr sourceMgr;
-    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
-        llvm::MemoryBuffer::getFileOrSTDIN(getCurrentInput().getFile());
-    sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
-    mlir::OwningOpRef<mlir::ModuleOp> module =
-        mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, mlirCtx.get());
+    if (ci.getInvocation().getLoweringOpts().getIsOpenMP())
+      return parseMLIRFileToModule<mlir::omp::ModuleOp>();
 
-    if (!module || mlir::failed(module->verifyInvariants())) {
-      unsigned diagID = ci.getDiagnostics().getCustomDiagID(
-          clang::DiagnosticsEngine::Error, "Could not parse FIR");
-      ci.getDiagnostics().Report(diagID);
-      return false;
-    }
-
-    mlirModule = std::make_unique<mlir::ModuleOp>(module.release());
-    setUpTargetMachine();
-    const llvm::DataLayout &dl = tm->createDataLayout();
-    setMLIRDataLayout(*mlirModule, dl);
-    return true;
+    return parseMLIRFileToModule<mlir::ModuleOp>();
   }
 
   // Otherwise, generate an MLIR module from the input Fortran source
@@ -162,44 +217,10 @@ bool CodeGenAction::beginSourceFileAction() {
   if (!res)
     return res;
 
-  // Create a LoweringBridge
-  const common::IntrinsicTypeDefaultKinds &defKinds =
-      ci.getInvocation().getSemanticsContext().defaultKinds();
-  fir::KindMapping kindMap(mlirCtx.get(), llvm::ArrayRef<fir::KindTy>{
-                                              fir::fromDefaultKinds(defKinds)});
-  lower::LoweringBridge lb = Fortran::lower::LoweringBridge::create(
-      *mlirCtx, ci.getInvocation().getSemanticsContext(), defKinds,
-      ci.getInvocation().getSemanticsContext().intrinsics(),
-      ci.getInvocation().getSemanticsContext().targetCharacteristics(),
-      ci.getParsing().allCooked(), ci.getInvocation().getTargetOpts().triple,
-      kindMap, ci.getInvocation().getLoweringOpts(),
-      ci.getInvocation().getFrontendOpts().envDefaults);
+  if (ci.getInvocation().getLoweringOpts().getIsOpenMP())
+    return parseLowerAndOptimiseModule<mlir::omp::ModuleOp>();
 
-  // Fetch module from lb, so we can set
-  mlirModule = std::make_unique<mlir::ModuleOp>(lb.getModule());
-  setUpTargetMachine();
-  const llvm::DataLayout &dl = tm->createDataLayout();
-  setMLIRDataLayout(*mlirModule, dl);
-
-  // Create a parse tree and lower it to FIR
-  Fortran::parser::Program &parseTree{*ci.getParsing().parseTree()};
-  lb.lower(parseTree, ci.getInvocation().getSemanticsContext());
-
-  // run the default passes.
-  mlir::PassManager pm((*mlirModule)->getName(),
-                       mlir::OpPassManager::Nesting::Implicit);
-  pm.enableVerifier(/*verifyPasses=*/true);
-  pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
-
-  if (mlir::failed(pm.run(*mlirModule))) {
-    unsigned diagID = ci.getDiagnostics().getCustomDiagID(
-        clang::DiagnosticsEngine::Error,
-        "verification of lowering to FIR failed");
-    ci.getDiagnostics().Report(diagID);
-    return false;
-  }
-
-  return true;
+  return parseLowerAndOptimiseModule<mlir::ModuleOp>();
 }
 
 //===----------------------------------------------------------------------===//
@@ -527,8 +548,10 @@ mapToLevel(const Fortran::frontend::CodeGenOptions &opts) {
 }
 
 // Lower the previously generated MLIR module into an LLVM IR module
+template <typename Mod>
 void CodeGenAction::generateLLVMIR() {
-  assert(mlirModule && "The MLIR module has not been generated yet.");
+  auto currentModule = std::get<std::unique_ptr<Mod>>(mlirModule).get();
+  assert(currentModule && "The MLIR module has not been generated yet.");
 
   CompilerInstance &ci = this->getInstance();
   auto opts = ci.getInvocation().getCodeGenOpts();
@@ -538,7 +561,7 @@ void CodeGenAction::generateLLVMIR() {
   fir::support::registerLLVMTranslation(*mlirCtx);
 
   // Set-up the MLIR pass manager
-  mlir::PassManager pm((*mlirModule)->getName(),
+  mlir::PassManager pm((*currentModule)->getName(),
                        mlir::OpPassManager::Nesting::Implicit);
 
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
@@ -549,16 +572,16 @@ void CodeGenAction::generateLLVMIR() {
   mlir::applyPassManagerCLOptions(pm);
 
   // run the pass manager
-  if (!mlir::succeeded(pm.run(*mlirModule))) {
+  if (!mlir::succeeded(pm.run(*currentModule))) {
     unsigned diagID = ci.getDiagnostics().getCustomDiagID(
         clang::DiagnosticsEngine::Error, "Lowering to LLVM IR failed");
     ci.getDiagnostics().Report(diagID);
   }
 
   // Translate to LLVM IR
-  std::optional<llvm::StringRef> moduleName = mlirModule->getName();
+  std::optional<llvm::StringRef> moduleName = currentModule->getName();
   llvmModule = mlir::translateModuleToLLVMIR(
-      *mlirModule, *llvmCtx, moduleName ? *moduleName : "FIRModule");
+      *currentModule, *llvmCtx, moduleName ? *moduleName : "FIRModule");
 
   // Set PIC/PIE level LLVM module flags.
   if (opts.PICLevel > 0) {
@@ -782,14 +805,26 @@ void CodeGenAction::executeAction() {
   }
 
   if (action == BackendActionTy::Backend_EmitMLIR) {
-    mlirModule->print(ci.isOutputStreamNull() ? *os : ci.getOutputStream());
+    if (ci.getInvocation().getLoweringOpts().getIsOpenMP())
+      std::get<std::unique_ptr<mlir::omp::ModuleOp>>(mlirModule)
+          .get()
+          ->print(ci.isOutputStreamNull() ? *os : ci.getOutputStream());
+    else
+      std::get<std::unique_ptr<mlir::ModuleOp>>(mlirModule)
+          .get()
+          ->print(ci.isOutputStreamNull() ? *os : ci.getOutputStream());
+
     return;
   }
 
   // Generate an LLVM module if it's not already present (it will already be
   // present if the input file is an LLVM IR/BC file).
-  if (!llvmModule)
-    generateLLVMIR();
+  if (!llvmModule) {
+    if (ci.getInvocation().getLoweringOpts().getIsOpenMP())
+      generateLLVMIR<mlir::omp::ModuleOp>();
+    else
+      generateLLVMIR<mlir::ModuleOp>();
+  }
 
   // Set the triple based on the targetmachine (this comes compiler invocation
   // and the command-line target option if specified, or the default if not
@@ -802,9 +837,10 @@ void CodeGenAction::executeAction() {
         << theTriple;
   }
 
-  // Always set the triple and data layout, to make sure they match and are set.
-  // Note that this overwrites any datalayout stored in the LLVM-IR. This avoids
-  // an assert for incompatible data layout when the code-generation happens.
+  // Always set the triple and data layout, to make sure they match and are
+  // set. Note that this overwrites any datalayout stored in the LLVM-IR. This
+  // avoids an assert for incompatible data layout when the code-generation
+  // happens.
   llvmModule->setTargetTriple(theTriple);
   llvmModule->setDataLayout(tm->createDataLayout());
 

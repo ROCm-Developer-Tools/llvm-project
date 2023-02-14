@@ -38,6 +38,7 @@
 #include "flang/Semantics/semantics.h"
 #include "flang/Semantics/unparse-with-symbols.h"
 #include "flang/Version.inc"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -122,6 +123,11 @@ static llvm::cl::opt<bool> enableOpenMP("fopenmp",
                                         llvm::cl::desc("enable openmp"),
                                         llvm::cl::init(false));
 
+static llvm::cl::opt<bool>
+    enableOpenMPDevice("fopenmp-is-device",
+                       llvm::cl::desc("enable openmp device compilation"),
+                       llvm::cl::init(false));
+
 static llvm::cl::opt<bool> enableOpenACC("fopenacc",
                                          llvm::cl::desc("enable openacc"),
                                          llvm::cl::init(false));
@@ -143,7 +149,8 @@ static llvm::cl::opt<bool> useHLFIR("hlfir",
 using ProgramName = std::string;
 
 // Print the module without the "module { ... }" wrapper.
-static void printModule(mlir::ModuleOp mlirModule, llvm::raw_ostream &out) {
+template <typename Mod>
+static void printModule(Mod mlirModule, llvm::raw_ostream &out) {
   for (auto &op : *mlirModule.getBody())
     out << op << '\n';
   out << '\n';
@@ -230,6 +237,10 @@ static mlir::LogicalResult convertFortranSourceToMLIR(
       &ctx, llvm::ArrayRef<fir::KindTy>{fir::fromDefaultKinds(defKinds)});
   // Use default lowering options for bbc.
   Fortran::lower::LoweringOptions loweringOptions{};
+
+  loweringOptions.setIsOpenMP(enableOpenMP);
+  loweringOptions.setIsOpenMPDevice(enableOpenMPDevice);
+
   loweringOptions.setPolymorphicTypeImpl(enablePolymorphic);
   loweringOptions.setLowerToHighLevelFIR(useHLFIR);
   auto burnside = Fortran::lower::LoweringBridge::create(
@@ -237,7 +248,52 @@ static mlir::LogicalResult convertFortranSourceToMLIR(
       semanticsContext.targetCharacteristics(), parsing.allCooked(), "",
       kindMap, loweringOptions, {});
   burnside.lower(parseTree, semanticsContext);
-  mlir::ModuleOp mlirModule = burnside.getModule();
+
+  // TODO: Template function for this and more generally a wrapper class for the
+  // std::variant modules that make them a little cleaner and nicer to use if
+  // possible...
+  auto performModuleLowering = [](auto mlirModule, auto passPipeline, auto ctx,
+                                  auto out) {
+    // Otherwise run the default passes.
+    mlir::PassManager pm(mlirModule->getName(),
+                         mlir::OpPassManager::Nesting::Implicit);
+    pm.enableVerifier(/*verifyPasses=*/true);
+    mlir::applyPassManagerCLOptions(pm);
+    if (passPipeline->hasAnyOccurrences()) {
+      // run the command-line specified pipeline
+      (void)passPipeline->addToPipeline(pm, [&](const llvm::Twine &msg) {
+        mlir::emitError(mlir::UnknownLoc::get(ctx)) << msg;
+        return mlir::failure();
+      });
+    } else if (emitFIR) {
+      // --emit-fir: Build the IR, verify it, and dump the IR if the IR passes
+      // verification. Use --dump-module-on-failure to dump invalid IR.
+      pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
+      if (mlir::failed(pm.run(mlirModule))) {
+        llvm::errs() << "FATAL: verification of lowering to FIR failed";
+        return mlir::failure();
+      }
+      printModule(mlirModule, *out);
+      return mlir::success();
+    } else {
+      // run the default canned pipeline
+      pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
+
+      // Add O2 optimizer pass pipeline.
+      fir::createDefaultFIROptimizerPassPipeline(pm,
+                                                 llvm::OptimizationLevel::O2);
+    }
+
+    if (mlir::succeeded(pm.run(mlirModule))) {
+      // Emit MLIR and do not lower to LLVM IR.
+      printModule(mlirModule, *out);
+      return mlir::success();
+    }
+    // Something went wrong. Try to dump the MLIR module.
+    llvm::errs() << "oops, pass manager reported failure\n";
+    return mlir::failure();
+  };
+
   std::error_code ec;
   std::string outputName = outputFilename;
   if (!outputName.size())
@@ -248,42 +304,21 @@ static mlir::LogicalResult convertFortranSourceToMLIR(
                            "could not open output file ")
            << outputName;
 
-  // Otherwise run the default passes.
-  mlir::PassManager pm(mlirModule->getName(),
-                       mlir::OpPassManager::Nesting::Implicit);
-  pm.enableVerifier(/*verifyPasses=*/true);
-  mlir::applyPassManagerCLOptions(pm);
-  if (passPipeline.hasAnyOccurrences()) {
-    // run the command-line specified pipeline
-    (void)passPipeline.addToPipeline(pm, [&](const llvm::Twine &msg) {
-      mlir::emitError(mlir::UnknownLoc::get(&ctx)) << msg;
-      return mlir::failure();
-    });
-  } else if (emitFIR) {
-    // --emit-fir: Build the IR, verify it, and dump the IR if the IR passes
-    // verification. Use --dump-module-on-failure to dump invalid IR.
-    pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
-    if (mlir::failed(pm.run(mlirModule))) {
-      llvm::errs() << "FATAL: verification of lowering to FIR failed";
-      return mlir::failure();
-    }
-    printModule(mlirModule, out);
-    return mlir::success();
-  } else {
-    // run the default canned pipeline
-    pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
-
-    // Add O2 optimizer pass pipeline.
-    fir::createDefaultFIROptimizerPassPipeline(pm, llvm::OptimizationLevel::O2);
+  if (std::holds_alternative<std::unique_ptr<mlir::ModuleOp>>(
+          *burnside.getModule())) {
+    mlir::ModuleOp mlirModule =
+        *std::get<std::unique_ptr<mlir::ModuleOp>>(*burnside.getModule()).get();
+    return performModuleLowering(mlirModule, &passPipeline, &ctx, &out);
   }
 
-  if (mlir::succeeded(pm.run(mlirModule))) {
-    // Emit MLIR and do not lower to LLVM IR.
-    printModule(mlirModule, out);
-    return mlir::success();
+  if (std::holds_alternative<std::unique_ptr<mlir::omp::ModuleOp>>(
+          *burnside.getModule())) {
+    mlir::omp::ModuleOp mlirModule =
+        *std::get<std::unique_ptr<mlir::omp::ModuleOp>>(*burnside.getModule())
+             .get();
+    return performModuleLowering(mlirModule, &passPipeline, &ctx, &out);
   }
-  // Something went wrong. Try to dump the MLIR module.
-  llvm::errs() << "oops, pass manager reported failure\n";
+
   return mlir::failure();
 }
 

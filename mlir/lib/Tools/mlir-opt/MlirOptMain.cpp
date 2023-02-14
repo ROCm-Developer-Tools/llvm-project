@@ -213,7 +213,8 @@ LogicalResult mlir::MlirOptMain(
 
 LogicalResult mlir::MlirOptMain(int argc, char **argv, llvm::StringRef toolName,
                                 DialectRegistry &registry,
-                                bool preloadDialectsInContext) {
+                                bool preloadDialectsInContext,
+                                bool implicitModule) {
   static cl::opt<std::string> inputFilename(
       cl::Positional, cl::desc("<input file>"), cl::init("-"));
 
@@ -254,7 +255,7 @@ LogicalResult mlir::MlirOptMain(int argc, char **argv, llvm::StringRef toolName,
       "no-implicit-module",
       cl::desc(
           "Disable implicit addition of a top-level module op during parsing"),
-      cl::init(false)};
+      cl::init(implicitModule)};
 
   static cl::opt<bool> dumpPassPipeline{
       "dump-pass-pipeline", cl::desc("Print the pipeline that will be run"),

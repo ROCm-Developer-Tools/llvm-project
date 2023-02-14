@@ -21,6 +21,7 @@
 #include "flang/Optimizer/Dialect/FIROpsSupport.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
 #include "flang/Optimizer/Support/KindMapping.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/ADT/DenseMap.h"
@@ -58,8 +59,13 @@ public:
   mlir::Region &getRegion() { return *getBlock()->getParent(); }
 
   /// Get the current Module
-  mlir::ModuleOp getModule() {
-    return getRegion().getParentOfType<mlir::ModuleOp>();
+  std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> getModule() {
+    auto modOp = getRegion().getParentOfType<mlir::ModuleOp>();
+    if (modOp)
+      return modOp;
+
+    auto mlirModOp = getRegion().getParentOfType<mlir::omp::ModuleOp>();
+    return mlirModOp;
   }
 
   /// Get the current Function
@@ -250,23 +256,26 @@ public:
   mlir::func::FuncOp getNamedFunction(llvm::StringRef name) {
     return getNamedFunction(getModule(), name);
   }
-  static mlir::func::FuncOp getNamedFunction(mlir::ModuleOp module,
-                                             llvm::StringRef name);
+  static mlir::func::FuncOp
+  getNamedFunction(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+                   llvm::StringRef name);
 
   /// Get a function by symbol name. The result will be null if there is no
   /// function with the given symbol in the module.
   mlir::func::FuncOp getNamedFunction(mlir::SymbolRefAttr symbol) {
     return getNamedFunction(getModule(), symbol);
   }
-  static mlir::func::FuncOp getNamedFunction(mlir::ModuleOp module,
-                                             mlir::SymbolRefAttr symbol);
+  static mlir::func::FuncOp
+  getNamedFunction(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp>,
+                   mlir::SymbolRefAttr symbol);
 
   fir::GlobalOp getNamedGlobal(llvm::StringRef name) {
     return getNamedGlobal(getModule(), name);
   }
 
-  static fir::GlobalOp getNamedGlobal(mlir::ModuleOp module,
-                                      llvm::StringRef name);
+  static fir::GlobalOp
+  getNamedGlobal(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp>,
+                 llvm::StringRef name);
 
   /// Lazy creation of fir.convert op.
   mlir::Value createConvert(mlir::Location loc, mlir::Type toTy,
@@ -284,10 +293,10 @@ public:
     return createFunction(loc, getModule(), name, ty);
   }
 
-  static mlir::func::FuncOp createFunction(mlir::Location loc,
-                                           mlir::ModuleOp module,
-                                           llvm::StringRef name,
-                                           mlir::FunctionType ty);
+  static mlir::func::FuncOp
+  createFunction(mlir::Location loc,
+                 std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+                 llvm::StringRef name, mlir::FunctionType ty);
 
   /// Determine if the named function is already in the module. Return the
   /// instance if found, otherwise add a new named function to the module.
@@ -298,10 +307,10 @@ public:
     return createFunction(loc, name, ty);
   }
 
-  static mlir::func::FuncOp addNamedFunction(mlir::Location loc,
-                                             mlir::ModuleOp module,
-                                             llvm::StringRef name,
-                                             mlir::FunctionType ty) {
+  static mlir::func::FuncOp
+  addNamedFunction(mlir::Location loc,
+                   std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+                   llvm::StringRef name, mlir::FunctionType ty) {
     if (auto func = getNamedFunction(module, name))
       return func;
     return createFunction(loc, module, name, ty);

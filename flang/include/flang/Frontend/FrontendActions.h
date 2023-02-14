@@ -18,6 +18,7 @@
 #include "flang/Parser/parsing.h"
 #include "flang/Semantics/semantics.h"
 
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
@@ -205,6 +206,15 @@ class CodeGenAction : public FrontendAction {
   bool beginSourceFileAction() override;
   /// Sets up LLVM's TargetMachine.
   void setUpTargetMachine();
+  /// Parses an MLIR file into a Module of a specified type
+  template <typename Mod>
+  bool parseMLIRFileToModule();
+
+  /// Parse, lower and optimise an MLIR file utilising a Module of a specified
+  /// type
+  template <typename Mod>
+  bool parseLowerAndOptimiseModule();
+
   /// Runs the optimization (aka middle-end) pipeline on the LLVM module
   /// associated with this action.
   void runOptimizationPipeline(llvm::raw_pwrite_stream &os);
@@ -213,7 +223,9 @@ protected:
   CodeGenAction(BackendActionTy act) : action{act} {};
   /// @name MLIR
   /// {
-  std::unique_ptr<mlir::ModuleOp> mlirModule;
+  std::variant<std::unique_ptr<mlir::ModuleOp>,
+               std::unique_ptr<mlir::omp::ModuleOp>>
+      mlirModule;
   std::unique_ptr<mlir::MLIRContext> mlirCtx;
   /// }
 
@@ -226,6 +238,7 @@ protected:
 
   /// Generates an LLVM IR module from CodeGenAction::mlirModule and saves it
   /// in CodeGenAction::llvmModule.
+  template <typename Mod>
   void generateLLVMIR();
 
   BackendActionTy action;

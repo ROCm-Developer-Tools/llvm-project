@@ -38,7 +38,7 @@ struct TargetRewriteOptions {
 
 /// Prerequiste pass for code gen. Perform intermediate rewrites to tailor the
 /// FIR for the chosen target.
-std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createFirTargetRewritePass(
+std::unique_ptr<mlir::OperationPass<>> createFirTargetRewritePass(
     const TargetRewriteOptions &options = TargetRewriteOptions());
 
 /// FIR to LLVM translation pass options.
