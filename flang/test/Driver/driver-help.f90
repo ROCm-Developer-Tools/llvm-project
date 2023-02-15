@@ -137,6 +137,7 @@
 ! HELP-FC1-NEXT: -fpass-plugin=<dsopath> Load pass plugin from a dynamic shared object file (only with new pass manager).
 ! HELP-FC1-NEXT: -freciprocal-math      Allow division operations to be reassociated
 ! HELP-FC1-NEXT: -fsyntax-only          Run the preprocessor, parser and semantic analysis stages
+! HELP-FC1-NEXT: -fvisibility=<value>   Set the default symbol visibility for all global definitions
 ! HELP-FC1-NEXT: -fxor-operator         Enable .XOR. as a synonym of .NEQV.
 ! HELP-FC1-NEXT: -help                  Display available options
 ! HELP-FC1-NEXT: -init-only             Only execute frontend initialization

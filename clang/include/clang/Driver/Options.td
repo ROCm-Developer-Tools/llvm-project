@@ -3026,7 +3026,7 @@ def fvisibility_externs_nodllstorageclass_EQ : Joined<["-"], "fvisibility-extern
   HelpText<"The visibility for external declarations without an explicit DLL dllstorageclass [-fvisibility-from-dllstorageclass]">,
   MarshallingInfoVisibility<LangOpts<"ExternDeclNoDLLStorageClassVisibility">, "HiddenVisibility">,
   ShouldParseIf<fvisibility_from_dllstorageclass.KeyPath>;
-def fvisibility_EQ : Joined<["-"], "fvisibility=">, Group<f_Group>, Flags<[CC1Option]>,
+def fvisibility_EQ : Joined<["-"], "fvisibility=">, Group<f_Group>, Flags<[CC1Option, FC1Option]>,
   HelpText<"Set the default symbol visibility for all global definitions">,
   MarshallingInfoVisibility<LangOpts<"ValueVisibilityMode">, "DefaultVisibility">;
 defm visibility_inlines_hidden : BoolFOption<"visibility-inlines-hidden",

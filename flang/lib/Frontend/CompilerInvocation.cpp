@@ -20,6 +20,7 @@
 #include "clang/Basic/AllDiagnostics.h"
 #include "clang/Basic/DiagnosticDriver.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/Visibility.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/OptionUtils.h"
 #include "clang/Driver/Options.h"
@@ -622,6 +623,25 @@ static bool parseDiagArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
 static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
                              clang::DiagnosticsEngine &diags) {
   unsigned numErrorsBefore = diags.getNumErrors();
+
+  // -fvisibility
+  if (llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_fvisibility_EQ)) {
+    clang::Visibility visibility;
+    llvm::StringRef visibilityStr = a->getValue();
+    if (visibilityStr.equals("hidden")) {
+      visibility = clang::HiddenVisibility;
+    } else if (visibilityStr.equals("protected")) {
+      visibility = clang::ProtectedVisibility;
+    } else if (visibilityStr.equals("default")) {
+      visibility = clang::DefaultVisibility;
+    } else {
+      diags.Report(clang::diag::err_drv_invalid_value)
+          << a->getAsString(args) << visibilityStr;
+      return false;
+    }
+    res.getLangOpts().setValueVisibilityMode(visibility);
+  }
 
   // -fdefault* family
   if (args.hasArg(clang::driver::options::OPT_fdefault_real_8)) {

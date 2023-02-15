@@ -20,6 +20,9 @@ LANGOPT(Name, Bits, Default)
 #endif
 
 ENUM_LANGOPT(FPContractMode, FPModeKind, 2, FPM_Fast) ///< FP Contract Mode (off/fast)
+/// Default visibility for functions and variables
+ENUM_LANGOPT(ValueVisibilityMode, clang::Visibility, 3,
+             clang::DefaultVisibility)
 
 /// Permit floating point optimization without regard to infinities
 LANGOPT(NoHonorInfs, 1, false)

@@ -106,6 +106,18 @@ void Flang::addTargetOptions(const ArgList &Args,
   // TODO: Add target specific flags, ABI, mtune option etc.
 }
 
+void Flang::addOffloadOptions(const JobAction &JA,
+                              ArgStringList &CmdArgs) const {
+  bool IsOpenMPDevice = JA.isDeviceOffloading(Action::OFK_OpenMP);
+
+  if (IsOpenMPDevice) {
+    // When compiling for the OpenMP device we want protected visibility by
+    // default. This prevents the device from accidentally preempting code on
+    // the host, makes the system more robust, and improves performance.
+    CmdArgs.push_back("-fvisibility=protected");
+  }
+}
+
 static void addFloatingPointOptions(const Driver &D, const ArgList &Args,
                                     ArgStringList &CmdArgs) {
   StringRef FPContract;
@@ -302,6 +314,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Add target args, features, etc.
   addTargetOptions(Args, CmdArgs);
+
+  // Offloading related options
+  addOffloadOptions(JA, CmdArgs);
 
   // Add other compile options
   addOtherOptions(Args, CmdArgs);
