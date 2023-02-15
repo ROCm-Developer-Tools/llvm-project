@@ -658,6 +658,40 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
         Fortran::common::LanguageFeature::OpenMP);
   }
 
+  // Get the OpenMP target triples if any.
+  llvm::Triple triple(res.getTargetOpts().triple);
+  if (llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_fopenmp_targets_EQ)) {
+    enum ArchPtrSize { Arch16Bit, Arch32Bit, Arch64Bit };
+    auto getArchPtrSize = [](const llvm::Triple &T) {
+      if (T.isArch16Bit())
+        return Arch16Bit;
+      if (T.isArch32Bit())
+        return Arch32Bit;
+      assert(T.isArch64Bit() && "Expected 64-bit architecture");
+      return Arch64Bit;
+    };
+
+    for (unsigned i = 0; i < a->getNumValues(); ++i) {
+      llvm::Triple targetTriple(a->getValue(i));
+      const auto targetArch = targetTriple.getArch();
+
+      if (targetArch == llvm::Triple::UnknownArch ||
+          !(targetArch == llvm::Triple::aarch64 || targetTriple.isPPC() ||
+            targetArch == llvm::Triple::nvptx ||
+            targetArch == llvm::Triple::nvptx64 ||
+            targetArch == llvm::Triple::amdgcn ||
+            targetArch == llvm::Triple::x86 ||
+            targetArch == llvm::Triple::x86_64))
+        diags.Report(clang::diag::err_drv_invalid_omp_target) << a->getValue(i);
+      else if (getArchPtrSize(triple) != getArchPtrSize(targetTriple))
+        diags.Report(clang::diag::err_drv_incompatible_omp_arch)
+            << a->getValue(i) << triple.str();
+      else
+        res.getLangOpts().ompTargetTriples.push_back(targetTriple);
+    }
+  }
+
   // -pedantic
   if (args.hasArg(clang::driver::options::OPT_pedantic)) {
     res.setEnableConformanceChecks();

@@ -106,6 +106,24 @@ void Flang::addTargetOptions(const ArgList &Args,
   // TODO: Add target specific flags, ABI, mtune option etc.
 }
 
+void Flang::addOffloadOptions(const Compilation &C, const JobAction &JA,
+                              const ArgList &Args,
+                              ArgStringList &CmdArgs) const {
+  bool IsOpenMPHost = JA.isHostOffloading(Action::OFK_OpenMP);
+
+  // For all the host OpenMP offloading compile jobs we need to pass the targets
+  // information using -fopenmp-targets= option.
+  if (IsOpenMPHost) {
+    SmallString<128> Targets("-fopenmp-targets=");
+
+    SmallVector<std::string, 4> Triples;
+    auto TCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
+    std::transform(TCRange.first, TCRange.second, std::back_inserter(Triples),
+                   [](auto TC) { return TC.second->getTripleString(); });
+    CmdArgs.push_back(Args.MakeArgString(Targets + llvm::join(Triples, ",")));
+  }
+}
+
 static void addFloatingPointOptions(const Driver &D, const ArgList &Args,
                                     ArgStringList &CmdArgs) {
   StringRef FPContract;
@@ -302,6 +320,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Add target args, features, etc.
   addTargetOptions(Args, CmdArgs);
+
+  // Offloading related options
+  addOffloadOptions(C, JA, Args, CmdArgs);
 
   // Add other compile options
   addOtherOptions(Args, CmdArgs);
