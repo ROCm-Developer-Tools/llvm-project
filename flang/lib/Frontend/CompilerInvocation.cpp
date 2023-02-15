@@ -348,6 +348,8 @@ static bool parseFrontendArgs(FrontendOptions &opts, llvm::opt::ArgList &args,
   opts.showHelp = args.hasArg(clang::driver::options::OPT_help);
   opts.showVersion = args.hasArg(clang::driver::options::OPT_version);
 
+  opts.auxTriple = args.getLastArgValue(clang::driver::options::OPT_aux_triple);
+
   // Get the input kind (from the value passed via `-x`)
   InputKind dashX(Language::Unknown);
   if (const llvm::opt::Arg *a =

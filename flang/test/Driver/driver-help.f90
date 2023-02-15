@@ -75,6 +75,7 @@
 ! HELP-FC1:USAGE: flang
 ! HELP-FC1-EMPTY:
 ! HELP-FC1-NEXT:OPTIONS:
+! HELP-FC1-NEXT: -aux-triple <value>    Auxiliary target triple.
 ! HELP-FC1-NEXT: -cpp                   Enable predefined and command line preprocessor macros
 ! HELP-FC1-NEXT: -D <macro>=<value>     Define <macro> to <value> (or 1 if <value> omitted)
 ! HELP-FC1-NEXT: -emit-llvm-bc          Build ASTs then convert to LLVM, emit .bc file

@@ -290,6 +290,9 @@ struct FrontendOptions {
   /// should only be used for debugging and experimental features.
   std::vector<std::string> mlirArgs;
 
+  /// Auxiliary triple for CUDA/HIP compilation.
+  std::string auxTriple;
+
   // Return the appropriate input kind for a file extension. For example,
   /// "*.f" would return Language::Fortran.
   ///

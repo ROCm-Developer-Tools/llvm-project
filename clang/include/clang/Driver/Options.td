@@ -5823,9 +5823,6 @@ def aux_target_cpu : Separate<["-"], "aux-target-cpu">,
   HelpText<"Target a specific auxiliary cpu type">;
 def aux_target_feature : Separate<["-"], "aux-target-feature">,
   HelpText<"Target specific auxiliary attributes">;
-def aux_triple : Separate<["-"], "aux-triple">,
-  HelpText<"Auxiliary target triple.">,
-  MarshallingInfoString<FrontendOpts<"AuxTriple">>;
 def code_completion_at : Separate<["-"], "code-completion-at">,
   MetaVarName<"<file>:<line>:<column>">,
   HelpText<"Dump code-completion information at a location">;
@@ -6491,6 +6488,9 @@ def emit_llvm_bc : Flag<["-"], "emit-llvm-bc">,
 
 } // let Group = Action_Group
 
+def aux_triple : Separate<["-"], "aux-triple">,
+  HelpText<"Auxiliary target triple.">,
+  MarshallingInfoString<FrontendOpts<"AuxTriple">>;
 def load : Separate<["-"], "load">, MetaVarName<"<dsopath>">,
   HelpText<"Load the named plugin (dynamic shared object)">;
 def plugin : Separate<["-"], "plugin">, MetaVarName<"<name>">,
