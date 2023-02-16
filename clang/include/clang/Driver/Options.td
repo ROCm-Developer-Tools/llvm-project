@@ -5140,8 +5140,6 @@ def tune_cpu : Separate<["-"], "tune-cpu">,
 def target_abi : Separate<["-"], "target-abi">,
   HelpText<"Target a particular ABI type">,
   MarshallingInfoString<TargetOpts<"ABI">>;
-def target_sdk_version_EQ : Joined<["-"], "target-sdk-version=">,
-  HelpText<"The version of target SDK used for compilation">;
 def darwin_target_variant_sdk_version_EQ : Joined<["-"],
   "darwin-target-variant-sdk-version=">,
   HelpText<"The version of darwin target variant SDK used for compilation">;
@@ -5169,6 +5167,8 @@ def target_cpu : Separate<["-"], "target-cpu">,
 def target_feature : Separate<["-"], "target-feature">,
   HelpText<"Target specific attributes">,
   MarshallingInfoStringVector<TargetOpts<"FeaturesAsWritten">>;
+def target_sdk_version_EQ : Joined<["-"], "target-sdk-version=">,
+  HelpText<"The version of target SDK used for compilation">;
 def triple : Separate<["-"], "triple">,
   HelpText<"Specify target triple (e.g. i686-apple-darwin9)">,
   MarshallingInfoString<TargetOpts<"Triple">, "llvm::Triple::normalize(llvm::sys::getDefaultTargetTriple())">,
@@ -6133,6 +6133,9 @@ def split_dwarf_output : Separate<["-"], "split-dwarf-output">,
 
 let Flags = [CC1Option, FC1Option, NoDriverOption] in {
 
+def fapply_global_visibility_to_externs : Flag<["-"], "fapply-global-visibility-to-externs">,
+  HelpText<"Apply global symbol visibility to external declarations without an explicit visibility">,
+  MarshallingInfoFlag<LangOpts<"SetVisibilityForExternDecls">>;
 def mreassociate : Flag<["-"], "mreassociate">,
   HelpText<"Allow reassociation transformations for floating-point instructions">,
   MarshallingInfoFlag<LangOpts<"AllowFPReassoc">>, ImpliedByAnyOf<[funsafe_math_optimizations.KeyPath]>;
@@ -6235,9 +6238,6 @@ def stack_protector_buffer_size : Separate<["-"], "stack-protector-buffer-size">
 def ftype_visibility : Joined<["-"], "ftype-visibility=">,
   HelpText<"Default type visibility">,
   MarshallingInfoVisibility<LangOpts<"TypeVisibilityMode">, fvisibility_EQ.KeyPath>;
-def fapply_global_visibility_to_externs : Flag<["-"], "fapply-global-visibility-to-externs">,
-  HelpText<"Apply global symbol visibility to external declarations without an explicit visibility">,
-  MarshallingInfoFlag<LangOpts<"SetVisibilityForExternDecls">>;
 def ftemplate_depth : Separate<["-"], "ftemplate-depth">,
   HelpText<"Maximum depth of recursive template instantiation">,
   MarshallingInfoInt<LangOpts<"InstantiationDepth">, "1024">;
@@ -6419,11 +6419,16 @@ def source_date_epoch : Separate<["-"], "source-date-epoch">,
 // CUDA Options
 //===----------------------------------------------------------------------===//
 
-let Flags = [CC1Option, NoDriverOption] in {
+let Flags = [CC1Option, FC1Option, NoDriverOption] in {
 
 def fcuda_is_device : Flag<["-"], "fcuda-is-device">,
   HelpText<"Generate code for CUDA device">,
   MarshallingInfoFlag<LangOpts<"CUDAIsDevice">>;
+
+} // let Flags = [CC1Option, FC1Option, NoDriverOption]
+
+let Flags = [CC1Option, NoDriverOption] in {
+
 def fcuda_include_gpubinary : Separate<["-"], "fcuda-include-gpubinary">,
   HelpText<"Incorporate CUDA device-side binary into host object file.">,
   MarshallingInfoString<CodeGenOpts<"CudaGpuBinaryFileName">>;
@@ -6471,7 +6476,7 @@ def sycl_std_EQ : Joined<["-"], "sycl-std=">, Group<sycl_Group>,
 
 defm cuda_approx_transcendentals : BoolFOption<"cuda-approx-transcendentals",
   LangOpts<"CUDADeviceApproxTranscendentals">, DefaultFalse,
-  PosFlag<SetTrue, [CC1Option], "Use">, NegFlag<SetFalse, [], "Don't use">,
+  PosFlag<SetTrue, [CC1Option, FC1Option], "Use">, NegFlag<SetFalse, [], "Don't use">,
   BothFlags<[], " approximate transcendental functions">>,
   ShouldParseIf<fcuda_is_device.KeyPath>;
 

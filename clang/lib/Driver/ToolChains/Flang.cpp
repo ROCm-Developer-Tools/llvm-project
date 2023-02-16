@@ -106,6 +106,14 @@ void Flang::addTargetOptions(const ArgList &Args,
   // TODO: Add target specific flags, ABI, mtune option etc.
 }
 
+void Flang::addOffloadOptions(const JobAction &JA, const ArgList &Args,
+                              ArgStringList &CmdArgs) const {
+  const ToolChain &TC = getToolChain();
+
+  Action::OffloadKind OffloadKind = JA.getOffloadingDeviceKind();
+  TC.addClangTargetOptions(Args, CmdArgs, OffloadKind);
+}
+
 static void addFloatingPointOptions(const Driver &D, const ArgList &Args,
                                     ArgStringList &CmdArgs) {
   StringRef FPContract;
@@ -302,6 +310,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Add target args, features, etc.
   addTargetOptions(Args, CmdArgs);
+
+  // Offloading related options
+  addOffloadOptions(JA, Args, CmdArgs);
 
   // Add other compile options
   addOtherOptions(Args, CmdArgs);

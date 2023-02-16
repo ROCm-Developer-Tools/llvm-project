@@ -173,7 +173,9 @@ static void parseCodeGenArgs(Fortran::frontend::CodeGenOptions &opts,
 ///
 /// \param [in] opts The target options instance to update
 /// \param [in] args The list of input arguments (from the compiler invocation)
-static void parseTargetArgs(TargetOptions &opts, llvm::opt::ArgList &args) {
+/// \param [in] diags The diagnostics engine
+static void parseTargetArgs(TargetOptions &opts, llvm::opt::ArgList &args,
+                            clang::DiagnosticsEngine &diags) {
   if (const llvm::opt::Arg *a =
           args.getLastArg(clang::driver::options::OPT_triple))
     opts.triple = a->getValue();
@@ -185,6 +187,16 @@ static void parseTargetArgs(TargetOptions &opts, llvm::opt::ArgList &args) {
   for (const llvm::opt::Arg *currentArg :
        args.filtered(clang::driver::options::OPT_target_feature))
     opts.featuresAsWritten.emplace_back(currentArg->getValue());
+
+  if (const llvm::opt::Arg *a =
+          args.getLastArg(clang::driver::options::OPT_target_sdk_version_EQ)) {
+    llvm::VersionTuple version;
+    if (version.tryParse(a->getValue()))
+      diags.Report(clang::diag::err_drv_invalid_value)
+          << a->getAsString(args) << a->getValue();
+    else
+      opts.sdkVersion = version;
+  }
 }
 
 // Tweak the frontend configuration based on the frontend action
@@ -658,6 +670,19 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
         Fortran::common::LanguageFeature::OpenMP);
   }
 
+  if (args.hasArg(clang::driver::options::OPT_fcuda_is_device)) {
+    res.getLangOpts().CUDAIsDevice = true;
+  }
+
+  if (args.hasArg(clang::driver::options::OPT_fcuda_approx_transcendentals)) {
+    res.getLangOpts().CUDADeviceApproxTranscendentals = true;
+  }
+
+  if (args.hasArg(
+          clang::driver::options::OPT_fapply_global_visibility_to_externs)) {
+    res.getLangOpts().SetVisibilityForExternDecls = true;
+  }
+
   // -pedantic
   if (args.hasArg(clang::driver::options::OPT_pedantic)) {
     res.setEnableConformanceChecks();
@@ -789,7 +814,7 @@ bool CompilerInvocation::createFromArgs(
   }
 
   success &= parseFrontendArgs(res.getFrontendOpts(), args, diags);
-  parseTargetArgs(res.getTargetOpts(), args);
+  parseTargetArgs(res.getTargetOpts(), args, diags);
   parsePreprocessorArgs(res.getPreprocessorOpts(), args);
   parseCodeGenArgs(res.getCodeGenOpts(), args, diags);
   success &= parseSemaArgs(res, args, diags);

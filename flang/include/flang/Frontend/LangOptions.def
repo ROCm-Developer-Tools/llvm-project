@@ -35,5 +35,13 @@ LANGOPT(AssociativeMath, 1, false)
 /// Allow division operations to be reassociated
 LANGOPT(ReciprocalMath, 1, false)
 
+/// Compiling for CUDA device
+LANGOPT(CUDAIsDevice, 1, false)
+/// Allow using approximate transcendental functions
+LANGOPT(CUDADeviceApproxTranscendentals, 1, false)
+/// Apply global symbol visibility to external declarations without an explicit
+/// visibility
+LANGOPT(SetVisibilityForExternDecls, 1, false)
+
 #undef LANGOPT
 #undef ENUM_LANGOPT

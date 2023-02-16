@@ -18,6 +18,7 @@
 #ifndef FORTRAN_FRONTEND_TARGETOPTIONS_H
 #define FORTRAN_FRONTEND_TARGETOPTIONS_H
 
+#include "llvm/Support/VersionTuple.h"
 #include <string>
 #include <vector>
 
@@ -35,6 +36,9 @@ public:
   /// The list of target specific features to enable or disable, as written on
   /// the command line.
   std::vector<std::string> featuresAsWritten;
+
+  /// The version of the SDK which was used during the compilation.
+  llvm::VersionTuple sdkVersion;
 };
 
 } // end namespace Fortran::frontend

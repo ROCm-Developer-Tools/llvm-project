@@ -84,10 +84,15 @@
 ! HELP-FC1-NEXT: -E                     Only run the preprocessor
 ! HELP-FC1-NEXT: -falternative-parameter-statement
 ! HELP-FC1-NEXT: Enable the old style PARAMETER statement
+! HELP-FC1-NEXT: -fapply-global-visibility-to-externs
+! HELP-FC1-NEXT:                        Apply global symbol visibility to external declarations without an explicit visibility
 ! HELP-FC1-NEXT: -fapprox-func          Allow certain math function calls to be replaced with an approximately equivalent calculation
 ! HELP-FC1-NEXT: -fbackslash            Specify that backslash in string introduces an escape character
 ! HELP-FC1-NEXT: -fcolor-diagnostics     Enable colors in diagnostics
 ! HELP-FC1-NEXT: -fconvert=<value>      Set endian conversion of data for unformatted files
+! HELP-FC1-NEXT: -fcuda-approx-transcendentals
+! HELP-FC1-NEXT:                        Use approximate transcendental functions
+! HELP-FC1-NEXT: -fcuda-is-device       Generate code for CUDA device
 ! HELP-FC1-NEXT: -fdebug-dump-all       Dump symbols and the parse tree after the semantic checks
 ! HELP-FC1-NEXT: -fdebug-dump-parse-tree-no-sema
 ! HELP-FC1-NEXT:                        Dump the parse tree (skips the semantic checks)
@@ -162,6 +167,8 @@
 ! HELP-FC1-NEXT: -S                     Only run preprocess and compilation steps
 ! HELP-FC1-NEXT: -target-cpu <value>    Target a specific cpu type
 ! HELP-FC1-NEXT: -target-feature <value> Target specific attributes
+! HELP-FC1-NEXT: -target-sdk-version=<value>
+! HELP-FC1-NEXT:                        The version of target SDK used for compilation
 ! HELP-FC1-NEXT: -test-io               Run the InputOuputTest action. Use for development and testing only.
 ! HELP-FC1-NEXT: -triple <value>        Specify target triple (e.g. i686-apple-darwin9)
 ! HELP-FC1-NEXT: -U <macro>             Undefine macro <macro>
