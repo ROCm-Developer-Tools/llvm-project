@@ -106,6 +106,51 @@ void Flang::addTargetOptions(const ArgList &Args,
   // TODO: Add target specific flags, ABI, mtune option etc.
 }
 
+void Flang::addOffloadOptions(const Compilation &C, const JobAction &JA,
+                              const InputInfoList &Inputs, const ArgList &Args,
+                              ArgStringList &CmdArgs) const {
+  const ToolChain &TC = getToolChain();
+
+  bool IsOpenMPDevice = JA.isDeviceOffloading(Action::OFK_OpenMP);
+  bool IsOpenMPHost = JA.isHostOffloading(Action::OFK_OpenMP);
+  bool IsHostOffloadingAction =
+      IsOpenMPHost || JA.isHostOffloading(C.getActiveOffloadKinds());
+
+  const InputInfo &Input = Inputs[0];
+  assert(Input.isFilename() && "Invalid input.");
+
+  InputInfoList HostOffloadingInputs;
+  const InputInfo *OpenMPDeviceInput = nullptr;
+  for (const InputInfo &I : Inputs) {
+    if (&I == &Input || I.getType() == types::TY_Nothing) {
+      // This is the primary input or contains nothing.
+    } else if (IsHostOffloadingAction) {
+      HostOffloadingInputs.push_back(I);
+    } else if (IsOpenMPDevice && !OpenMPDeviceInput) {
+      OpenMPDeviceInput = &I;
+    } else {
+      llvm_unreachable("unexpectedly given multiple inputs");
+    }
+  }
+
+  if (IsOpenMPDevice) {
+    // OpenMP offloading device jobs take the argument
+    // -fopenmp-host-ir-file-path to specify the result of the compile phase on
+    // the host, so the meaningful device declarations can be identified.
+    if (OpenMPDeviceInput) {
+      CmdArgs.push_back("-fopenmp-host-ir-file-path");
+      CmdArgs.push_back(Args.MakeArgString(OpenMPDeviceInput->getFilename()));
+    }
+  }
+
+  if (!HostOffloadingInputs.empty()) {
+    for (const InputInfo Input : HostOffloadingInputs) {
+      CmdArgs.push_back(Args.MakeArgString("-fembed-offload-object=" +
+                                           TC.getInputFilename(Input)));
+    }
+  }
+}
+
 static void addFloatingPointOptions(const Driver &D, const ArgList &Args,
                                     ArgStringList &CmdArgs) {
   StringRef FPContract;
@@ -303,6 +348,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
   // Add target args, features, etc.
   addTargetOptions(Args, CmdArgs);
 
+  // Offloading related options
+  addOffloadOptions(C, JA, Inputs, Args, CmdArgs);
+
   // Add other compile options
   addOtherOptions(Args, CmdArgs);
 
@@ -341,17 +389,6 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   assert(Input.isFilename() && "Invalid input.");
-
-  bool IsHostOffloadingAction = JA.isHostOffloading(Action::OFK_OpenMP) ||
-                                JA.isHostOffloading(C.getActiveOffloadKinds());
-  for (const InputInfo &I : Inputs) {
-    if (&I == &Input || I.getType() == types::TY_Nothing) {
-      // This is the primary input or contains nothing.
-    } else if (IsHostOffloadingAction) {
-      CmdArgs.push_back(Args.MakeArgString("-fembed-offload-object=" +
-                                           TC.getInputFilename(I)));
-    }
-  }
 
   addDashXForInput(Args, Input, CmdArgs);
 

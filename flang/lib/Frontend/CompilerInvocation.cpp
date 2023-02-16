@@ -658,6 +658,16 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
         Fortran::common::LanguageFeature::OpenMP);
   }
 
+  // Get OpenMP host file path if any and report if a non existent file is
+  // found
+  if (llvm::opt::Arg *a = args.getLastArg(
+          clang::driver::options::OPT_fopenmp_host_ir_file_path)) {
+    const char *irPath = a->getValue();
+    res.getLangOpts().ompHostIRFile = irPath;
+    if (!llvm::sys::fs::exists(irPath))
+      diags.Report(clang::diag::err_drv_omp_host_ir_file_not_found) << irPath;
+  }
+
   // -pedantic
   if (args.hasArg(clang::driver::options::OPT_pedantic)) {
     res.setEnableConformanceChecks();

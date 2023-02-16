@@ -15,6 +15,8 @@
 #ifndef LLVM_FLANG_FRONTEND_LANGOPTIONS_H
 #define LLVM_FLANG_FRONTEND_LANGOPTIONS_H
 
+#include <string>
+
 namespace Fortran::frontend {
 
 /// Bitfields of LangOptions, split out from LangOptions to ensure
@@ -29,6 +31,10 @@ public:
     // Aggressively fuse FP ops (E.g. FMA).
     FPM_Fast,
   };
+
+  /// Name of the IR file that contains the result of the OpenMP target
+  /// host code generation.
+  std::string ompHostIRFile;
 
 #define LANGOPT(Name, Bits, Default) unsigned Name : Bits;
 #define ENUM_LANGOPT(Name, Type, Bits, Default)
