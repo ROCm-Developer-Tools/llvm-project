@@ -27,6 +27,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include <optional>
 
+#include "flang/Common/module-wrapper.h"
 namespace fir {
 class AbstractArrayBox;
 class ExtendedValue;
@@ -59,13 +60,10 @@ public:
   mlir::Region &getRegion() { return *getBlock()->getParent(); }
 
   /// Get the current Module
-  std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> getModule() {
-    auto modOp = getRegion().getParentOfType<mlir::ModuleOp>();
-    if (modOp)
+  fortran::common::ModuleInterface getModule() {
+    if (auto modOp = getRegion().getParentOfType<mlir::ModuleOp>())
       return modOp;
-
-    auto mlirModOp = getRegion().getParentOfType<mlir::omp::ModuleOp>();
-    return mlirModOp;
+    return getRegion().getParentOfType<mlir::omp::ModuleOp>();
   }
 
   /// Get the current Function
@@ -257,7 +255,7 @@ public:
     return getNamedFunction(getModule(), name);
   }
   static mlir::func::FuncOp
-  getNamedFunction(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+  getNamedFunction(fortran::common::ModuleInterface module,
                    llvm::StringRef name);
 
   /// Get a function by symbol name. The result will be null if there is no
@@ -266,16 +264,15 @@ public:
     return getNamedFunction(getModule(), symbol);
   }
   static mlir::func::FuncOp
-  getNamedFunction(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp>,
+  getNamedFunction(fortran::common::ModuleInterface module,
                    mlir::SymbolRefAttr symbol);
 
   fir::GlobalOp getNamedGlobal(llvm::StringRef name) {
     return getNamedGlobal(getModule(), name);
   }
 
-  static fir::GlobalOp
-  getNamedGlobal(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp>,
-                 llvm::StringRef name);
+  static fir::GlobalOp getNamedGlobal(fortran::common::ModuleInterface module,
+                                      llvm::StringRef name);
 
   /// Lazy creation of fir.convert op.
   mlir::Value createConvert(mlir::Location loc, mlir::Type toTy,
@@ -294,8 +291,7 @@ public:
   }
 
   static mlir::func::FuncOp
-  createFunction(mlir::Location loc,
-                 std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+  createFunction(mlir::Location loc, fortran::common::ModuleInterface module,
                  llvm::StringRef name, mlir::FunctionType ty);
 
   /// Determine if the named function is already in the module. Return the
@@ -308,8 +304,7 @@ public:
   }
 
   static mlir::func::FuncOp
-  addNamedFunction(mlir::Location loc,
-                   std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+  addNamedFunction(mlir::Location loc, fortran::common::ModuleInterface module,
                    llvm::StringRef name, mlir::FunctionType ty) {
     if (auto func = getNamedFunction(module, name))
       return func;

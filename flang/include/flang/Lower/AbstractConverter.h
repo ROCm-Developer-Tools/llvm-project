@@ -14,6 +14,7 @@
 #define FORTRAN_LOWER_ABSTRACTCONVERTER_H
 
 #include "flang/Common/Fortran.h"
+#include "flang/Common/module-wrapper.h"
 #include "flang/Lower/LoweringOptions.h"
 #include "flang/Lower/PFTDefs.h"
 #include "flang/Optimizer/Builder/BoxValue.h"
@@ -227,9 +228,7 @@ public:
   /// Get the OpBuilder
   virtual fir::FirOpBuilder &getFirOpBuilder() = 0;
   /// Get the ModuleOp
-  virtual std::variant<std::unique_ptr<mlir::ModuleOp>,
-                       std::unique_ptr<mlir::omp::ModuleOp>> *
-  getModuleOp() = 0;
+  virtual fortran::common::ModuleInterface &getModuleOp() = 0;
   /// Get the MLIRContext
   virtual mlir::MLIRContext &getMLIRContext() = 0;
   /// Unique a symbol

@@ -3508,56 +3508,25 @@ fir::parseSelector(mlir::OpAsmParser &parser, mlir::OperationState &result,
 }
 
 mlir::func::FuncOp
-fir::createFuncOp(mlir::Location loc,
-                  std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
+fir::createFuncOp(mlir::Location loc, fortran::common::ModuleInterface module,
                   llvm::StringRef name, mlir::FunctionType type,
                   llvm::ArrayRef<mlir::NamedAttribute> attrs) {
-  mlir::Region *reg;
-  mlir::Block *body;
-  if (std::holds_alternative<mlir::ModuleOp>(module)) {
-    auto mod = std::get<mlir::ModuleOp>(module);
-    if (auto f = mod.lookupSymbol<mlir::func::FuncOp>(name))
-      return f;
-    body = mod.getBody();
-    reg = &mod.getBodyRegion();
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(module)) {
-    auto mod = std::get<mlir::omp::ModuleOp>(module);
-    if (auto f = mod.lookupSymbol<mlir::func::FuncOp>(name))
-      return f;
-    body = mod.getBody();
-    reg = &mod.getBodyRegion();
-  }
-
-  mlir::OpBuilder modBuilder(reg);
-  modBuilder.setInsertionPointToEnd(body);
+  if (auto f = module.lookupSymbol<mlir::func::FuncOp>(name))
+    return f;
+  mlir::OpBuilder modBuilder(module.getBodyRegion());
+  modBuilder.setInsertionPointToEnd(module.getBody());
   auto result = modBuilder.create<mlir::func::FuncOp>(loc, name, type, attrs);
   result.setVisibility(mlir::SymbolTable::Visibility::Private);
   return result;
 }
 
-fir::GlobalOp
-fir::createGlobalOp(mlir::Location loc,
-                    std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
-                    llvm::StringRef name, mlir::Type type,
-                    llvm::ArrayRef<mlir::NamedAttribute> attrs) {
-  mlir::Region *reg;
-  if (std::holds_alternative<mlir::ModuleOp>(module)) {
-    auto mod = std::get<mlir::ModuleOp>(module);
-    if (auto g = mod.lookupSymbol<fir::GlobalOp>(name))
-      return g;
-    reg = &mod.getBodyRegion();
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(module)) {
-    auto mod = std::get<mlir::omp::ModuleOp>(module);
-    if (auto g = mod.lookupSymbol<fir::GlobalOp>(name))
-      return g;
-    reg = &mod.getBodyRegion();
-  }
-
-  mlir::OpBuilder modBuilder(reg);
+fir::GlobalOp fir::createGlobalOp(mlir::Location loc,
+                                  fortran::common::ModuleInterface module,
+                                  llvm::StringRef name, mlir::Type type,
+                                  llvm::ArrayRef<mlir::NamedAttribute> attrs) {
+  if (auto g = module.lookupSymbol<fir::GlobalOp>(name))
+    return g;
+  mlir::OpBuilder modBuilder(module.getBodyRegion());
   auto result = modBuilder.create<fir::GlobalOp>(loc, name, type, attrs);
   result.setVisibility(mlir::SymbolTable::Visibility::Private);
   return result;

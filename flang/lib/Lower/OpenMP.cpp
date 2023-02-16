@@ -1039,22 +1039,10 @@ static omp::ReductionDeclareOp createReductionDecl(
     Fortran::parser::DefinedOperator::IntrinsicOperator intrinsicOp,
     mlir::Type type, mlir::Location loc) {
   OpBuilder::InsertionGuard guard(builder);
-
-  mlir::omp::ReductionDeclareOp decl;
-  mlir::Region *reg;
-  if (std::holds_alternative<mlir::ModuleOp>(builder.getModule())) {
-    auto mod = std::get<mlir::ModuleOp>(builder.getModule());
-    decl = mod.lookupSymbol<mlir::omp::ReductionDeclareOp>(reductionOpName);
-    reg = &mod.getBodyRegion();
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(builder.getModule())) {
-    auto mod = std::get<mlir::omp::ModuleOp>(builder.getModule());
-    decl = mod.lookupSymbol<mlir::omp::ReductionDeclareOp>(reductionOpName);
-    reg = &mod.getBodyRegion();
-  }
-
-  mlir::OpBuilder modBuilder(reg);
+  auto module = builder.getModule();
+  mlir::OpBuilder modBuilder(module.getBodyRegion());
+  auto decl =
+      module.lookupSymbol<mlir::omp::ReductionDeclareOp>(reductionOpName);
   if (!decl)
     decl =
         modBuilder.create<omp::ReductionDeclareOp>(loc, reductionOpName, type);
@@ -1480,23 +1468,9 @@ genOMP(Fortran::lower::AbstractConverter &converter,
       return firOpBuilder.create<mlir::omp::CriticalOp>(currentLocation,
                                                         FlatSymbolRefAttr());
     } else {
-      mlir::omp::CriticalDeclareOp global;
-      mlir::Region *reg;
-      if (std::holds_alternative<mlir::ModuleOp>(firOpBuilder.getModule())) {
-        auto mod = std::get<mlir::ModuleOp>(firOpBuilder.getModule());
-        global = mod.lookupSymbol<mlir::omp::CriticalDeclareOp>(name);
-        reg = &mod.getBodyRegion();
-      }
-
-      if (std::holds_alternative<mlir::omp::ModuleOp>(
-              firOpBuilder.getModule())) {
-        auto mod = std::get<mlir::omp::ModuleOp>(firOpBuilder.getModule());
-        global = mod.lookupSymbol<mlir::omp::CriticalDeclareOp>(name);
-        reg = &mod.getBodyRegion();
-      }
-
-      mlir::OpBuilder modBuilder(reg);
-
+      auto module = firOpBuilder.getModule();
+      mlir::OpBuilder modBuilder(module.getBodyRegion());
+      auto global = module.lookupSymbol<mlir::omp::CriticalDeclareOp>(name);
       if (!global)
         global = modBuilder.create<mlir::omp::CriticalDeclareOp>(
             currentLocation, name, hint);

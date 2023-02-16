@@ -32,59 +32,29 @@ static llvm::cl::opt<std::size_t>
                                       "name"),
                        llvm::cl::init(32));
 
-mlir::func::FuncOp fir::FirOpBuilder::createFunction(
-    mlir::Location loc,
-    std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> module,
-    llvm::StringRef name, mlir::FunctionType ty) {
+mlir::func::FuncOp
+fir::FirOpBuilder::createFunction(mlir::Location loc,
+                                  fortran::common::ModuleInterface module,
+                                  llvm::StringRef name, mlir::FunctionType ty) {
   return fir::createFuncOp(loc, module, name, ty);
 }
 
-mlir::func::FuncOp fir::FirOpBuilder::getNamedFunction(
-    std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> modOp,
-    llvm::StringRef name) {
-  mlir::func::FuncOp fOp;
-  if (std::holds_alternative<mlir::ModuleOp>(modOp)) {
-    auto mod = std::get<mlir::ModuleOp>(modOp);
-    fOp = mod.lookupSymbol<mlir::func::FuncOp>(name);
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(modOp)) {
-    auto mod = std::get<mlir::omp::ModuleOp>(modOp);
-    fOp = mod.lookupSymbol<mlir::func::FuncOp>(name);
-  }
-  return fOp;
+mlir::func::FuncOp
+fir::FirOpBuilder::getNamedFunction(fortran::common::ModuleInterface modOp,
+                                    llvm::StringRef name) {
+  return modOp.lookupSymbol<mlir::func::FuncOp>(name);
 }
 
-mlir::func::FuncOp fir::FirOpBuilder::getNamedFunction(
-    std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> modOp,
-    mlir::SymbolRefAttr symbol) {
-  mlir::func::FuncOp fOp;
-  if (std::holds_alternative<mlir::ModuleOp>(modOp)) {
-    auto mod = std::get<mlir::ModuleOp>(modOp);
-    fOp = mod.lookupSymbol<mlir::func::FuncOp>(symbol);
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(modOp)) {
-    auto mod = std::get<mlir::omp::ModuleOp>(modOp);
-    fOp = mod.lookupSymbol<mlir::func::FuncOp>(symbol);
-  }
-  return fOp;
+mlir::func::FuncOp
+fir::FirOpBuilder::getNamedFunction(fortran::common::ModuleInterface modOp,
+                                    mlir::SymbolRefAttr symbol) {
+  return modOp.lookupSymbol<mlir::func::FuncOp>(symbol);
 }
 
-fir::GlobalOp fir::FirOpBuilder::getNamedGlobal(
-    std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> modOp,
-    llvm::StringRef name) {
-  fir::GlobalOp gOp;
-  if (std::holds_alternative<mlir::ModuleOp>(modOp)) {
-    auto mod = std::get<mlir::ModuleOp>(modOp);
-    gOp = mod.lookupSymbol<fir::GlobalOp>(name);
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(modOp)) {
-    auto mod = std::get<mlir::omp::ModuleOp>(modOp);
-    gOp = mod.lookupSymbol<fir::GlobalOp>(name);
-  }
-  return gOp;
+fir::GlobalOp
+fir::FirOpBuilder::getNamedGlobal(fortran::common::ModuleInterface modOp,
+                                  llvm::StringRef name) {
+  return modOp.lookupSymbol<fir::GlobalOp>(name);
 }
 
 mlir::Type fir::FirOpBuilder::getRefType(mlir::Type eleTy) {
@@ -287,24 +257,11 @@ fir::GlobalOp fir::FirOpBuilder::createGlobal(mlir::Location loc,
                                               mlir::StringAttr linkage,
                                               mlir::Attribute value,
                                               bool isConst, bool isTarget) {
-  mlir::Block *body;
-  if (std::holds_alternative<mlir::ModuleOp>(getModule())) {
-    auto mod = std::get<mlir::ModuleOp>(getModule());
-    if (auto glob = mod.lookupSymbol<fir::GlobalOp>(name))
-      return glob;
-    body = mod.getBody();
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(getModule())) {
-    auto mod = std::get<mlir::omp::ModuleOp>(getModule());
-    if (auto glob = mod.lookupSymbol<fir::GlobalOp>(name))
-      return glob;
-    body = mod.getBody();
-  }
-
+  auto module = getModule();
   auto insertPt = saveInsertionPoint();
-
-  setInsertionPoint(body, body->end());
+  if (auto glob = module.lookupSymbol<fir::GlobalOp>(name))
+    return glob;
+  setInsertionPoint(module.getBody(), module.getBody()->end());
   auto glob =
       create<fir::GlobalOp>(loc, name, isConst, isTarget, type, value, linkage);
   restoreInsertionPoint(insertPt);
@@ -315,23 +272,11 @@ fir::GlobalOp fir::FirOpBuilder::createGlobal(
     mlir::Location loc, mlir::Type type, llvm::StringRef name, bool isConst,
     bool isTarget, std::function<void(FirOpBuilder &)> bodyBuilder,
     mlir::StringAttr linkage) {
-  mlir::Block *body;
-  if (std::holds_alternative<mlir::ModuleOp>(getModule())) {
-    auto mod = std::get<mlir::ModuleOp>(getModule());
-    if (auto glob = mod.lookupSymbol<fir::GlobalOp>(name))
-      return glob;
-    body = mod.getBody();
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(getModule())) {
-    auto mod = std::get<mlir::omp::ModuleOp>(getModule());
-    if (auto glob = mod.lookupSymbol<fir::GlobalOp>(name))
-      return glob;
-    body = mod.getBody();
-  }
-
+  auto module = getModule();
   auto insertPt = saveInsertionPoint();
-  setInsertionPoint(body, body->end());
+  if (auto glob = module.lookupSymbol<fir::GlobalOp>(name))
+    return glob;
+  setInsertionPoint(module.getBody(), module.getBody()->end());
   auto glob = create<fir::GlobalOp>(loc, name, isConst, isTarget, type,
                                     mlir::Attribute{}, linkage);
   auto &region = glob.getRegion();
@@ -345,23 +290,11 @@ fir::GlobalOp fir::FirOpBuilder::createGlobal(
 
 fir::DispatchTableOp fir::FirOpBuilder::createDispatchTableOp(
     mlir::Location loc, llvm::StringRef name, llvm::StringRef parentName) {
-  mlir::Block *body;
-  if (std::holds_alternative<mlir::ModuleOp>(getModule())) {
-    auto mod = std::get<mlir::ModuleOp>(getModule());
-    if (auto dt = mod.lookupSymbol<fir::DispatchTableOp>(name))
-      return dt;
-    body = mod.getBody();
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(getModule())) {
-    auto mod = std::get<mlir::omp::ModuleOp>(getModule());
-    if (auto dt = mod.lookupSymbol<fir::DispatchTableOp>(name))
-      return dt;
-    body = mod.getBody();
-  }
-
+  auto module = getModule();
   auto insertPt = saveInsertionPoint();
-  setInsertionPoint(body, body->end());
+  if (auto dt = module.lookupSymbol<fir::DispatchTableOp>(name))
+    return dt;
+  setInsertionPoint(module.getBody(), module.getBody()->end());
   auto dt = create<fir::DispatchTableOp>(loc, name, mlir::Type{}, parentName);
   restoreInsertionPoint(insertPt);
   return dt;

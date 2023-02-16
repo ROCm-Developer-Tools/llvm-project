@@ -13,6 +13,7 @@
 #ifndef FORTRAN_FRONTEND_FRONTENDACTIONS_H
 #define FORTRAN_FRONTEND_FRONTENDACTIONS_H
 
+#include "flang/Common/module-wrapper.h"
 #include "flang/Frontend/CodeGenOptions.h"
 #include "flang/Frontend/FrontendAction.h"
 #include "flang/Parser/parsing.h"
@@ -206,14 +207,6 @@ class CodeGenAction : public FrontendAction {
   bool beginSourceFileAction() override;
   /// Sets up LLVM's TargetMachine.
   void setUpTargetMachine();
-  /// Parses an MLIR file into a Module of a specified type
-  template <typename Mod>
-  bool parseMLIRFileToModule();
-
-  /// Parse, lower and optimise an MLIR file utilising a Module of a specified
-  /// type
-  template <typename Mod>
-  bool parseLowerAndOptimiseModule();
 
   /// Runs the optimization (aka middle-end) pipeline on the LLVM module
   /// associated with this action.
@@ -223,9 +216,7 @@ protected:
   CodeGenAction(BackendActionTy act) : action{act} {};
   /// @name MLIR
   /// {
-  std::variant<std::unique_ptr<mlir::ModuleOp>,
-               std::unique_ptr<mlir::omp::ModuleOp>>
-      mlirModule;
+  std::unique_ptr<fortran::common::ModuleInterface> mlirModule;
   std::unique_ptr<mlir::MLIRContext> mlirCtx;
   /// }
 
@@ -238,7 +229,6 @@ protected:
 
   /// Generates an LLVM IR module from CodeGenAction::mlirModule and saves it
   /// in CodeGenAction::llvmModule.
-  template <typename Mod>
   void generateLLVMIR();
 
   BackendActionTy action;

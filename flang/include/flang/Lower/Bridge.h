@@ -14,6 +14,7 @@
 #define FORTRAN_LOWER_BRIDGE_H
 
 #include "flang/Common/Fortran.h"
+#include "flang/Common/module-wrapper.h"
 #include "flang/Lower/AbstractConverter.h"
 #include "flang/Lower/EnvironmentDefault.h"
 #include "flang/Lower/LoweringOptions.h"
@@ -22,7 +23,6 @@
 #include "flang/Optimizer/Support/KindMapping.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/BuiltinOps.h"
-
 namespace Fortran {
 namespace common {
 class IntrinsicTypeDefaultKinds;
@@ -73,11 +73,7 @@ public:
 
   /// Get the ModuleOp. At least one Module type must exist, otherwise the
   /// ctor should have asserted.
-  std::variant<std::unique_ptr<mlir::ModuleOp>,
-               std::unique_ptr<mlir::omp::ModuleOp>> *
-  getModule() {
-    return &module;
-  }
+  fortran::common::ModuleInterface &getModule() { return *module.get(); }
 
   const Fortran::common::IntrinsicTypeDefaultKinds &getDefaultKinds() const {
     return defaultKinds;
@@ -114,18 +110,7 @@ public:
 
   Fortran::lower::StatementContext &fctCtx() { return functionContext; }
 
-  bool validModule() {
-    auto *module = getModule();
-    if (std::holds_alternative<std::unique_ptr<mlir::ModuleOp>>(*module)) {
-      return std::get<std::unique_ptr<mlir::ModuleOp>>(*module).get();
-    }
-
-    if (std::holds_alternative<std::unique_ptr<mlir::omp::ModuleOp>>(*module)) {
-      return std::get<std::unique_ptr<mlir::omp::ModuleOp>>(*module).get();
-    }
-
-    return false;
-  }
+  bool validModule() { return getModule(); }
 
   //===--------------------------------------------------------------------===//
   // Perform the creation of an mlir::ModuleOp
@@ -160,9 +145,7 @@ private:
   const Fortran::evaluate::TargetCharacteristics &targetCharacteristics;
   const Fortran::parser::AllCookedSources *cooked;
   mlir::MLIRContext &context;
-  std::variant<std::unique_ptr<mlir::ModuleOp>,
-               std::unique_ptr<mlir::omp::ModuleOp>>
-      module;
+  std::unique_ptr<fortran::common::ModuleInterface> module;
   fir::KindMapping &kindMap;
   const Fortran::lower::LoweringOptions &loweringOptions;
   const std::vector<Fortran::lower::EnvironmentDefault> &envDefaults;

@@ -17,88 +17,39 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/Support/Host.h"
 
-void fir::setTargetTriple(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> mod,
+void fir::setTargetTriple(fortran::common::ModuleInterface mod,
                           llvm::StringRef triple) {
   auto target = fir::determineTargetTriple(triple);
-  if (std::holds_alternative<mlir::ModuleOp>(mod)) {
-    auto module = std::get<mlir::ModuleOp>(mod);
-    module->setAttr(mlir::LLVM::LLVMDialect::getTargetTripleAttrName(),
-                    mlir::StringAttr::get(module.getContext(), target));
-  } else if (std::holds_alternative<mlir::omp::ModuleOp>(mod)) {
-    auto module = std::get<mlir::omp::ModuleOp>(mod);
-    module->setAttr(mlir::LLVM::LLVMDialect::getTargetTripleAttrName(),
-                    mlir::StringAttr::get(module.getContext(), target));
-  }
+  mod->setAttr(mlir::LLVM::LLVMDialect::getTargetTripleAttrName(),
+               mlir::StringAttr::get(mod.getContext(), target));
 }
 
-llvm::Triple
-fir::getTargetTriple(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> mod) {
-  if (std::holds_alternative<mlir::ModuleOp>(mod)) {
-    auto module = std::get<mlir::ModuleOp>(mod);
-    if (auto target = module->getAttrOfType<mlir::StringAttr>(
-            mlir::LLVM::LLVMDialect::getTargetTripleAttrName()))
-      return llvm::Triple(target.getValue());
-  }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(mod)) {
-    auto module = std::get<mlir::omp::ModuleOp>(mod);
-    if (auto target = module->getAttrOfType<mlir::StringAttr>(
-            mlir::LLVM::LLVMDialect::getTargetTripleAttrName()))
-      return llvm::Triple(target.getValue());
-  }
-
+llvm::Triple fir::getTargetTriple(fortran::common::ModuleInterface mod) {
+  if (auto target = mod->getAttrOfType<mlir::StringAttr>(
+          mlir::LLVM::LLVMDialect::getTargetTripleAttrName()))
+    return llvm::Triple(target.getValue());
   return llvm::Triple(llvm::sys::getDefaultTargetTriple());
 }
 
 static constexpr const char *kindMapName = "fir.kindmap";
 static constexpr const char *defKindName = "fir.defaultkind";
 
-void fir::setKindMapping(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> mod,
+void fir::setKindMapping(fortran::common::ModuleInterface mod,
                          fir::KindMapping &kindMap) {
-
-  if (std::holds_alternative<mlir::ModuleOp>(mod)) {
-    auto module = std::get<mlir::ModuleOp>(mod);
-    auto *ctx = module.getContext();
-    module->setAttr(kindMapName,
-                    mlir::StringAttr::get(ctx, kindMap.mapToString()));
-    auto defs = kindMap.defaultsToString();
-    module->setAttr(defKindName, mlir::StringAttr::get(ctx, defs));
-
-  } else if (std::holds_alternative<mlir::omp::ModuleOp>(mod)) {
-    auto module = std::get<mlir::omp::ModuleOp>(mod);
-    auto *ctx = module.getContext();
-    module->setAttr(kindMapName,
-                    mlir::StringAttr::get(ctx, kindMap.mapToString()));
-    auto defs = kindMap.defaultsToString();
-    module->setAttr(defKindName, mlir::StringAttr::get(ctx, defs));
-  }
+  auto *ctx = mod.getContext();
+  mod->setAttr(kindMapName, mlir::StringAttr::get(ctx, kindMap.mapToString()));
+  auto defs = kindMap.defaultsToString();
+  mod->setAttr(defKindName, mlir::StringAttr::get(ctx, defs));
 }
 
-fir::KindMapping
-fir::getKindMapping(std::variant<mlir::ModuleOp, mlir::omp::ModuleOp> mod) {
-  mlir::MLIRContext *ctx = nullptr;
-  if (std::holds_alternative<mlir::ModuleOp>(mod)) {
-    auto module = std::get<mlir::ModuleOp>(mod);
-    ctx = module.getContext();
-    if (auto defs = module->getAttrOfType<mlir::StringAttr>(defKindName)) {
-      auto defVals = fir::KindMapping::toDefaultKinds(defs.getValue());
-      if (auto maps = module->getAttrOfType<mlir::StringAttr>(kindMapName))
-        return fir::KindMapping(ctx, maps.getValue(), defVals);
-      return fir::KindMapping(ctx, defVals);
-    }
+fir::KindMapping fir::getKindMapping(fortran::common::ModuleInterface mod) {
+  auto *ctx = mod.getContext();
+  if (auto defs = mod->getAttrOfType<mlir::StringAttr>(defKindName)) {
+    auto defVals = fir::KindMapping::toDefaultKinds(defs.getValue());
+    if (auto maps = mod->getAttrOfType<mlir::StringAttr>(kindMapName))
+      return fir::KindMapping(ctx, maps.getValue(), defVals);
+    return fir::KindMapping(ctx, defVals);
   }
-
-  if (std::holds_alternative<mlir::omp::ModuleOp>(mod)) {
-    auto module = std::get<mlir::omp::ModuleOp>(mod);
-    ctx = module.getContext();
-    if (auto defs = module->getAttrOfType<mlir::StringAttr>(defKindName)) {
-      auto defVals = fir::KindMapping::toDefaultKinds(defs.getValue());
-      if (auto maps = module->getAttrOfType<mlir::StringAttr>(kindMapName))
-        return fir::KindMapping(ctx, maps.getValue(), defVals);
-      return fir::KindMapping(ctx, defVals);
-    }
-  }
-
   return fir::KindMapping(ctx);
 }
 

@@ -461,10 +461,10 @@ mlir::func::FuncOp SimplifyIntrinsicsPass::getOrCreateFunction(
   //          We can also avoid this by using internal linkage, but
   //          this may increase the size of final executable/shared library.
   std::string replacementName = mlir::Twine{baseName, "_simplified"}.str();
-
+  fortran::common::ModuleInterface module = builder.getModule();
   // If we already have a function, just return it.
   mlir::func::FuncOp newFunc =
-      fir::FirOpBuilder::getNamedFunction(builder.getModule(), replacementName);
+      fir::FirOpBuilder::getNamedFunction(module, replacementName);
   mlir::FunctionType fType = typeGenerator(builder);
   if (newFunc) {
     assert(newFunc.getFunctionType() == fType &&
@@ -474,8 +474,8 @@ mlir::func::FuncOp SimplifyIntrinsicsPass::getOrCreateFunction(
 
   // Need to build the function!
   auto loc = mlir::UnknownLoc::get(builder.getContext());
-  newFunc = fir::FirOpBuilder::createFunction(loc, builder.getModule(),
-                                              replacementName, fType);
+  newFunc =
+      fir::FirOpBuilder::createFunction(loc, module, replacementName, fType);
   auto inlineLinkage = mlir::LLVM::linkage::Linkage::LinkonceODR;
   auto linkage =
       mlir::LLVM::LinkageAttr::get(builder.getContext(), inlineLinkage);
