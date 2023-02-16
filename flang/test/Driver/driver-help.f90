@@ -144,6 +144,8 @@
 ! HELP-FC1-NEXT: -load <dsopath>        Load the named plugin (dynamic shared object)
 ! HELP-FC1-NEXT: -menable-no-infs       Allow optimization to assume there are no infinities.
 ! HELP-FC1-NEXT: -menable-no-nans       Allow optimization to assume there are no NaNs.
+! HELP-FC1-NEXT: -mlink-builtin-bitcode <value>
+! HELP-FC1-NEXT:                        Link and internalize needed symbols from the given bitcode file before performing optimizations.
 ! HELP-FC1-NEXT: -mllvm <value>         Additional arguments to forward to LLVM's option processing
 ! HELP-FC1-NEXT: -mmlir <value>         Additional arguments to forward to MLIR's option processing
 ! HELP-FC1-NEXT: -module-dir <dir>      Put MODULE files in <dir>

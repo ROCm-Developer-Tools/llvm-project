@@ -26,6 +26,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/OptTable.h"
@@ -165,6 +166,18 @@ static void parseCodeGenArgs(Fortran::frontend::CodeGenOptions &opts,
     opts.PICLevel = PICLevel;
     if (args.hasArg(clang::driver::options::OPT_pic_is_pie))
       opts.IsPIE = 1;
+  }
+
+  for (auto *a :
+       args.filtered(clang::driver::options::OPT_mlink_builtin_bitcode)) {
+    CodeGenOptions::BitcodeFileToLink file;
+    file.Filename = a->getValue();
+    file.LinkFlags = llvm::Linker::Flags::LinkOnlyNeeded;
+    // When linking CUDA bitcode, propagate function attributes so that
+    // e.g. libdevice gets fast-math attrs if we're building with fast-math.
+    file.PropagateAttrs = true;
+    file.Internalize = true;
+    opts.LinkBitcodeFiles.push_back(file);
   }
 }
 
