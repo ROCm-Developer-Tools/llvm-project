@@ -19,7 +19,9 @@ namespace fortran::common {
 // modules.
 class ModuleInterface {
 public:
-  enum class ModuleType { Builtin, OpenMP };
+  enum class ModuleType { Builtin, OpenMP, NoModule };
+
+  ModuleInterface() : modType(ModuleType::NoModule) {}
 
   ModuleInterface(mlir::omp::ModuleOp mod)
       : module(mod), modType(ModuleType::OpenMP) {}
@@ -42,6 +44,14 @@ public:
   }
 
   mlir::Operation *getAsOperation() { return module; }
+  ModuleType getModuleType() { return modType; }
+  bool isValidModule() {
+    if (module &&
+        (modType == ModuleType::Builtin || modType == ModuleType::OpenMP)) {
+      return true;
+    }
+    return false;
+  }
 
   template <typename T, typename U> auto lookupSymbol(U name) {
     switch (modType) {
@@ -54,7 +64,7 @@ public:
           .lookupSymbol<T>(name);
       break;
     default:
-      assert(false && "lookupSymbol invoked with incorrect module type");
+      assert(false && "lookupSymbol unsupported for current module type");
       break;
     }
   }
@@ -68,7 +78,7 @@ public:
       return mlir::dyn_cast_or_null<mlir::omp::ModuleOp>(module).getName();
       break;
     default:
-      assert(false && "getName invoked with incorrect module type");
+      assert(false && "getName unsupported for current module type");
       break;
     }
   }
@@ -82,7 +92,7 @@ public:
       return mlir::dyn_cast_or_null<mlir::omp::ModuleOp>(module).print(printer);
       break;
     default:
-      assert(false && "lookupSymbol invoked with incorrect module type");
+      assert(false && "print unsupported for current module type");
       break;
     }
   }
@@ -96,7 +106,7 @@ public:
       return mlir::dyn_cast_or_null<mlir::omp::ModuleOp>(module).getBody();
       break;
     default:
-      assert(false && "getBody invoked with incorrect module type");
+      assert(false && "getBody unsupported for current module type");
       break;
     }
   }
@@ -111,7 +121,7 @@ public:
           .getBodyRegion();
       break;
     default:
-      assert(false && "getBodyRegion invoked with incorrect module type");
+      assert(false && "getBodyRegion unsupported for current module type");
       break;
     }
   }
@@ -125,7 +135,7 @@ public:
       return mlir::dyn_cast_or_null<mlir::omp::ModuleOp>(module).getContext();
       break;
     default:
-      assert(false && "getContext invoked with incorrect module type");
+      assert(false && "getContext unsupported for current module type");
       break;
     }
   }
@@ -140,7 +150,7 @@ public:
           .verifyInvariants();
       break;
     default:
-      assert(false && "getContext invoked with incorrect module type");
+      assert(false && "getContext unsupported for current module type");
       break;
     }
   }
