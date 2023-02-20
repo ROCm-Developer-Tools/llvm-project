@@ -721,7 +721,7 @@ public:
 
   fir::FirOpBuilder &getFirOpBuilder() override final { return *builder; }
 
-  fortran::common::ModuleInterface &getModuleOp() override final {
+  mlir::ModuleInterface &getModuleOp() override final {
     return bridge.getModule();
   }
 
@@ -3836,13 +3836,13 @@ void Fortran::lower::LoweringBridge::parseSourceFile(llvm::SourceMgr &srcMgr) {
   if (getLoweringOptions().getIsOpenMP()) {
     mlir::OwningOpRef<mlir::omp::ModuleOp> owningRef =
         mlir::parseSourceFile<mlir::omp::ModuleOp>(srcMgr, &context);
-    module.reset(new fortran::common::ModuleInterface(
+    module.reset(new mlir::ModuleInterface(
         new mlir::omp::ModuleOp(owningRef.get().getOperation())));
     owningRef.release();
   } else {
     mlir::OwningOpRef<mlir::ModuleOp> owningRef =
         mlir::parseSourceFile<mlir::ModuleOp>(srcMgr, &context);
-    module.reset(new fortran::common::ModuleInterface(
+    module.reset(new mlir::ModuleInterface(
         new mlir::ModuleOp(owningRef.get().getOperation())));
     owningRef.release();
   }
@@ -3908,12 +3908,12 @@ Fortran::lower::LoweringBridge::LoweringBridge(
 
   // Create the module and attach the attributes.
   if (getLoweringOptions().getIsOpenMP()) {
-    module = std::make_unique<fortran::common::ModuleInterface>(
+    module = std::make_unique<mlir::ModuleInterface>(
         mlir::omp::ModuleOp::create(getPathLocation()));
     if (getLoweringOptions().getIsOpenMPDevice())
       module->getAsOMPModule().setIsDevice(true);
   } else {
-    module = std::make_unique<fortran::common::ModuleInterface>(
+    module = std::make_unique<mlir::ModuleInterface>(
         mlir::ModuleOp::create(getPathLocation()));
   }
   assert(module.get()->getAsOperation() && "module was not created");

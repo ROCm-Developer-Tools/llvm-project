@@ -461,7 +461,7 @@ mlir::func::FuncOp SimplifyIntrinsicsPass::getOrCreateFunction(
   //          We can also avoid this by using internal linkage, but
   //          this may increase the size of final executable/shared library.
   std::string replacementName = mlir::Twine{baseName, "_simplified"}.str();
-  fortran::common::ModuleInterface module = builder.getModule();
+  mlir::ModuleInterface module = builder.getModule();
   // If we already have a function, just return it.
   mlir::func::FuncOp newFunc =
       fir::FirOpBuilder::getNamedFunction(module, replacementName);

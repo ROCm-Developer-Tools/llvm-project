@@ -13,7 +13,7 @@
 namespace mlir {
 namespace omp {
 class ModuleOp;
-}
+} // namespace omp
 class LLVMTypeConverter;
 class ConversionTarget;
 class MLIRContext;

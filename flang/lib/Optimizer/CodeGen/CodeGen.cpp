@@ -3749,15 +3749,11 @@ public:
   FIRToLLVMLowering() = default;
   FIRToLLVMLowering(fir::FIRToLLVMPassOptions options) : options{options} {}
 
-  bool canScheduleOn(mlir::RegisteredOperationName opInfo) const override {
-    return opInfo.getStringRef() == "builtin.module" ||
-           opInfo.getStringRef() == "omp.module";
-  }
+  mlir::ModuleInterface getModule() { return getOperation(); }
 
-  template <typename T>
-  void runOperationOnModule(T mod) {
+  void runOnOperation() override final {
     if (!forcedTargetTriple.empty())
-      fir::setTargetTriple(mod, forcedTargetTriple);
+      fir::setTargetTriple(getModule(), forcedTargetTriple);
 
     // Run dynamic pass pipeline for converting Math dialect
     // operations into other dialects (llvm, func, etc.).
@@ -3767,7 +3763,7 @@ public:
     // function operations in it. We have to run such conversions
     // as passes here.
     llvm::StringRef moduleName;
-    if constexpr (std::is_same_v<T, mlir::omp::ModuleOp>)
+    if (getModule().isOMPModule())
       moduleName = "omp.module";
     else
       moduleName = "builtin.module";
@@ -3789,23 +3785,23 @@ public:
     // Go through each binding tables and store the procedure name
     // and binding index for later use by the fir.dispatch conversion pattern.
     BindingTables bindingTables;
-    for (auto dispatchTableOp : mod.template getOps<fir::DispatchTableOp>()) {
+    for (auto dispatchTableOp : getModule().getOps<fir::DispatchTableOp>()) {
       unsigned bindingIdx = 0;
       BindingTable bindings;
       if (dispatchTableOp.getRegion().empty()) {
         bindingTables[dispatchTableOp.getSymName()] = bindings;
         continue;
       }
-      for (auto dtEntry :
-           dispatchTableOp.getBlock().template getOps<fir::DTEntryOp>()) {
+      for (auto dtEntry : dispatchTableOp.getBlock().getOps<fir::DTEntryOp>()) {
         bindings[dtEntry.getMethod()] = bindingIdx;
         ++bindingIdx;
       }
       bindingTables[dispatchTableOp.getSymName()] = bindings;
     }
 
-    auto *context = getOperation()->getContext();
-    fir::LLVMTypeConverter typeConverter{mod, options.applyTBAA || applyTBAA};
+    auto *context = getModule().getContext();
+    fir::LLVMTypeConverter typeConverter{getModule(),
+                                         options.applyTBAA || applyTBAA};
     mlir::RewritePatternSet pattern(context);
     pattern.insert<
         AbsentOpConversion, AddcOpConversion, AddrOfOpConversion,
@@ -3853,7 +3849,7 @@ public:
     target.addLegalOp<mlir::ModuleOp>();
 
     // If we're on Windows, we might need to rename some libm calls.
-    bool isMSVC = fir::getTargetTriple(mod).isOSMSVCRT();
+    bool isMSVC = fir::getTargetTriple(getOperation()).isOSMSVCRT();
     if (isMSVC) {
       pattern.insert<RenameMSVCLibmCallees, RenameMSVCLibmFuncs>(context);
 
@@ -3877,15 +3873,6 @@ public:
     }
   }
 
-  void runOnOperation() override final {
-    if (mlir::ModuleOp mod = mlir::dyn_cast<mlir::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::ModuleOp>(mod);
-    } else if (mlir::omp::ModuleOp mod =
-                   mlir::dyn_cast<mlir::omp::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::omp::ModuleOp>(mod);
-    }
-  }
-
 private:
   fir::FIRToLLVMPassOptions options;
 };
@@ -3898,35 +3885,22 @@ struct LLVMIRLoweringPass
   LLVMIRLoweringPass(llvm::raw_ostream &output, fir::LLVMIRLoweringPrinter p)
       : output{output}, printer{p} {}
 
-  bool canScheduleOn(mlir::RegisteredOperationName opInfo) const override {
-    if (opInfo.getStringRef() == "builtin.module" ||
-        opInfo.getStringRef() == "omp.module") {
-      return true;
-    }
-    return false;
-  }
+  mlir::ModuleInterface getModule() { return getOperation(); }
 
-  template <typename T>
-  void runOperationOnModule(T mod) {
-    auto *ctx = mod.getContext();
-    auto optName = mod.getName();
+  void runOnOperation() override final {
+    auto *ctx = getModule().getContext();
+    auto optName = getModule().getName();
+    getModule()->dump();
+    llvm::errs() << "I enter lowering pass? \n";
     llvm::LLVMContext llvmCtx;
     if (auto llvmModule = mlir::translateModuleToLLVMIR(
-            getOperation(), llvmCtx, optName ? *optName : "FIRModule")) {
+            getModule(), llvmCtx, optName ? *optName : "FIRModule")) {
       printer(*llvmModule, output);
       return;
     }
+
     mlir::emitError(mlir::UnknownLoc::get(ctx), "could not emit LLVM-IR\n");
     signalPassFailure();
-  }
-
-  void runOnOperation() override final {
-    if (mlir::ModuleOp mod = mlir::dyn_cast<mlir::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::ModuleOp>(mod);
-    } else if (mlir::omp::ModuleOp mod =
-                   mlir::dyn_cast<mlir::omp::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::omp::ModuleOp>(mod);
-    }
   }
 
 private:

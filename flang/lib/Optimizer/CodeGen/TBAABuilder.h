@@ -15,12 +15,8 @@
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 
-namespace mlir {
-namespace omp {
-class ModuleOp;
-} // namespace omp
-} // namespace mlir
 namespace fir {
 
 // TBAA builder provides mapping between FIR types and their TBAA type
@@ -169,8 +165,7 @@ namespace fir {
 //   < `<any data access>`, `<any data access>`, 0 >
 class TBAABuilder {
 public:
-  TBAABuilder(mlir::ModuleOp module, bool applyTBAA);
-  TBAABuilder(mlir::omp::ModuleOp module, bool applyTBAA);
+  TBAABuilder(mlir::ModuleInterface module, bool applyTBAA);
 
   TBAABuilder(TBAABuilder const &) = delete;
   TBAABuilder &operator=(TBAABuilder const &) = delete;
@@ -181,10 +176,6 @@ public:
                      mlir::Type accessFIRType, mlir::LLVM::GEPOp gep);
 
 private:
-  // generalises costruction of TBAA information for other module types
-  template <typename ModType>
-  void constructTBAAForModule(ModType module);
-
   // Return unique string name based on `basename`.
   std::string getNewTBAANodeName(llvm::StringRef basename);
 

@@ -11,7 +11,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "flang/Common/module-wrapper.h"
 #include "flang/Optimizer/CodeGen/CodeGen.h"
 #include "flang/Optimizer/Support/FIRContext.h"
 #include "flang/Optimizer/Support/InitFIR.h"
@@ -21,6 +20,7 @@
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -63,8 +63,7 @@ static cl::opt<bool> codeGenLLVM(
 
 #include "flang/Tools/CLOptions.inc"
 
-static void printModuleBody(fortran::common::ModuleInterface mod,
-                            raw_ostream &output) {
+static void printModuleBody(mlir::ModuleInterface mod, raw_ostream &output) {
   for (auto &op : *mod.getBody())
     output << op << '\n';
 }
@@ -90,11 +89,13 @@ compileFIR(const mlir::PassPipelineCLParser &passPipeline) {
   fir::support::loadDialects(context);
   fir::support::registerLLVMTranslation(context);
 
+  // FIXME: This will emit an error if it finds no top level, but that isn't
+  // ideal
   auto owningRef = mlir::parseSourceFileForTool(sourceMgr, &context,
                                                 false /*implicitModule*/);
 
   // No longer wrap the IR in a builtin module unless absolutely neccessary.
-  fortran::common::ModuleInterface mod;
+  mlir::ModuleInterface mod;
   if (owningRef) {
     if (mlir::omp::ModuleOp ompMod =
             dyn_cast<mlir::omp::ModuleOp>(*owningRef)) {

@@ -17,8 +17,8 @@
 #ifndef FORTRAN_OPTIMIZER_SUPPORT_FIRCONTEXT_H
 #define FORTRAN_OPTIMIZER_SUPPORT_FIRCONTEXT_H
 
-#include "flang/Common/module-wrapper.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 namespace fir {
@@ -27,19 +27,18 @@ struct NameUniquer;
 
 /// Set the target triple for the module. `triple` must not be deallocated while
 /// module `mod` is still live.
-void setTargetTriple(fortran::common::ModuleInterface mod,
-                     llvm::StringRef triple);
+void setTargetTriple(mlir::ModuleInterface mod, llvm::StringRef triple);
 
 /// Get the Triple instance from the Module or return the default Triple.
-llvm::Triple getTargetTriple(fortran::common::ModuleInterface mod);
+llvm::Triple getTargetTriple(mlir::ModuleInterface mod);
 
 /// Set the kind mapping for the module. `kindMap` must not be deallocated while
 /// module `mod` is still live.
-void setKindMapping(fortran::common::ModuleInterface mod, KindMapping &kindMap);
+void setKindMapping(mlir::ModuleInterface mod, KindMapping &kindMap);
 
 /// Get the KindMapping instance from the Module. If none was set, returns a
 /// default.
-KindMapping getKindMapping(fortran::common::ModuleInterface mod);
+KindMapping getKindMapping(mlir::ModuleInterface mod);
 
 /// Helper for determining the target from the host, etc. Tools may use this
 /// function to provide a consistent interpretation of the `--target=<string>`

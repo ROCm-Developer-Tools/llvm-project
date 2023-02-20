@@ -14,7 +14,6 @@
 #define FORTRAN_LOWER_ABSTRACTCONVERTER_H
 
 #include "flang/Common/Fortran.h"
-#include "flang/Common/module-wrapper.h"
 #include "flang/Lower/LoweringOptions.h"
 #include "flang/Lower/PFTDefs.h"
 #include "flang/Optimizer/Builder/BoxValue.h"
@@ -23,6 +22,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 #include "llvm/ADT/ArrayRef.h"
 
 namespace fir {
@@ -228,7 +228,7 @@ public:
   /// Get the OpBuilder
   virtual fir::FirOpBuilder &getFirOpBuilder() = 0;
   /// Get the ModuleOp
-  virtual fortran::common::ModuleInterface &getModuleOp() = 0;
+  virtual mlir::ModuleInterface &getModuleOp() = 0;
   /// Get the MLIRContext
   virtual mlir::MLIRContext &getMLIRContext() = 0;
   /// Unique a symbol

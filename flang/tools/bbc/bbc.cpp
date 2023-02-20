@@ -16,7 +16,6 @@
 
 #include "flang/Common/Fortran-features.h"
 #include "flang/Common/default-kinds.h"
-#include "flang/Common/module-wrapper.h"
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/Support/Verifier.h"
@@ -43,6 +42,7 @@
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -150,7 +150,7 @@ static llvm::cl::opt<bool> useHLFIR("hlfir",
 using ProgramName = std::string;
 
 // Print the module without the "module { ... }" wrapper.
-static void printModule(fortran::common::ModuleInterface mlirModule,
+static void printModule(mlir::ModuleInterface mlirModule,
                         llvm::raw_ostream &out) {
   for (auto &op : *mlirModule.getBody())
     out << op << '\n';

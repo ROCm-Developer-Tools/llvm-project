@@ -13,11 +13,11 @@
 #ifndef FORTRAN_FRONTEND_FRONTENDACTIONS_H
 #define FORTRAN_FRONTEND_FRONTENDACTIONS_H
 
-#include "flang/Common/module-wrapper.h"
 #include "flang/Frontend/CodeGenOptions.h"
 #include "flang/Frontend/FrontendAction.h"
 #include "flang/Parser/parsing.h"
 #include "flang/Semantics/semantics.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -216,7 +216,7 @@ protected:
   CodeGenAction(BackendActionTy act) : action{act} {};
   /// @name MLIR
   /// {
-  std::unique_ptr<fortran::common::ModuleInterface> mlirModule;
+  std::unique_ptr<mlir::ModuleInterface> mlirModule;
   std::unique_ptr<mlir::MLIRContext> mlirCtx;
   /// }
 

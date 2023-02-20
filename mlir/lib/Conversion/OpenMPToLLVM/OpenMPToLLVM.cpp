@@ -17,6 +17,7 @@
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {

@@ -17,14 +17,13 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/Support/Host.h"
 
-void fir::setTargetTriple(fortran::common::ModuleInterface mod,
-                          llvm::StringRef triple) {
+void fir::setTargetTriple(mlir::ModuleInterface mod, llvm::StringRef triple) {
   auto target = fir::determineTargetTriple(triple);
   mod->setAttr(mlir::LLVM::LLVMDialect::getTargetTripleAttrName(),
                mlir::StringAttr::get(mod.getContext(), target));
 }
 
-llvm::Triple fir::getTargetTriple(fortran::common::ModuleInterface mod) {
+llvm::Triple fir::getTargetTriple(mlir::ModuleInterface mod) {
   if (auto target = mod->getAttrOfType<mlir::StringAttr>(
           mlir::LLVM::LLVMDialect::getTargetTripleAttrName()))
     return llvm::Triple(target.getValue());
@@ -34,15 +33,14 @@ llvm::Triple fir::getTargetTriple(fortran::common::ModuleInterface mod) {
 static constexpr const char *kindMapName = "fir.kindmap";
 static constexpr const char *defKindName = "fir.defaultkind";
 
-void fir::setKindMapping(fortran::common::ModuleInterface mod,
-                         fir::KindMapping &kindMap) {
+void fir::setKindMapping(mlir::ModuleInterface mod, fir::KindMapping &kindMap) {
   auto *ctx = mod.getContext();
   mod->setAttr(kindMapName, mlir::StringAttr::get(ctx, kindMap.mapToString()));
   auto defs = kindMap.defaultsToString();
   mod->setAttr(defKindName, mlir::StringAttr::get(ctx, defs));
 }
 
-fir::KindMapping fir::getKindMapping(fortran::common::ModuleInterface mod) {
+fir::KindMapping fir::getKindMapping(mlir::ModuleInterface mod) {
   auto *ctx = mod.getContext();
   if (auto defs = mod->getAttrOfType<mlir::StringAttr>(defKindName)) {
     auto defVals = fir::KindMapping::toDefaultKinds(defs.getValue());

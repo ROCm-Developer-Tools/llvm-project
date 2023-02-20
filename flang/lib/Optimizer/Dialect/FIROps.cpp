@@ -3508,7 +3508,7 @@ fir::parseSelector(mlir::OpAsmParser &parser, mlir::OperationState &result,
 }
 
 mlir::func::FuncOp
-fir::createFuncOp(mlir::Location loc, fortran::common::ModuleInterface module,
+fir::createFuncOp(mlir::Location loc, mlir::ModuleInterface module,
                   llvm::StringRef name, mlir::FunctionType type,
                   llvm::ArrayRef<mlir::NamedAttribute> attrs) {
   if (auto f = module.lookupSymbol<mlir::func::FuncOp>(name))
@@ -3521,7 +3521,7 @@ fir::createFuncOp(mlir::Location loc, fortran::common::ModuleInterface module,
 }
 
 fir::GlobalOp fir::createGlobalOp(mlir::Location loc,
-                                  fortran::common::ModuleInterface module,
+                                  mlir::ModuleInterface module,
                                   llvm::StringRef name, mlir::Type type,
                                   llvm::ArrayRef<mlir::NamedAttribute> attrs) {
   if (auto g = module.lookupSymbol<fir::GlobalOp>(name))

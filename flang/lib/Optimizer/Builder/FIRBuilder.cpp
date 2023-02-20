@@ -34,26 +34,25 @@ static llvm::cl::opt<std::size_t>
 
 mlir::func::FuncOp
 fir::FirOpBuilder::createFunction(mlir::Location loc,
-                                  fortran::common::ModuleInterface module,
+                                  mlir::ModuleInterface module,
                                   llvm::StringRef name, mlir::FunctionType ty) {
   return fir::createFuncOp(loc, module, name, ty);
 }
 
 mlir::func::FuncOp
-fir::FirOpBuilder::getNamedFunction(fortran::common::ModuleInterface modOp,
+fir::FirOpBuilder::getNamedFunction(mlir::ModuleInterface modOp,
                                     llvm::StringRef name) {
   return modOp.lookupSymbol<mlir::func::FuncOp>(name);
 }
 
 mlir::func::FuncOp
-fir::FirOpBuilder::getNamedFunction(fortran::common::ModuleInterface modOp,
+fir::FirOpBuilder::getNamedFunction(mlir::ModuleInterface modOp,
                                     mlir::SymbolRefAttr symbol) {
   return modOp.lookupSymbol<mlir::func::FuncOp>(symbol);
 }
 
-fir::GlobalOp
-fir::FirOpBuilder::getNamedGlobal(fortran::common::ModuleInterface modOp,
-                                  llvm::StringRef name) {
+fir::GlobalOp fir::FirOpBuilder::getNamedGlobal(mlir::ModuleInterface modOp,
+                                                llvm::StringRef name) {
   return modOp.lookupSymbol<fir::GlobalOp>(name);
 }
 

@@ -90,7 +90,7 @@ bool PrescanAndSemaDebugAction::beginSourceFileAction() {
          (generateRtTypeTables() || true);
 }
 
-static void setMLIRDataLayout(fortran::common::ModuleInterface &mlirModule,
+static void setMLIRDataLayout(mlir::ModuleInterface &mlirModule,
                               const llvm::DataLayout &dl) {
   mlir::MLIRContext *context = mlirModule.getContext();
   mlirModule->setAttr(
@@ -135,13 +135,13 @@ bool CodeGenAction::beginSourceFileAction() {
     sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
 
     if (ci.getInvocation().getLoweringOpts().getIsOpenMP()) {
-      mlirModule = std::make_unique<fortran::common::ModuleInterface>(
+      mlirModule = std::make_unique<mlir::ModuleInterface>(
           mlir::parseSourceFile<mlir::omp::ModuleOp>(sourceMgr, mlirCtx.get())
               .release());
       if (ci.getInvocation().getLoweringOpts().getIsOpenMPDevice())
         mlirModule->getAsOMPModule().setIsDevice(true);
     } else {
-      mlirModule = std::make_unique<fortran::common::ModuleInterface>(
+      mlirModule = std::make_unique<mlir::ModuleInterface>(
           mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, mlirCtx.get())
               .release());
     }
@@ -187,8 +187,7 @@ bool CodeGenAction::beginSourceFileAction() {
       ci.getInvocation().getFrontendOpts().envDefaults);
 
   // Fetch module from lb, so we can set
-  mlirModule =
-      std::make_unique<fortran::common::ModuleInterface>(lb.getModule());
+  mlirModule = std::make_unique<mlir::ModuleInterface>(lb.getModule());
   setUpTargetMachine();
   const llvm::DataLayout &dl = tm->createDataLayout();
   setMLIRDataLayout(*mlirModule, dl);

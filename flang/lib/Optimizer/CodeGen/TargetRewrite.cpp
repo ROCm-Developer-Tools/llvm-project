@@ -79,16 +79,11 @@ public:
     noComplexConversion = options.noComplexConversion;
   }
 
-  bool canScheduleOn(mlir::RegisteredOperationName opInfo) const override {
-    return opInfo.getStringRef() == "builtin.module" ||
-           opInfo.getStringRef() == "omp.module";
-  }
-
-  template <typename T>
-  void runOperationOnModule(T mod) {
+  void runOnOperation() override final {
     auto &context = getContext();
     mlir::OpBuilder rewriter(&context);
 
+    auto mod = getModule();
     if (!forcedTargetTriple.empty())
       fir::setTargetTriple(mod, forcedTargetTriple);
 
@@ -107,10 +102,10 @@ public:
     mod.walk([&](mlir::Operation *op) {
       if (auto call = mlir::dyn_cast<fir::CallOp>(op)) {
         if (!hasPortableSignature(call.getFunctionType(), op))
-          convertCallOp(call, mod);
+          convertCallOp(call);
       } else if (auto dispatch = mlir::dyn_cast<fir::DispatchOp>(op)) {
         if (!hasPortableSignature(dispatch.getFunctionType(), op))
-          convertCallOp(dispatch, mod);
+          convertCallOp(dispatch);
       } else if (auto addr = mlir::dyn_cast<fir::AddrOfOp>(op)) {
         if (addr.getType().isa<mlir::FunctionType>() &&
             !hasPortableSignature(addr.getType(), op))
@@ -121,14 +116,7 @@ public:
     clearMembers();
   }
 
-  void runOnOperation() override final {
-    if (mlir::ModuleOp mod = mlir::dyn_cast<mlir::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::ModuleOp>(mod);
-    } else if (mlir::omp::ModuleOp mod =
-                   mlir::dyn_cast<mlir::omp::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::omp::ModuleOp>(mod);
-    }
-  }
+  mlir::ModuleInterface getModule() { return getOperation(); }
 
   template <typename A, typename B, typename C>
   std::function<mlir::Value(mlir::Operation *)>
@@ -204,8 +192,8 @@ public:
   }
 
   // Convert fir.call and fir.dispatch Ops.
-  template <typename A, typename ModType>
-  void convertCallOp(A callOp, ModType mod) {
+  template <typename A>
+  void convertCallOp(A callOp) {
     auto fnTy = callOp.getFunctionType();
     auto loc = callOp.getLoc();
     rewriter->setInsertionPoint(callOp);
@@ -259,7 +247,7 @@ public:
             if constexpr (std::is_same_v<std::decay_t<A>, fir::CallOp>) {
               sret = callOp.getCallee() &&
                      functionArgIsSRet(
-                         index, mod.template lookupSymbol<mlir::func::FuncOp>(
+                         index, getModule().lookupSymbol<mlir::func::FuncOp>(
                                     *callOp.getCallee()));
             } else {
               // TODO: dispatch case; how do we put arguments on a call?
@@ -302,7 +290,7 @@ public:
                   // confirm that this is a dummy procedure and should be split.
                   // It cannot be used to match because attributes are not
                   // available in case of indirect calls.
-                  auto funcOp = mod.template lookupSymbol<mlir::func::FuncOp>(
+                  auto funcOp = getModule().lookupSymbol<mlir::func::FuncOp>(
                       *callOp.getCallee());
                   if (funcOp &&
                       !funcOp.template getArgAttrOfType<mlir::UnitAttr>(
@@ -314,7 +302,7 @@ public:
               }
               mlir::Type funcPointerType = tuple.getType(0);
               mlir::Type lenType = tuple.getType(1);
-              fir::KindMapping kindMap = fir::getKindMapping(mod);
+              fir::KindMapping kindMap = fir::getKindMapping(getModule());
               fir::FirOpBuilder builder(*rewriter, kindMap);
               auto [funcPointer, len] =
                   fir::factory::extractCharacterProcedureTuple(builder, loc,
@@ -458,10 +446,9 @@ public:
   /// Convert the type signatures on all the functions present in the module.
   /// As the type signature is being changed, this must also update the
   /// function itself to use any new arguments, etc.
-  template <typename ModType>
-  mlir::LogicalResult convertTypes(ModType mod) {
-    for (auto fn : mod.template getOps<mlir::func::FuncOp>())
-      convertSignature(fn, mod);
+  mlir::LogicalResult convertTypes(mlir::ModuleInterface mod) {
+    for (auto fn : mod.getOps<mlir::func::FuncOp>())
+      convertSignature(fn);
     return mlir::success();
   }
 
@@ -504,8 +491,7 @@ public:
 
   /// Rewrite the signatures and body of the `FuncOp`s in the module for
   /// the immediately subsequent target code gen.
-  template <typename ModType>
-  void convertSignature(mlir::func::FuncOp func, ModType mod) {
+  void convertSignature(mlir::func::FuncOp func) {
     auto funcTy = func.getFunctionType().cast<mlir::FunctionType>();
     if (hasPortableSignature(funcTy, func) && !hasHostAssociations(func))
       return;
@@ -536,13 +522,13 @@ public:
             else
               doComplexReturn(func, cmplx, newResTys, newInTys, fixups);
           })
-          .template Case<mlir::ComplexType>([&](mlir::ComplexType cmplx) {
+          .Case<mlir::ComplexType>([&](mlir::ComplexType cmplx) {
             if (noComplexConversion)
               newResTys.push_back(cmplx);
             else
               doComplexReturn(func, cmplx, newResTys, newInTys, fixups);
           })
-          .template Case<mlir::IntegerType>([&](mlir::IntegerType intTy) {
+          .Case<mlir::IntegerType>([&](mlir::IntegerType intTy) {
             auto m = specifics->integerArgumentType(func.getLoc(), intTy);
             assert(m.size() == 1);
             auto attr = std::get<fir::CodeGenSpecifics::Attributes>(m[0]);
@@ -599,19 +585,19 @@ public:
               }
             }
           })
-          .template Case<fir::ComplexType>([&](fir::ComplexType cmplx) {
+          .Case<fir::ComplexType>([&](fir::ComplexType cmplx) {
             if (noComplexConversion)
               newInTys.push_back(cmplx);
             else
               doComplexArg(func, cmplx, newInTys, fixups);
           })
-          .template Case<mlir::ComplexType>([&](mlir::ComplexType cmplx) {
+          .Case<mlir::ComplexType>([&](mlir::ComplexType cmplx) {
             if (noComplexConversion)
               newInTys.push_back(cmplx);
             else
               doComplexArg(func, cmplx, newInTys, fixups);
           })
-          .template Case<mlir::TupleType>([&](mlir::TupleType tuple) {
+          .Case<mlir::TupleType>([&](mlir::TupleType tuple) {
             if (fir::isCharacterProcedureTuple(tuple)) {
               fixups.emplace_back(FixupTy::Codes::TrailingCharProc,
                                   newInTys.size(), trailingTys.size());
@@ -621,7 +607,7 @@ public:
               newInTys.push_back(ty);
             }
           })
-          .template Case<mlir::IntegerType>([&](mlir::IntegerType intTy) {
+          .Case<mlir::IntegerType>([&](mlir::IntegerType intTy) {
             auto m = specifics->integerArgumentType(func.getLoc(), intTy);
             assert(m.size() == 1);
             auto attr = std::get<fir::CodeGenSpecifics::Attributes>(m[0]);
@@ -795,7 +781,7 @@ public:
               func.front().addArgument(trailingTys[fixup.second], loc);
           auto tupleType = oldArgTys[fixup.index - offset];
           rewriter->setInsertionPointToStart(&func.front());
-          fir::KindMapping kindMap = fir::getKindMapping(mod);
+          fir::KindMapping kindMap = fir::getKindMapping(getModule());
           fir::FirOpBuilder builder(*rewriter, kindMap);
           auto tuple = fir::factory::createCharacterProcedureTuple(
               builder, loc, tupleType, newProcPointerArg, newLenArg);

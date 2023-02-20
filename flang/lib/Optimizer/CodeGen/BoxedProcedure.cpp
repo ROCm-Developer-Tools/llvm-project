@@ -17,6 +17,7 @@
 #include "flang/Optimizer/Support/FatalError.h"
 #include "flang/Optimizer/Support/InternalNames.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/ModuleInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -182,19 +183,15 @@ public:
   BoxedProcedurePass() { options = {true}; }
   BoxedProcedurePass(bool useThunks) { options = {useThunks}; }
 
-  bool canScheduleOn(mlir::RegisteredOperationName opInfo) const override {
-    return opInfo.getStringRef() == "builtin.module" ||
-           opInfo.getStringRef() == "omp.module";
-  }
+  inline mlir::ModuleInterface getModule() { return getOperation(); }
 
-  template <typename T>
-  void runOperationOnModule(T mod) {
+  void runOnOperation() override final {
     if (options.useThunks) {
       auto *context = &getContext();
       mlir::IRRewriter rewriter(context);
       BoxprocTypeRewriter typeConverter(mlir::UnknownLoc::get(context));
       mlir::Dialect *firDialect = context->getLoadedDialect("fir");
-      mod.walk([&](mlir::Operation *op) {
+      getModule().walk([&](mlir::Operation *op) {
         typeConverter.setLocation(op->getLoc());
         if (auto addr = mlir::dyn_cast<BoxAddrOp>(op)) {
           auto ty = addr.getVal().getType();
@@ -335,15 +332,6 @@ public:
           rewriter.finalizeRootUpdate(op);
         }
       });
-    }
-  }
-
-  void runOnOperation() override final {
-    if (mlir::ModuleOp mod = mlir::dyn_cast<mlir::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::ModuleOp>(mod);
-    } else if (mlir::omp::ModuleOp mod =
-                   mlir::dyn_cast<mlir::omp::ModuleOp>(getOperation())) {
-      runOperationOnModule<mlir::omp::ModuleOp>(mod);
     }
   }
 
