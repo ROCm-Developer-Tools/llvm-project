@@ -3748,12 +3748,12 @@ class FIRToLLVMLowering
 public:
   FIRToLLVMLowering() = default;
   FIRToLLVMLowering(fir::FIRToLLVMPassOptions options) : options{options} {}
-
   mlir::ModuleInterface getModule() { return getOperation(); }
 
   void runOnOperation() override final {
+    auto mod = getModule();
     if (!forcedTargetTriple.empty())
-      fir::setTargetTriple(getModule(), forcedTargetTriple);
+      fir::setTargetTriple(mod, forcedTargetTriple);
 
     // Run dynamic pass pipeline for converting Math dialect
     // operations into other dialects (llvm, func, etc.).
@@ -3763,7 +3763,7 @@ public:
     // function operations in it. We have to run such conversions
     // as passes here.
     llvm::StringRef moduleName;
-    if (getModule().isOMPModule())
+    if (mod.isOMPModule())
       moduleName = "omp.module";
     else
       moduleName = "builtin.module";
@@ -3777,7 +3777,7 @@ public:
     mathConvertionPM.addPass(
         mlir::createConvertMathToFuncs(mathToFuncsOptions));
     mathConvertionPM.addPass(mlir::createConvertComplexToStandardPass());
-    if (mlir::failed(runPipeline(mathConvertionPM, getOperation())))
+    if (mlir::failed(runPipeline(mathConvertionPM, mod)))
       return signalPassFailure();
 
     // Reconstruct binding tables for dynamic dispatch. The binding tables
@@ -3785,7 +3785,7 @@ public:
     // Go through each binding tables and store the procedure name
     // and binding index for later use by the fir.dispatch conversion pattern.
     BindingTables bindingTables;
-    for (auto dispatchTableOp : getModule().getOps<fir::DispatchTableOp>()) {
+    for (auto dispatchTableOp : mod.getOps<fir::DispatchTableOp>()) {
       unsigned bindingIdx = 0;
       BindingTable bindings;
       if (dispatchTableOp.getRegion().empty()) {
@@ -3849,7 +3849,7 @@ public:
     target.addLegalOp<mlir::ModuleOp>();
 
     // If we're on Windows, we might need to rename some libm calls.
-    bool isMSVC = fir::getTargetTriple(getOperation()).isOSMSVCRT();
+    bool isMSVC = fir::getTargetTriple(mod).isOSMSVCRT();
     if (isMSVC) {
       pattern.insert<RenameMSVCLibmCallees, RenameMSVCLibmFuncs>(context);
 
@@ -3867,8 +3867,8 @@ public:
     }
 
     // apply the patterns
-    if (mlir::failed(mlir::applyFullConversion(getOperation(), target,
-                                               std::move(pattern)))) {
+    if (mlir::failed(
+            mlir::applyFullConversion(mod, target, std::move(pattern)))) {
       signalPassFailure();
     }
   }
@@ -3890,8 +3890,6 @@ struct LLVMIRLoweringPass
   void runOnOperation() override final {
     auto *ctx = getModule().getContext();
     auto optName = getModule().getName();
-    getModule()->dump();
-    llvm::errs() << "I enter lowering pass? \n";
     llvm::LLVMContext llvmCtx;
     if (auto llvmModule = mlir::translateModuleToLLVMIR(
             getModule(), llvmCtx, optName ? *optName : "FIRModule")) {

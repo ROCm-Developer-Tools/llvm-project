@@ -209,7 +209,15 @@ public:
 
   template <typename T>
   static bool classof(T op) {
-    return true;
+    if constexpr (std::is_same<T, omp::ModuleOp>())
+      return true;
+
+    if constexpr (std::is_same<T, ModuleOp>())
+      return true;
+
+    if constexpr (std::is_same<T, Operation *>())
+      return true;
+    return false;
   }
 
   ::mlir::LogicalResult verifyInvariants() {

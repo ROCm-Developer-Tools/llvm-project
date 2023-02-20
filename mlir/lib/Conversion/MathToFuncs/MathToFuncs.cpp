@@ -588,11 +588,6 @@ struct ConvertMathToFuncsPass
   ConvertMathToFuncsPass(const ConvertMathToFuncsOptions &options)
       : impl::ConvertMathToFuncsBase<ConvertMathToFuncsPass>(options) {}
 
-  bool canScheduleOn(mlir::RegisteredOperationName opInfo) const override {
-    return opInfo.getStringRef() == "builtin.module" ||
-           opInfo.getStringRef() == "omp.module";
-  }
-
   void runOnOperation() override;
 
 private:

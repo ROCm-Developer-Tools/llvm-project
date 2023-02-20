@@ -282,6 +282,7 @@ public:
           })
           .template Case<mlir::TupleType>([&](mlir::TupleType tuple) {
             if (fir::isCharacterProcedureTuple(tuple)) {
+              auto module = getModule();
               if constexpr (std::is_same_v<std::decay_t<A>, fir::CallOp>) {
                 if (callOp.getCallee()) {
                   llvm::StringRef charProcAttr =
@@ -290,7 +291,7 @@ public:
                   // confirm that this is a dummy procedure and should be split.
                   // It cannot be used to match because attributes are not
                   // available in case of indirect calls.
-                  auto funcOp = getModule().lookupSymbol<mlir::func::FuncOp>(
+                  auto funcOp = module.lookupSymbol<mlir::func::FuncOp>(
                       *callOp.getCallee());
                   if (funcOp &&
                       !funcOp.template getArgAttrOfType<mlir::UnitAttr>(
@@ -302,7 +303,7 @@ public:
               }
               mlir::Type funcPointerType = tuple.getType(0);
               mlir::Type lenType = tuple.getType(1);
-              fir::KindMapping kindMap = fir::getKindMapping(getModule());
+              fir::KindMapping kindMap = fir::getKindMapping(module);
               fir::FirOpBuilder builder(*rewriter, kindMap);
               auto [funcPointer, len] =
                   fir::factory::extractCharacterProcedureTuple(builder, loc,
