@@ -12,7 +12,6 @@
 
 #include "TBAABuilder.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 

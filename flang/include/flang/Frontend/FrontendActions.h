@@ -19,7 +19,6 @@
 #include "flang/Semantics/semantics.h"
 #include "mlir/Interfaces/ModuleInterface.h"
 
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"

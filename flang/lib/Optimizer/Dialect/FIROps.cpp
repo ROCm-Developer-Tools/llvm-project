@@ -3615,7 +3615,6 @@ valueCheckFirAttributes(mlir::Value value,
     if (auto addressOfOp = mlir::dyn_cast<fir::AddrOfOp>(definingOp)) {
       if (testAttributeSets(addressOfOp->getAttrs(), attributeNames))
         return true;
-
       if (auto module = definingOp->getParentOfType<mlir::ModuleOp>()) {
         if (auto globalOp =
                 module.lookupSymbol<fir::GlobalOp>(addressOfOp.getSymbol()))
