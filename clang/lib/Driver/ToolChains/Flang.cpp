@@ -106,6 +106,18 @@ void Flang::addTargetOptions(const ArgList &Args,
   // TODO: Add target specific flags, ABI, mtune option etc.
 }
 
+void Flang::addOffloadOptions(const JobAction &JA,
+                              ArgStringList &CmdArgs) const {
+  bool IsOpenMPDevice = JA.isDeviceOffloading(Action::OFK_OpenMP);
+
+  if (IsOpenMPDevice) {
+    // -fopenmp-is-device is passed along to tell the frontend that it is
+    // generating code for a device, so that only the relevant declarations are
+    // emitted.
+    CmdArgs.push_back("-fopenmp-is-device");
+  }
+}
+
 static void addFloatingPointOptions(const Driver &D, const ArgList &Args,
                                     ArgStringList &CmdArgs) {
   StringRef FPContract;
@@ -302,6 +314,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Add target args, features, etc.
   addTargetOptions(Args, CmdArgs);
+
+  // Offloading related options
+  addOffloadOptions(JA, CmdArgs);
 
   // Add other compile options
   addOtherOptions(Args, CmdArgs);

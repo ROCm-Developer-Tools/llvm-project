@@ -56,6 +56,14 @@ private:
   void addTargetOptions(const llvm::opt::ArgList &Args,
                         llvm::opt::ArgStringList &CmdArgs) const;
 
+  /// Extract offload options from the driver arguments and add them to
+  /// the command arguments.
+  ///
+  /// \param [in] JA The job action
+  /// \param [out] CmdArgs The list of output command arguments
+  void addOffloadOptions(const JobAction &JA,
+                         llvm::opt::ArgStringList &CmdArgs) const;
+
   /// Extract other compilation options from the driver arguments and add them
   /// to the command arguments.
   ///

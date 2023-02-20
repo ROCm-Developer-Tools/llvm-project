@@ -29,6 +29,10 @@ public:
   /// The name of the target triple to compile for.
   std::string triple;
 
+  /// When compiling for the device side, contains the triple used to compile
+  /// for the host.
+  std::string hostTriple;
+
   /// If given, the name of the target CPU to generate code for.
   std::string cpu;
 
