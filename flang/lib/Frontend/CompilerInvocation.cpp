@@ -807,9 +807,9 @@ bool CompilerInvocation::createFromArgs(
 
   success &= parseFloatingPointArgs(res, args, diags);
 
-  if (res.getLangOpts().OpenMPIsDevice) {
-    res.getTargetOpts().hostTriple = res.getFrontendOpts().auxTriple;
-  }
+  // if (res.getLangOpts().OpenMPIsDevice) {
+  //   res.getTargetOpts().hostTriple = res.getFrontendOpts().auxTriple;
+  // }
 
   return success;
 }
