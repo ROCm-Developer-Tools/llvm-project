@@ -32,4 +32,12 @@
 #define GET_OP_CLASSES
 #include "mlir/Dialect/OpenMP/OpenMPOps.h.inc"
 
+namespace mlir::omp {
+// Set the omp.is_device attribute on the module with the specified boolean
+void setIsDevice(mlir::ModuleOp module, bool isDevice);
+// Return the value of the omp.is_device attribute stored in the module if it
+// exists, otherwise return false by default
+bool getIsDevice(mlir::ModuleOp module);
+} // namespace mlir::omp
+
 #endif // MLIR_DIALECT_OPENMP_OPENMPDIALECT_H_
