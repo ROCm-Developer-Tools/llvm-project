@@ -287,13 +287,6 @@ private:
   LogicalResult convertGlobals();
   LogicalResult convertOneFunction(LLVMFuncOp func);
 
-  /// Converts a module operation after all other operations have been handled.
-  /// This is a No-Op for dialects that have no specified interface for module
-  /// operations. This function is invoked after all operations in the module
-  /// have been processed.
-  LogicalResult convertModuleOperation(Operation &op,
-                                       llvm::IRBuilderBase &builder);
-
   /// Process access_group LLVM Metadata operations and create LLVM
   /// metadata nodes.
   LogicalResult createAccessGroupMetadata();
