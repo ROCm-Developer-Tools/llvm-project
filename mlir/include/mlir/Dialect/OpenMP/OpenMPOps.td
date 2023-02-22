@@ -29,6 +29,15 @@ def OpenMP_Dialect : Dialect {
   let dependentDialects = ["::mlir::LLVM::LLVMDialect"];
   let useDefaultAttributePrinterParser = 1;
   let useFoldAPI = kEmitFoldAdaptorFolder;
+
+  let extraClassDeclaration = [{
+    // Set the omp.is_device attribute on the module with the specified boolean
+    static void setIsDevice(mlir::ModuleOp module, bool isDevice);
+    
+    // Return the value of the omp.is_device attribute stored in the module if it
+    // exists, otherwise return false by default
+    static bool getIsDevice(mlir::ModuleOp module);
+  }];
 }
 
 // OmpCommon requires definition of OpenACC_Dialect.

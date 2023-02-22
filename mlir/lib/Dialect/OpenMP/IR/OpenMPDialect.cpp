@@ -1347,12 +1347,11 @@ LogicalResult CancellationPointOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
-// Helpers for custom OMP Attributes for builtin.module
+// OpenMPDialect functions
 //===----------------------------------------------------------------------===//
 
-namespace mlir::omp {
 // Set the omp.is_device attribute on the module with the specified boolean
-void setIsDevice(mlir::ModuleOp module, bool isDevice) {
+void OpenMPDialect::setIsDevice(mlir::ModuleOp module, bool isDevice) {
   module->setAttr(
       mlir::StringAttr::get(module->getContext(), llvm::Twine{"omp.is_device"}),
       mlir::BoolAttr::get(module->getContext(), isDevice));
@@ -1360,13 +1359,12 @@ void setIsDevice(mlir::ModuleOp module, bool isDevice) {
 
 // Return the value of the omp.is_device attribute stored in the module if it
 // exists, otherwise return false by default
-bool getIsDevice(mlir::ModuleOp module) {
+bool OpenMPDialect::getIsDevice(mlir::ModuleOp module) {
   if (Attribute isDevice = module->getAttr("omp.is_device"))
     if (isDevice.isa<mlir::BoolAttr>())
       return isDevice.dyn_cast<BoolAttr>().getValue();
   return false;
 }
-} // namespace mlir::omp
 
 #define GET_ATTRDEF_CLASSES
 #include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.cpp.inc"

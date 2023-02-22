@@ -180,8 +180,8 @@ bool CodeGenAction::beginSourceFileAction() {
 
   if (ci.getInvocation().getFrontendOpts().features.IsEnabled(
           Fortran::common::LanguageFeature::OpenMP)) {
-    mlir::omp::setIsDevice(*mlirModule,
-                           ci.getInvocation().getLangOpts().OpenMPIsDevice);
+    mlir::omp::OpenMPDialect::setIsDevice(
+        *mlirModule, ci.getInvocation().getLangOpts().OpenMPIsDevice);
   }
 
   setUpTargetMachine();
