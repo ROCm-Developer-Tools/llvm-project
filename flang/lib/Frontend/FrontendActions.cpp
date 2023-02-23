@@ -180,6 +180,8 @@ bool CodeGenAction::beginSourceFileAction() {
 
   if (ci.getInvocation().getFrontendOpts().features.IsEnabled(
           Fortran::common::LanguageFeature::OpenMP)) {
+    mlir::omp::OpenMPDialect::setRTLFlags(*mlirModule, false, false, false,
+                                          false, false);
     mlir::omp::OpenMPDialect::setIsDevice(
         *mlirModule, ci.getInvocation().getLangOpts().OpenMPIsDevice);
   }

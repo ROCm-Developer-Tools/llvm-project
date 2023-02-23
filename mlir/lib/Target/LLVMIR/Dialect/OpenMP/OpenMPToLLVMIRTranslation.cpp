@@ -1353,47 +1353,69 @@ public:
   convertOperation(Operation *op, llvm::IRBuilderBase &builder,
                    LLVM::ModuleTranslation &moduleTranslation) const final;
 
-  /// Translates the given omp.module to LLVM-IR using the provided IR builder
-  /// and saving the state in 'moduleTranslation'. This is for omp.module
-  /// specific handling, regular builtin.module style handling continues to
-  /// occur elsewhere. NOTE: This occurs after all convertOperation's have been
-  /// processed/
-  LogicalResult convertModuleOperation(
-      Operation *op, llvm::IRBuilderBase &builder,
-      LLVM::ModuleTranslation &moduleTranslation) const final;
+  LogicalResult
+  amendOperation(Operation *op, NamedAttribute attribute,
+                 LLVM::ModuleTranslation &moduleTranslation) const final;
 };
 
 } // namespace
 
-LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertModuleOperation(
-    Operation *op, llvm::IRBuilderBase &builder,
-    LLVM::ModuleTranslation &moduleTranslation) const {
+LogicalResult
+convertRTLModuleFlagsAttr(Operation *op,
+                          mlir::omp::RTLModuleFlagsAttr attribute,
+                          LLVM::ModuleTranslation &moduleTranslation) {
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
   if (auto mod = dyn_cast<mlir::ModuleOp>(op)) {
-    if (mlir::omp::getIsDevice(mod)) {
+    if (mlir::omp::OpenMPDialect::getIsDevice(mod)) {
       // TODO: This is the default settings, still need to create module
       // attribute/arguments for these alongside flags to pass down from
       // fc1 and possibly higher driver.
       // TODO: Might need to extend createGlobalFlag to support address spaces
       // on the globals to 1:1 mimic Clang which puts these in address space 1
-      ompBuilder->createGlobalFlag(0 /*CGM.getLangOpts().OpenMPTargetDebug*/,
-                                   "__omp_rtl_debug_kind");
       ompBuilder->createGlobalFlag(
-          0 /*CGM.getLangOpts().OpenMPTeamSubscription*/,
+          attribute.getDebugKind() /*LangOpts().OpenMPTargetDebug*/,
+          "__omp_rtl_debug_kind");
+      ompBuilder->createGlobalFlag(
+          attribute
+              .getAssumeTeamsOversubscription() /*LangOpts().OpenMPTeamSubscription*/
+          ,
           "__omp_rtl_assume_teams_oversubscription");
       ompBuilder->createGlobalFlag(
-          0 /*CGM.getLangOpts().OpenMPThreadSubscription*/,
+          attribute
+              .getAssumeThreadsOversubscription() /*LangOpts().OpenMPThreadSubscription*/
+          ,
           "__omp_rtl_assume_threads_oversubscription");
-      ompBuilder->createGlobalFlag(0 /*CGM.getLangOpts().OpenMPNoThreadState*/,
-                                   "__omp_rtl_assume_no_thread_state");
       ompBuilder->createGlobalFlag(
-          0 /*CGM.getLangOpts().OpenMPNoNestedParallelism*/,
+          attribute.getAssumeNoThreadState() /*LangOpts().OpenMPNoThreadState*/,
+          "__omp_rtl_assume_no_thread_state");
+      ompBuilder->createGlobalFlag(
+          attribute
+              .getAssumeNoNestedParallelism() /*LangOpts().OpenMPNoNestedParallelism*/
+          ,
           "__omp_rtl_assume_no_nested_parallelism");
     }
 
     return success();
   }
+
+  return failure();
+}
+
+LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
+    Operation *op, NamedAttribute attribute,
+    LLVM::ModuleTranslation &moduleTranslation) const {
+
+  return llvm::TypeSwitch<Attribute, LogicalResult>(attribute.getValue())
+      .Case([&](mlir::omp::RTLModuleFlagsAttr rtlAttr) {
+        return convertRTLModuleFlagsAttr(op, rtlAttr, moduleTranslation);
+      })
+      .Default([&](Attribute attr) {
+        // fall through for omp attributes that do not require lowering and/or
+        // have no concrete definition and thus no type to define a case on
+        // e.g. omp.is_device
+        return success();
+      });
 
   return failure();
 }

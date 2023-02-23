@@ -33,15 +33,49 @@ def OpenMP_Dialect : Dialect {
   let extraClassDeclaration = [{
     // Set the omp.is_device attribute on the module with the specified boolean
     static void setIsDevice(mlir::ModuleOp module, bool isDevice);
-    
+
     // Return the value of the omp.is_device attribute stored in the module if it
     // exists, otherwise return false by default
     static bool getIsDevice(mlir::ModuleOp module);
+
+    // Apply an omp.RTLModuleFlagsAttr to a module with the specified values for the 
+    // flags
+    static void setRTLFlags(mlir::ModuleOp module, uint32_t debugKind, 
+      bool assumeTeamsOversubscription, bool assumeThreadsOversubscription, 
+      bool assumeNoThreadState, bool assumeNoNestedParallelism);
+
+    // Return an omp.RTLModuleFlagsAttr from a given module, if it exists
+    static mlir::omp::RTLModuleFlagsAttr getRTLFlags(mlir::ModuleOp module);
   }];
 }
 
 // OmpCommon requires definition of OpenACC_Dialect.
 include "mlir/Dialect/OpenMP/OmpCommon.td"
+
+
+// All of the attributes will extend this class.
+class OpenMP_Attr<string name, string attrMnemonic,
+                list<Trait> traits = [],
+                string baseCppClass = "::mlir::Attribute">
+    : AttrDef<OpenMP_Dialect, name, traits, baseCppClass> {
+  let mnemonic = attrMnemonic;
+}
+
+def RTLModuleFlagsAttr : OpenMP_Attr<"RTLModuleFlags", "rtlmoduleflags"> {
+  let parameters = (ins 
+    "uint32_t":$debug_kind,
+    "bool":$assume_teams_oversubscription,
+    "bool":$assume_threads_oversubscription,
+    "bool":$assume_no_thread_state,
+    "bool":$assume_no_nested_parallelism
+  );
+  
+  let assemblyFormat =  "`<` `debug_kind` `:` $debug_kind `,`"
+   " `assume_teams_oversubscription` `:` $assume_teams_oversubscription `,`"
+   " `assume_threads_oversubscription` `:` $assume_threads_oversubscription `,`"
+   " `assume_no_thread_state` `:` $assume_no_thread_state `,`"
+   " `assume_no_nested_parallelism` `:` $assume_no_nested_parallelism `>`";
+}
 
 class OpenMP_Op<string mnemonic, list<Trait> traits = []> :
       Op<OpenMP_Dialect, mnemonic, traits>;

@@ -1347,7 +1347,7 @@ LogicalResult CancellationPointOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
-// OpenMPDialect functions
+// OpenMPDialect helper functions
 //===----------------------------------------------------------------------===//
 
 // Set the omp.is_device attribute on the module with the specified boolean
@@ -1364,6 +1364,28 @@ bool OpenMPDialect::getIsDevice(mlir::ModuleOp module) {
     if (isDevice.isa<mlir::BoolAttr>())
       return isDevice.dyn_cast<BoolAttr>().getValue();
   return false;
+}
+
+// Apply an omp.RTLModuleFlagsAttr to a module with the specified values for the
+// flags
+void OpenMPDialect::setRTLFlags(mlir::ModuleOp module, uint32_t debugKind,
+                                bool assumeTeamsOversubscription,
+                                bool assumeThreadsOversubscription,
+                                bool assumeNoThreadState,
+                                bool assumeNoNestedParallelism) {
+  module->setAttr(("omp." + mlir::omp::RTLModuleFlagsAttr::getMnemonic()).str(),
+                  mlir::omp::RTLModuleFlagsAttr::get(
+                      module->getContext(), debugKind,
+                      assumeTeamsOversubscription,
+                      assumeThreadsOversubscription, assumeNoThreadState,
+                      assumeNoNestedParallelism));
+}
+
+// Return an omp.RTLModuleFlagsAttr from a given module, if it exists
+RTLModuleFlagsAttr OpenMPDialect::getRTLFlags(mlir::ModuleOp module) {
+  if (Attribute isDevice = module->getAttr("omp.rtlmoduleflags"))
+    return isDevice.dyn_cast_or_null<mlir::omp::RTLModuleFlagsAttr>();
+  return nullptr;
 }
 
 #define GET_ATTRDEF_CLASSES

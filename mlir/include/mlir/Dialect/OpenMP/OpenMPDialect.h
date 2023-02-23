@@ -13,6 +13,10 @@
 #ifndef MLIR_DIALECT_OPENMP_OPENMPDIALECT_H_
 #define MLIR_DIALECT_OPENMP_OPENMPDIALECT_H_
 
+namespace mlir::omp {
+class RTLModuleFlagsAttr;
+} // namespace mlir::omp
+
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
