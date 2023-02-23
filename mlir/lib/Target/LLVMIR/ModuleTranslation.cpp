@@ -573,6 +573,24 @@ ModuleTranslation::convertOperation(Operation &op,
   return convertDialectAttributes(&op);
 }
 
+/// Given a single MLIR module, create the corresponding LLVM IR operations
+/// using the `builder`, this lowering is defined by the dialect and for dialect
+/// specific modules e.g. omp.module from the OpenMP dialect. This is a
+/// completely optional hook for a dialect. This function is invoked after all
+/// operations in the module have been processed.
+LogicalResult
+ModuleTranslation::convertModuleOperation(Operation &op,
+                                          llvm::IRBuilderBase &builder) {
+  if (const LLVMTranslationDialectInterface *opIface =
+          iface.getInterfaceFor(&op)) {
+    if (failed(opIface->convertModuleOperation(&op, builder, *this)))
+      return failure();
+    return convertDialectAttributes(&op);
+  }
+
+  return success();
+}
+
 /// Convert block to LLVM IR.  Unless `ignoreArguments` is set, emit PHI nodes
 /// to define values corresponding to the MLIR block arguments.  These nodes
 /// are not connected to the source basic blocks, which may not exist yet.  Uses
@@ -1323,6 +1341,11 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
       return nullptr;
     }
   }
+
+  // Convert a dialect specific module with dialect specific lowering if
+  // neccessary, otherwise this is a no-op
+  if (failed(translator.convertModuleOperation(*module, llvmBuilder)))
+    return nullptr;
 
   if (llvm::verifyModule(*translator.llvmModule, &llvm::errs()))
     return nullptr;
