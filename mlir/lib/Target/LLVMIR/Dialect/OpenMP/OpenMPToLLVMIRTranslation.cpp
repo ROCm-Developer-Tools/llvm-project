@@ -1366,40 +1366,31 @@ convertRTLModuleFlagsAttr(Operation *op,
                           LLVM::ModuleTranslation &moduleTranslation) {
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
-  if (auto mod = dyn_cast<mlir::ModuleOp>(op)) {
-    if (mlir::omp::OpenMPDialect::getIsDevice(mod)) {
-      // TODO: This is the default settings, still need to create module
-      // attribute/arguments for these alongside flags to pass down from
-      // fc1 and possibly higher driver.
-      // TODO: Might need to extend createGlobalFlag to support address spaces
-      // on the globals to 1:1 mimic Clang which puts these in address space 1
-      ompBuilder->createGlobalFlag(
-          attribute.getDebugKind() /*LangOpts().OpenMPTargetDebug*/,
-          "__omp_rtl_debug_kind");
-      ompBuilder->createGlobalFlag(
-          attribute
-              .getAssumeTeamsOversubscription() /*LangOpts().OpenMPTeamSubscription*/
-          ,
-          "__omp_rtl_assume_teams_oversubscription");
-      ompBuilder->createGlobalFlag(
-          attribute
-              .getAssumeThreadsOversubscription() /*LangOpts().OpenMPThreadSubscription*/
-          ,
-          "__omp_rtl_assume_threads_oversubscription");
-      ompBuilder->createGlobalFlag(
-          attribute.getAssumeNoThreadState() /*LangOpts().OpenMPNoThreadState*/,
-          "__omp_rtl_assume_no_thread_state");
-      ompBuilder->createGlobalFlag(
-          attribute
-              .getAssumeNoNestedParallelism() /*LangOpts().OpenMPNoNestedParallelism*/
-          ,
-          "__omp_rtl_assume_no_nested_parallelism");
-    }
+  // TODO: Might need to extend createGlobalFlag to support address spaces
+  // on the globals to 1:1 mimic Clang which puts these in address space 1
+  ompBuilder->createGlobalFlag(
+      attribute.getDebugKind() /*LangOpts().OpenMPTargetDebug*/,
+      "__omp_rtl_debug_kind");
+  ompBuilder->createGlobalFlag(
+      attribute
+          .getAssumeTeamsOversubscription() /*LangOpts().OpenMPTeamSubscription*/
+      ,
+      "__omp_rtl_assume_teams_oversubscription");
+  ompBuilder->createGlobalFlag(
+      attribute
+          .getAssumeThreadsOversubscription() /*LangOpts().OpenMPThreadSubscription*/
+      ,
+      "__omp_rtl_assume_threads_oversubscription");
+  ompBuilder->createGlobalFlag(
+      attribute.getAssumeNoThreadState() /*LangOpts().OpenMPNoThreadState*/,
+      "__omp_rtl_assume_no_thread_state");
+  ompBuilder->createGlobalFlag(
+      attribute
+          .getAssumeNoNestedParallelism() /*LangOpts().OpenMPNoNestedParallelism*/
+      ,
+      "__omp_rtl_assume_no_nested_parallelism");
 
-    return success();
-  }
-
-  return failure();
+  return success();
 }
 
 LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
