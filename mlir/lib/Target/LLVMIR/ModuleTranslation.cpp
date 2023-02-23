@@ -585,10 +585,8 @@ ModuleTranslation::convertModuleOperation(Operation &op,
           iface.getInterfaceFor(&op)) {
     if (failed(opIface->convertModuleOperation(&op, builder, *this)))
       return failure();
-    return convertDialectAttributes(&op);
   }
-
-  return success();
+  return convertDialectAttributes(&op);
 }
 
 /// Convert block to LLVM IR.  Unless `ignoreArguments` is set, emit PHI nodes
