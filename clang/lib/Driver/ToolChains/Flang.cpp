@@ -106,7 +106,7 @@ void Flang::addTargetOptions(const ArgList &Args,
   // TODO: Add target specific flags, ABI, mtune option etc.
 }
 
-void Flang::addOffloadOptions(const JobAction &JA,
+void Flang::addOffloadOptions(const JobAction &JA, const ArgList &Args,
                               ArgStringList &CmdArgs) const {
   bool IsOpenMPDevice = JA.isDeviceOffloading(Action::OFK_OpenMP);
 
@@ -115,6 +115,27 @@ void Flang::addOffloadOptions(const JobAction &JA,
     // generating code for a device, so that only the relevant declarations are
     // emitted.
     CmdArgs.push_back("-fopenmp-is-device");
+
+    // When in OpenMP offloading mode, enable debugging on the device.
+    Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_target_debug_EQ);
+    if (Args.hasFlag(options::OPT_fopenmp_target_debug,
+                     options::OPT_fno_openmp_target_debug, /*Default=*/false))
+      CmdArgs.push_back("-fopenmp-target-debug");
+
+    // When in OpenMP offloading mode, forward assumptions information about
+    // thread and team counts in the device.
+    if (Args.hasFlag(options::OPT_fopenmp_assume_teams_oversubscription,
+                     options::OPT_fno_openmp_assume_teams_oversubscription,
+                     /*Default=*/false))
+      CmdArgs.push_back("-fopenmp-assume-teams-oversubscription");
+    if (Args.hasFlag(options::OPT_fopenmp_assume_threads_oversubscription,
+                     options::OPT_fno_openmp_assume_threads_oversubscription,
+                     /*Default=*/false))
+      CmdArgs.push_back("-fopenmp-assume-threads-oversubscription");
+    if (Args.hasArg(options::OPT_fopenmp_assume_no_thread_state))
+      CmdArgs.push_back("-fopenmp-assume-no-thread-state");
+    if (Args.hasArg(options::OPT_fopenmp_assume_no_nested_parallelism))
+      CmdArgs.push_back("-fopenmp-assume-no-nested-parallelism");
   }
 }
 
@@ -316,7 +337,7 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
   addTargetOptions(Args, CmdArgs);
 
   // Offloading related options
-  addOffloadOptions(JA, CmdArgs);
+  addOffloadOptions(JA, Args, CmdArgs);
 
   // Add other compile options
   addOtherOptions(Args, CmdArgs);
