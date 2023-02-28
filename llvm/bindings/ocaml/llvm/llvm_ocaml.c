@@ -587,7 +587,7 @@ LLVMTypeRef llvm_vector_type(LLVMTypeRef ElementTy, value Count) {
 
 /* lltype -> int */
 value llvm_array_length(LLVMTypeRef ArrayTy) {
-  return Val_int(LLVMGetArrayLength(ArrayTy));
+  return Val_int(LLVMGetArrayLength2(ArrayTy));
 }
 
 /* lltype -> int */
@@ -2337,38 +2337,5 @@ value llvm_memorybuffer_as_string(LLVMMemoryBufferRef MemBuf) {
 /* llmemorybuffer -> unit */
 value llvm_memorybuffer_dispose(LLVMMemoryBufferRef MemBuf) {
   LLVMDisposeMemoryBuffer(MemBuf);
-  return Val_unit;
-}
-
-/*===-- Pass Managers -----------------------------------------------------===*/
-
-/* unit -> [ `Module ] PassManager.t */
-LLVMPassManagerRef llvm_passmanager_create(value Unit) {
-  return LLVMCreatePassManager();
-}
-
-/* llmodule -> [ `Function ] PassManager.t -> bool */
-value llvm_passmanager_run_module(LLVMModuleRef M, LLVMPassManagerRef PM) {
-  return Val_bool(LLVMRunPassManager(PM, M));
-}
-
-/* [ `Function ] PassManager.t -> bool */
-value llvm_passmanager_initialize(LLVMPassManagerRef FPM) {
-  return Val_bool(LLVMInitializeFunctionPassManager(FPM));
-}
-
-/* llvalue -> [ `Function ] PassManager.t -> bool */
-value llvm_passmanager_run_function(LLVMValueRef F, LLVMPassManagerRef FPM) {
-  return Val_bool(LLVMRunFunctionPassManager(FPM, F));
-}
-
-/* [ `Function ] PassManager.t -> bool */
-value llvm_passmanager_finalize(LLVMPassManagerRef FPM) {
-  return Val_bool(LLVMFinalizeFunctionPassManager(FPM));
-}
-
-/* PassManager.any PassManager.t -> unit */
-value llvm_passmanager_dispose(LLVMPassManagerRef PM) {
-  LLVMDisposePassManager(PM);
   return Val_unit;
 }

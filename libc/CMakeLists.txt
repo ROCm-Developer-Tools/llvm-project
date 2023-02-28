@@ -3,9 +3,6 @@ cmake_minimum_required(VERSION 3.13.4)
 # Default to C++17
 set(CMAKE_CXX_STANDARD 17)
 
-# Use old version of target_sources command which converts the source
-# file paths to full paths.
-cmake_policy(SET CMP0076 OLD)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 # The top-level sourse and binary directories.
@@ -110,6 +107,7 @@ if(LLVM_LIBC_ENABLE_LINTING)
           The path to the clang-tidy binary can be set manually by passing
           -DLLVM_LIBC_CLANG_TIDY=<path/to/clang-tidy> to CMake.")
       endif()
+      add_custom_target(libc-lint)
     else()
       message(FATAL_ERROR "
         Linting is enabled but 'clang-tidy' is not found!
@@ -163,10 +161,7 @@ foreach(entrypoint IN LISTS TARGET_LLVMLIBC_ENTRYPOINTS)
   list(APPEND TARGET_ENTRYPOINT_NAME_LIST ${entrypoint_name})
 endforeach()
 
-set(LIBC_TARGET)
-set(LIBC_COMPONENT)
 set(LIBC_INSTALL_DEPENDS)
-set(LIBC_INSTALL_TARGET)
 if(LLVM_LIBC_FULL_BUILD)
   set(LIBC_INSTALL_DEPENDS "install-libc-static-archives;install-libc-headers")
   if(NOT LIBC_TARGET_OS_IS_BAREMETAL)
@@ -175,14 +170,8 @@ if(LLVM_LIBC_FULL_BUILD)
     # and install it as part of the libc installation.
     list(APPEND LIBC_INSTALL_DEPENDS "libc-startup")
   endif()
-  if(LIBC_TARGET_ARCHITECTURE_IS_GPU)
-    set(LIBC_ARCHIVE_NAME cgpu)
-  else()
-    set(LIBC_ARCHIVE_NAME c)
-  endif()
 else()
   set(LIBC_INSTALL_DEPENDS install-libc-static-archives)
-  set(LIBC_ARCHIVE_NAME llvmlibc)
 endif()
 
 add_subdirectory(include)

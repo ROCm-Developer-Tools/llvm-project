@@ -53,6 +53,9 @@ Changes to the LLVM IR
 * Typed pointers are no longer supported. See the `opaque pointers
   <OpaquePointers.html>`__ documentation for migration instructions.
 
+* The ``nofpclass`` attribute was introduced. This allows more
+  optimizations around special floating point value comparisons.
+
 Changes to building LLVM
 ------------------------
 
@@ -70,6 +73,10 @@ Changes to the AMDGPU Backend
 
 Changes to the ARM Backend
 --------------------------
+
+- The hard-float ABI is now available in Armv8.1-M configurations that
+  have integer MVE instructions (and therefore have FP registers) but
+  no scalar or vector floating point computation.
 
 Changes to the AVR Backend
 --------------------------
@@ -102,6 +109,21 @@ Changes to the RISC-V Backend
 
 * Assembler support for version 1.0.1 of the Zcb extension was added.
 * Zca, Zcf, and Zcd extensions were upgraded to version 1.0.1.
+* vsetvli intrinsics no longer have side effects. They may now be combined,
+  moved, deleted, etc. by optimizations.
+* Adds support for the vendor-defined XTHeadBa (address-generation) extension.
+* Adds support for the vendor-defined XTHeadBb (basic bit-manipulation) extension.
+* Adds support for the vendor-defined XTHeadBs (single-bit) extension.
+* Adds support for the vendor-defined XTHeadCondMov (conditional move) extension.
+* Adds support for the vendor-defined XTHeadMac (multiply-accumulate instructions) extension.
+* Added support for the vendor-defined XTHeadMemPair (two-GPR memory operations)
+  extension disassembler/assembler.
+* Added support for the vendor-defined XTHeadMemIdx (indexed memory operations)
+  extension disassembler/assembler.
+* Support for the now-ratified Zawrs extension is no longer experimental.
+* Adds support for the vendor-defined XTHeadCmo (cache management operations) extension.
+* Adds support for the vendor-defined XTHeadSync (multi-core synchronization instructions) extension.
+* Added support for the vendor-defined XTHeadFMemIdx (indexed memory operations for floating point) extension.
 
 Changes to the WebAssembly Backend
 ----------------------------------

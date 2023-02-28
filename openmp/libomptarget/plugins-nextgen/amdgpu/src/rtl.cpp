@@ -50,7 +50,7 @@
 #endif
 #else
 #include "hsa/hsa.h"
-#include "hsa_ext_amd.h"
+#include "hsa/hsa_ext_amd.h"
 #endif
 
 namespace llvm {
@@ -373,10 +373,22 @@ struct AMDGPUDeviceImageTy : public DeviceImageTy {
   Expected<hsa_executable_symbol_t>
   findDeviceSymbol(GenericDeviceTy &Device, StringRef SymbolName) const;
 
+  /// Get additional info for kernel, e.g., register spill counts
+  std::optional<utils::KernelMetaDataTy>
+  getKernelInfo(StringRef Identifier) const {
+    auto It = KernelInfoMap.find(Identifier);
+
+    if (It == KernelInfoMap.end())
+      return {};
+
+    return It->second;
+  }
+
 private:
   /// The exectuable loaded on the agent.
   hsa_executable_t Executable;
   hsa_code_object_t CodeObject;
+  StringMap<utils::KernelMetaDataTy> KernelInfoMap;
 };
 
 /// Class implementing the AMDGPU kernel functionalities which derives from the
@@ -426,14 +438,24 @@ struct AMDGPUKernelTy : public GenericKernelTy {
     // TODO: Read the kernel descriptor for the max threads per block. May be
     // read from the image.
 
+    // Get additional kernel info read from image
+    KernelInfo = AMDImage.getKernelInfo(getName());
+    if (!KernelInfo.has_value())
+      INFO(OMP_INFOTYPE_PLUGIN_KERNEL, Device.getDeviceId(),
+           "Could not read extra information for kernel %s.", getName());
+
     return Plugin::success();
   }
 
   /// Launch the AMDGPU kernel function.
   Error launchImpl(GenericDeviceTy &GenericDevice, uint32_t NumThreads,
-                   uint64_t NumBlocks, 
-                   KernelArgsTy &KernelArgs, void *Args,
+                   uint64_t NumBlocks, KernelArgsTy &KernelArgs, void *Args,
                    AsyncInfoWrapperTy &AsyncInfoWrapper) const override;
+
+  /// Print more elaborate kernel launch info for AMDGPU
+  Error printLaunchInfoDetails(GenericDeviceTy &GenericDevice,
+                               KernelArgsTy &KernelArgs, uint32_t NumThreads,
+                               uint64_t NumBlocks) const override;
 
   /// The default number of blocks is common to the whole device.
   uint32_t getDefaultNumBlocks(GenericDeviceTy &GenericDevice) const override {
@@ -463,6 +485,9 @@ private:
 
   /// The size of implicit kernel arguments.
   const uint32_t ImplicitArgsSize;
+
+  /// Additional Info for the AMD GPU Kernel
+  std::optional<utils::KernelMetaDataTy> KernelInfo;
 };
 
 /// Class representing an HSA signal. Signals are used to define dependencies
@@ -1439,7 +1464,7 @@ struct AMDHostDeviceTy : public AMDGenericDeviceTy {
     if (auto Err = ArgsMemoryManager.init(getArgsMemoryPool()))
       return Err;
 
-    if (auto Err = PinnedMemoryManager.init(getHostMemoryPool()))
+    if (auto Err = PinnedMemoryManager.init(getFineGrainedMemoryPool()))
       return Err;
 
     return Plugin::success();
@@ -1479,11 +1504,17 @@ struct AMDHostDeviceTy : public AMDGenericDeviceTy {
   /// Get one of the host agents. Return always the first agent.
   hsa_agent_t getAgent() const override { return Agents[0]; }
 
-  /// Get a memory pool for host pinned allocations.
-  AMDGPUMemoryPoolTy &getHostMemoryPool() {
+  /// Get a memory pool for fine-grained allocations.
+  AMDGPUMemoryPoolTy &getFineGrainedMemoryPool() {
     assert(!FineGrainedMemoryPools.empty() && "No fine-grained mempool");
     // Retrive any memory pool.
     return *FineGrainedMemoryPools[0];
+  }
+
+  AMDGPUMemoryPoolTy &getCoarseGrainedMemoryPool() {
+    assert(!CoarseGrainedMemoryPools.empty() && "No coarse-grained mempool");
+    // Retrive any memory pool.
+    return *CoarseGrainedMemoryPools[0];
   }
 
   /// Get a memory pool for kernel args allocations.
@@ -1763,12 +1794,10 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
       MemoryPool = CoarseGrainedMemoryPools[0];
       break;
     case TARGET_ALLOC_HOST:
-      MemoryPool = &HostDevice.getHostMemoryPool();
+      MemoryPool = &HostDevice.getFineGrainedMemoryPool();
       break;
     case TARGET_ALLOC_SHARED:
-      // TODO: Not supported yet. We could look at fine-grained host memory
-      // pools that are accessible by this device. The allocation should be made
-      // explicitly accessible if it is not yet.
+      MemoryPool = &HostDevice.getFineGrainedMemoryPool();
       break;
     }
 
@@ -1843,6 +1872,38 @@ struct AMDGPUDeviceTy : public GenericDeviceTy, AMDGenericDeviceTy {
   Error dataUnlockImpl(void *HstPtr) override {
     hsa_status_t Status = hsa_amd_memory_unlock(HstPtr);
     return Plugin::check(Status, "Error in hsa_amd_memory_unlock: %s\n");
+  }
+
+  /// Check through the HSA runtime whether the \p HstPtr buffer is pinned.
+  Expected<bool> isPinnedPtrImpl(void *HstPtr, void *&BaseHstPtr,
+                                 void *&BaseDevAccessiblePtr,
+                                 size_t &BaseSize) const override {
+    hsa_amd_pointer_info_t Info;
+    Info.size = sizeof(hsa_amd_pointer_info_t);
+
+    hsa_status_t Status =
+        hsa_amd_pointer_info(HstPtr, &Info, /* Allocator */ nullptr,
+                             /* Number of accessible agents (out) */ nullptr,
+                             /* Accessible agents */ nullptr);
+    if (auto Err = Plugin::check(Status, "Error in hsa_amd_pointer_info: %s"))
+      return Err;
+
+    // The buffer may be locked or allocated through HSA allocators. Assume that
+    // the buffer is host pinned if the runtime reports a HSA type.
+    if (Info.type != HSA_EXT_POINTER_TYPE_LOCKED &&
+        Info.type != HSA_EXT_POINTER_TYPE_HSA)
+      return false;
+
+    assert(Info.hostBaseAddress && "Invalid host pinned address");
+    assert(Info.agentBaseAddress && "Invalid agent pinned address");
+    assert(Info.sizeInBytes > 0 && "Invalid pinned allocation size");
+
+    // Save the allocation info in the output parameters.
+    BaseHstPtr = Info.hostBaseAddress;
+    BaseDevAccessiblePtr = Info.agentBaseAddress;
+    BaseSize = Info.sizeInBytes;
+
+    return true;
   }
 
   /// Submit data to the device (host to device transfer).
@@ -2165,6 +2226,10 @@ Error AMDGPUDeviceImageTy::loadExecutable(const AMDGPUDeviceTy &Device) {
   if (Result)
     return Plugin::error("Loaded HSA executable does not validate");
 
+  if (auto Err =
+          utils::readAMDGPUMetaDataFromImage(getMemoryBuffer(), KernelInfoMap))
+    return Err;
+
   return Plugin::success();
 }
 
@@ -2431,38 +2496,40 @@ private:
     if (Event->event_type != HSA_AMD_GPU_MEMORY_FAULT_EVENT)
       return HSA_STATUS_SUCCESS;
 
-    std::string Reasons;
+    SmallVector<std::string> Reasons;
     uint32_t ReasonsMask = Event->memory_fault.fault_reason_mask;
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT)
-      Reasons += "HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT, ";
+      Reasons.emplace_back("Page not present or supervisor privilege");
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_READ_ONLY)
-      Reasons += " HSA_AMD_MEMORY_FAULT_READ_ONLY, ";
+      Reasons.emplace_back("Write access to a read-only page");
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_NX)
-      Reasons += " HSA_AMD_MEMORY_FAULT_NX, ";
+      Reasons.emplace_back("Execute access to a page marked NX");
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_HOST_ONLY)
-      Reasons += " HSA_AMD_MEMORY_FAULT_HOST_ONLY, ";
+      Reasons.emplace_back("GPU attempted access to a host only page");
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_DRAMECC)
-      Reasons += " HSA_AMD_MEMORY_FAULT_DRAMECC, ";
+      Reasons.emplace_back("DRAM ECC failure");
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_IMPRECISE)
-      Reasons += " HSA_AMD_MEMORY_FAULT_IMPRECISE, ";
+      Reasons.emplace_back("Can't determine the exact fault address");
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_SRAMECC)
-      Reasons += " HSA_AMD_MEMORY_FAULT_SRAMECC, ";
+      Reasons.emplace_back("SRAM ECC failure (ie registers, no fault address)");
     if (ReasonsMask & HSA_AMD_MEMORY_FAULT_HANG)
-      Reasons += " HSA_AMD_MEMORY_FAULT_HANG, ";
+      Reasons.emplace_back("GPU reset following unspecified hang");
 
     // If we do not know the reason, say so, otherwise remove the trailing comma
     // and space.
     if (Reasons.empty())
-      Reasons = "Unknown (Mask: " + std::to_string(ReasonsMask) + ")";
-    else
-      Reasons.resize(Reasons.size() - /* ', ' */ 2);
+      Reasons.emplace_back("Unknown (" + std::to_string(ReasonsMask) + ")");
+
+    uint32_t Node = -1;
+    hsa_agent_get_info(Event->memory_fault.agent, HSA_AGENT_INFO_NODE, &Node);
 
     // Abort the execution since we do not recover from this error.
     FATAL_MESSAGE(1,
-                  "Found HSA_AMD_GPU_MEMORY_FAULT_EVENT in agent %" PRIu64
-                  " at virtual address %p and reasons: %s",
-                  Event->memory_fault.agent.handle,
-                  (void *)Event->memory_fault.virtual_address, Reasons.data());
+                  "Memory access fault by GPU %" PRIu32 " (agent 0x%" PRIx64
+                  ") at virtual address %p. Reasons: %s",
+                  Node, Event->memory_fault.agent.handle,
+                  (void *)Event->memory_fault.virtual_address,
+                  llvm::join(Reasons, ", ").c_str());
 
     return HSA_STATUS_ERROR;
   }
@@ -2534,6 +2601,50 @@ Error AMDGPUKernelTy::launchImpl(GenericDeviceTy &GenericDevice,
                                  GroupSize, ArgsMemoryManager);
 }
 
+Error AMDGPUKernelTy::printLaunchInfoDetails(GenericDeviceTy &GenericDevice,
+                                             KernelArgsTy &KernelArgs,
+                                             uint32_t NumThreads,
+                                             uint64_t NumBlocks) const {
+  // Only do all this when the output is requested
+  if (!(getInfoLevel() & OMP_INFOTYPE_PLUGIN_KERNEL))
+    return Plugin::success();
+
+  // We don't have data to print additional info, but no hard error
+  if (!KernelInfo.has_value())
+    return Plugin::success();
+
+  // General Info
+  auto ConstWGSize = getDefaultNumThreads(GenericDevice);
+  auto NumGroups = NumBlocks;
+  auto ThreadsPerGroup = getDefaultNumThreads(GenericDevice);
+  auto NumTeams = KernelArgs.NumTeams[0];       // Only first dimension
+  auto ThreadLimit = KernelArgs.ThreadLimit[0]; // Only first dimension
+
+  // Kernel Arguments Info
+  auto ArgNum = KernelArgs.NumArgs;
+  auto LoopTripCount = KernelArgs.Tripcount;
+
+  // Details for AMDGPU kernels
+  auto GroupSegmentSize = (*KernelInfo).GroupSegmentList;
+  auto SGPRCount = (*KernelInfo).SGPRCount;
+  auto VGPRCount = (*KernelInfo).VGPRCount;
+  auto SGPRSpillCount = (*KernelInfo).SGPRSpillCount;
+  auto VGPRSpillCount = (*KernelInfo).VGPRSpillCount;
+
+  // TODO set correctly once host services available
+  auto HostCallRequired = false;
+  INFO(OMP_INFOTYPE_PLUGIN_KERNEL, GenericDevice.getDeviceId(),
+       "SGN:%s ConstWGSize:%d args:%d teamsXthrds:(%4dX%4d) "
+       "reqd:(%4dX%4d) lds_usage:%uB sgpr_count:%u vgpr_count:%u "
+       "sgpr_spill_count:%u vgpr_spill_count:%u tripcount:%lu rpc:%d n:%s\n",
+       getExecutionModeName(), ConstWGSize, ArgNum, NumGroups, ThreadsPerGroup,
+       NumTeams, ThreadLimit, GroupSegmentSize, SGPRCount, VGPRCount,
+       SGPRSpillCount, VGPRSpillCount, LoopTripCount, HostCallRequired,
+       getName());
+
+  return Plugin::success();
+}
+
 GenericPluginTy *Plugin::createPlugin() { return new AMDGPUPluginTy(); }
 
 GenericDeviceTy *Plugin::createDevice(int32_t DeviceId, int32_t NumDevices) {
@@ -2593,12 +2704,10 @@ void *AMDGPUDeviceTy::allocate(size_t Size, void *, TargetAllocTy Kind) {
     MemoryPool = CoarseGrainedMemoryPools[0];
     break;
   case TARGET_ALLOC_HOST:
-    MemoryPool = &HostDevice.getHostMemoryPool();
+    MemoryPool = &HostDevice.getFineGrainedMemoryPool();
     break;
   case TARGET_ALLOC_SHARED:
-    // TODO: Not supported yet. We could look at fine-grained host memory
-    // pools that are accessible by this device. The allocation should be made
-    // explicitly accessible if it is not yet.
+    MemoryPool = &HostDevice.getFineGrainedMemoryPool();
     break;
   }
 
@@ -2614,10 +2723,10 @@ void *AMDGPUDeviceTy::allocate(size_t Size, void *, TargetAllocTy Kind) {
     return nullptr;
   }
 
-  if (Kind == TARGET_ALLOC_HOST && Alloc) {
+  if (Alloc && (Kind == TARGET_ALLOC_HOST || Kind == TARGET_ALLOC_SHARED)) {
     auto &KernelAgents = Plugin::get<AMDGPUPluginTy>().getKernelAgents();
 
-    // Enable all kernel agents to access the host pinned buffer.
+    // Enable all kernel agents to access the buffer.
     if (auto Err = MemoryPool->enableAccess(Alloc, Size, KernelAgents)) {
       REPORT("%s\n", toString(std::move(Err)).data());
       return nullptr;

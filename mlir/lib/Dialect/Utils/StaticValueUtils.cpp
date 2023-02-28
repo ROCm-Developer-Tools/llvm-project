@@ -14,6 +14,18 @@
 
 namespace mlir {
 
+bool isZeroIndex(OpFoldResult v) {
+  if (!v)
+    return false;
+  if (auto attr = v.dyn_cast<Attribute>()) {
+    IntegerAttr intAttr = attr.dyn_cast<IntegerAttr>();
+    return intAttr && intAttr.getValue().isZero();
+  }
+  if (auto cst = v.get<Value>().getDefiningOp<arith::ConstantIndexOp>())
+    return cst.value() == 0;
+  return false;
+}
+
 std::tuple<SmallVector<OpFoldResult>, SmallVector<OpFoldResult>,
            SmallVector<OpFoldResult>>
 getOffsetsSizesAndStrides(ArrayRef<Range> ranges) {
@@ -122,6 +134,16 @@ bool isEqualConstantIntOrValue(OpFoldResult ofr1, OpFoldResult ofr2) {
     return true;
   auto v1 = ofr1.dyn_cast<Value>(), v2 = ofr2.dyn_cast<Value>();
   return v1 && v1 == v2;
+}
+
+bool isEqualConstantIntOrValueArray(ArrayRef<OpFoldResult> ofrs1,
+                                    ArrayRef<OpFoldResult> ofrs2) {
+  if (ofrs1.size() != ofrs2.size())
+    return false;
+  for (auto [ofr1, ofr2] : llvm::zip_equal(ofrs1, ofrs2))
+    if (!isEqualConstantIntOrValue(ofr1, ofr2))
+      return false;
+  return true;
 }
 
 /// Helper function to convert a vector of `OpFoldResult`s into a vector of

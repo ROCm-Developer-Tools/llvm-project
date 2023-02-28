@@ -1,3 +1,5 @@
+// REQUIRES: aarch64-registered-target
+
 // RUN: %clang_cc1 -S -x c++ -std=c++11 -triple aarch64-linux-android31 \
 // RUN:   -fsanitize=memtag-globals -o %t.out %s
 // RUN: FileCheck %s --input-file=%t.out

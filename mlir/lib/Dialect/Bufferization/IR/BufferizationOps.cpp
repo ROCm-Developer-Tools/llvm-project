@@ -226,9 +226,9 @@ bool AllocTensorOp::bufferizesToMemoryWrite(OpOperand &opOperand,
   return false;
 }
 
-SmallVector<OpResult>
-AllocTensorOp::getAliasingOpResult(OpOperand &opOperand,
-                                   const AnalysisState &state) {
+AliasingOpResultList
+AllocTensorOp::getAliasingOpResults(OpOperand &opOperand,
+                                    const AnalysisState &state) {
   // This is a new allocation. It does not alias with any other buffer.
   return {};
 }
@@ -560,6 +560,10 @@ LogicalResult DeallocTensorOp::bufferize(RewriterBase &rewriter,
 //===----------------------------------------------------------------------===//
 // ToTensorOp
 //===----------------------------------------------------------------------===//
+
+bool ToTensorOp::isWritable(Value value, const AnalysisState &state) {
+  return getWritable();
+}
 
 OpFoldResult ToTensorOp::fold(FoldAdaptor) {
   if (auto toMemref = getMemref().getDefiningOp<ToMemrefOp>())

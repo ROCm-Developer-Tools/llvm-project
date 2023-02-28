@@ -34,7 +34,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 
-#include "mlir/Dialect/LLVMIR/LLVMOpsInterfaces.h.inc"
+#include "mlir/Dialect/LLVMIR/LLVMInterfaces.h.inc"
 
 namespace llvm {
 class Type;
@@ -208,7 +208,8 @@ private:
 /// global and use it to compute the address of the first character in the
 /// string (operations inserted at the builder insertion point).
 Value createGlobalString(Location loc, OpBuilder &builder, StringRef name,
-                         StringRef value, Linkage linkage);
+                         StringRef value, Linkage linkage,
+                         bool useOpaquePointers);
 
 /// LLVM requires some operations to be inside of a Module operation. This
 /// function confirms that the Operation has the desired properties.

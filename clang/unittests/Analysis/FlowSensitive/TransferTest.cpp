@@ -2102,6 +2102,54 @@ TEST(TransferTest, CopyConstructor) {
       });
 }
 
+TEST(TransferTest, CopyConstructorWithDefaultArgument) {
+  std::string Code = R"(
+    struct A {
+      int Baz;
+      A() = default;
+      A(const A& a, bool def = true) { Baz = a.Baz; }
+    };
+
+    void target() {
+      A Foo;
+      (void)Foo.Baz;
+      A Bar = Foo;
+      // [[p]]
+    }
+  )";
+  runDataflow(
+      Code,
+      [](const llvm::StringMap<DataflowAnalysisState<NoopLattice>> &Results,
+         ASTContext &ASTCtx) {
+        ASSERT_THAT(Results.keys(), UnorderedElementsAre("p"));
+        const Environment &Env = getEnvironmentAtAnnotation(Results, "p");
+
+        const ValueDecl *FooDecl = findValueDecl(ASTCtx, "Foo");
+        ASSERT_THAT(FooDecl, NotNull());
+
+        const ValueDecl *BarDecl = findValueDecl(ASTCtx, "Bar");
+        ASSERT_THAT(BarDecl, NotNull());
+
+        const ValueDecl *BazDecl = findValueDecl(ASTCtx, "Baz");
+        ASSERT_THAT(BazDecl, NotNull());
+
+        const auto *FooLoc = cast<AggregateStorageLocation>(
+            Env.getStorageLocation(*FooDecl, SkipPast::None));
+        const auto *BarLoc = cast<AggregateStorageLocation>(
+            Env.getStorageLocation(*BarDecl, SkipPast::None));
+
+        const auto *FooVal = cast<StructValue>(Env.getValue(*FooLoc));
+        const auto *BarVal = cast<StructValue>(Env.getValue(*BarLoc));
+        EXPECT_EQ(FooVal, BarVal);
+
+        const auto *FooBazVal =
+            cast<IntegerValue>(Env.getValue(FooLoc->getChild(*BazDecl)));
+        const auto *BarBazVal =
+            cast<IntegerValue>(Env.getValue(BarLoc->getChild(*BazDecl)));
+        EXPECT_EQ(FooBazVal, BarBazVal);
+      });
+}
+
 TEST(TransferTest, CopyConstructorWithParens) {
   std::string Code = R"(
     struct A {
@@ -3893,6 +3941,8 @@ TEST(TransferTest, StructuredBindingAssignFromTupleLikeType) {
         const ValueDecl *BazDecl = findValueDecl(ASTCtx, "Baz");
         ASSERT_THAT(BazDecl, NotNull());
 
+        // BindingDecls always map to references -- either lvalue or rvalue, so
+        // we still need to skip here.
         const Value *BoundFooValue =
             Env1.getValue(*BoundFooDecl, SkipPast::Reference);
         ASSERT_THAT(BoundFooValue, NotNull());
@@ -3904,13 +3954,13 @@ TEST(TransferTest, StructuredBindingAssignFromTupleLikeType) {
         EXPECT_TRUE(isa<IntegerValue>(BoundBarValue));
 
         // Test that a `DeclRefExpr` to a `BindingDecl` works as expected.
-        EXPECT_EQ(Env1.getValue(*BazDecl, SkipPast::Reference), BoundFooValue);
+        EXPECT_EQ(Env1.getValue(*BazDecl, SkipPast::None), BoundFooValue);
 
         const Environment &Env2 = getEnvironmentAtAnnotation(Results, "p2");
 
         // Test that `BoundFooDecl` retains the value we expect, after the join.
         BoundFooValue = Env2.getValue(*BoundFooDecl, SkipPast::Reference);
-        EXPECT_EQ(Env2.getValue(*BazDecl, SkipPast::Reference), BoundFooValue);
+        EXPECT_EQ(Env2.getValue(*BazDecl, SkipPast::None), BoundFooValue);
       });
 }
 
@@ -3988,16 +4038,15 @@ TEST(TransferTest, StructuredBindingAssignRefFromTupleLikeType) {
         // works as expected. We don't test aliasing properties of the
         // reference, because we don't model `std::get` and so have no way to
         // equate separate references into the tuple.
-        EXPECT_EQ(Env1.getValue(*BazDecl, SkipPast::Reference), BoundFooValue);
+        EXPECT_EQ(Env1.getValue(*BazDecl, SkipPast::None), BoundFooValue);
 
         const Environment &Env2 = getEnvironmentAtAnnotation(Results, "p2");
 
         // Test that `BoundFooDecl` retains the value we expect, after the join.
         BoundFooValue = Env2.getValue(*BoundFooDecl, SkipPast::Reference);
-        EXPECT_EQ(Env2.getValue(*BazDecl, SkipPast::Reference), BoundFooValue);
+        EXPECT_EQ(Env2.getValue(*BazDecl, SkipPast::None), BoundFooValue);
       });
 }
-// TODO: ref binding
 
 TEST(TransferTest, BinaryOperatorComma) {
   std::string Code = R"(

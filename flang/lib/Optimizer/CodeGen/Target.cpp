@@ -470,7 +470,34 @@ struct TargetRISCV64 : public GenericTarget<TargetRISCV64> {
 //===----------------------------------------------------------------------===//
 
 namespace {
-struct TargetAMDGCN : public GenericTarget<TargetAMDGCN> {
+struct TargetAMDGPU : public GenericTarget<TargetAMDGPU> {
+  using GenericTarget::GenericTarget;
+
+  // Default size (in bits) of the index type for strings.
+  static constexpr int defaultWidth = 64;
+
+  CodeGenSpecifics::Marshalling
+  complexArgumentType(mlir::Location loc, mlir::Type eleTy) const override {
+    CodeGenSpecifics::Marshalling marshal;
+    TODO(loc, "handle complex argument types");
+    return marshal;
+  }
+
+  CodeGenSpecifics::Marshalling
+  complexReturnType(mlir::Location loc, mlir::Type eleTy) const override {
+    CodeGenSpecifics::Marshalling marshal;
+    TODO(loc, "handle complex return types");
+    return marshal;
+  }
+};
+} // namespace
+
+//===----------------------------------------------------------------------===//
+// LoongArch64 linux target specifics.
+//===----------------------------------------------------------------------===//
+
+namespace {
+struct TargetLoongArch64 : public GenericTarget<TargetLoongArch64> {
   using GenericTarget::GenericTarget;
 
   static constexpr int defaultWidth = 64;
@@ -498,8 +525,8 @@ struct TargetAMDGCN : public GenericTarget<TargetAMDGCN> {
         sem == &llvm::APFloat::IEEEdouble()) {
       // Use a type that will be translated into LLVM as:
       // { t, t }   struct of 2 eleTy, byVal
-      mlir::TypeRange range = {eleTy, eleTy};
-      marshal.emplace_back(mlir::TupleType::get(eleTy.getContext(), range),
+      marshal.emplace_back(mlir::TupleType::get(eleTy.getContext(),
+                                                mlir::TypeRange{eleTy, eleTy}),
                            AT{/*alignment=*/0, /*byval=*/true});
     } else {
       TODO(loc, "complex for this precision");
@@ -542,8 +569,11 @@ fir::CodeGenSpecifics::get(mlir::MLIRContext *ctx, llvm::Triple &&trp,
     return std::make_unique<TargetRISCV64>(ctx, std::move(trp),
                                            std::move(kindMap));
   case llvm::Triple::ArchType::amdgcn:
-    return std::make_unique<TargetAMDGCN>(ctx, std::move(trp),
+    return std::make_unique<TargetAMDGPU>(ctx, std::move(trp),
                                           std::move(kindMap));
+  case llvm::Triple::ArchType::loongarch64:
+    return std::make_unique<TargetLoongArch64>(ctx, std::move(trp),
+                                               std::move(kindMap));
   }
   TODO(mlir::UnknownLoc::get(ctx), "target not implemented");
 }

@@ -41,12 +41,20 @@ moduleNames(const Fortran::semantics::Symbol &symbol) {
 
 static std::optional<llvm::StringRef>
 hostName(const Fortran::semantics::Symbol &symbol) {
-  const Fortran::semantics::Scope &scope = symbol.owner();
-  if (scope.kind() == Fortran::semantics::Scope::Kind::Subprogram) {
-    assert(scope.symbol() && "subprogram scope must have a symbol");
-    return toStringRef(scope.symbol()->name());
+  const Fortran::semantics::Scope *scope = &symbol.owner();
+  if (symbol.has<Fortran::semantics::AssocEntityDetails>())
+    // Associate/Select construct scopes are not part of the mangling. This can
+    // result in different construct selector being mangled with the same name.
+    // This is not an issue since these are not global symbols.
+    while (!scope->IsTopLevel() &&
+           (scope->kind() != Fortran::semantics::Scope::Kind::Subprogram &&
+            scope->kind() != Fortran::semantics::Scope::Kind::MainProgram))
+      scope = &scope->parent();
+  if (scope->kind() == Fortran::semantics::Scope::Kind::Subprogram) {
+    assert(scope->symbol() && "subprogram scope must have a symbol");
+    return toStringRef(scope->symbol()->name());
   }
-  if (scope.kind() == Fortran::semantics::Scope::Kind::MainProgram)
+  if (scope->kind() == Fortran::semantics::Scope::Kind::MainProgram)
     // Do not use the main program name, if any, because it may lead to name
     // collision with procedures with the same name in other compilation units
     // (technically illegal, but all compilers are able to compile and link
@@ -79,6 +87,15 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
       Fortran::semantics::ClassifyProcedure(symbol) !=
           Fortran::semantics::ProcedureDefinitionClass::Internal)
     return ultimateSymbol.name().ToString();
+
+  // mangle ObjectEntityDetails or AssocEntityDetails symbols.
+  auto mangleObject = [&]() -> std::string {
+    llvm::SmallVector<llvm::StringRef> modNames = moduleNames(ultimateSymbol);
+    std::optional<llvm::StringRef> optHost = hostName(ultimateSymbol);
+    if (Fortran::semantics::IsNamedConstant(ultimateSymbol))
+      return fir::NameUniquer::doConstant(modNames, optHost, symbolName);
+    return fir::NameUniquer::doVariable(modNames, optHost, symbolName);
+  };
 
   return std::visit(
       Fortran::common::visitors{
@@ -117,13 +134,10 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
                                                  symbolName);
           },
           [&](const Fortran::semantics::ObjectEntityDetails &) {
-            llvm::SmallVector<llvm::StringRef> modNames =
-                moduleNames(ultimateSymbol);
-            std::optional<llvm::StringRef> optHost = hostName(ultimateSymbol);
-            if (Fortran::semantics::IsNamedConstant(ultimateSymbol))
-              return fir::NameUniquer::doConstant(modNames, optHost,
-                                                  symbolName);
-            return fir::NameUniquer::doVariable(modNames, optHost, symbolName);
+            return mangleObject();
+          },
+          [&](const Fortran::semantics::AssocEntityDetails &) {
+            return mangleObject();
           },
           [&](const Fortran::semantics::NamelistDetails &) {
             llvm::SmallVector<llvm::StringRef> modNames =
@@ -229,52 +243,6 @@ std::string Fortran::lower::mangle::mangleArrayLiteral(
   llvm::SmallString<32> hashString;
   llvm::MD5::stringifyResult(hashResult, hashString);
   return name += hashString.c_str();
-}
-
-//===----------------------------------------------------------------------===//
-// Intrinsic Procedure Mangling
-//===----------------------------------------------------------------------===//
-
-/// Helper to encode type into string for intrinsic procedure names.
-/// Note: mlir has Type::dump(ostream) methods but it may add "!" that is not
-/// suitable for function names.
-static std::string typeToString(mlir::Type t) {
-  if (auto refT{t.dyn_cast<fir::ReferenceType>()})
-    return "ref_" + typeToString(refT.getEleTy());
-  if (auto i{t.dyn_cast<mlir::IntegerType>()}) {
-    return "i" + std::to_string(i.getWidth());
-  }
-  if (auto cplx{t.dyn_cast<fir::ComplexType>()}) {
-    return "z" + std::to_string(cplx.getFKind());
-  }
-  if (auto real{t.dyn_cast<fir::RealType>()}) {
-    return "r" + std::to_string(real.getFKind());
-  }
-  if (auto f{t.dyn_cast<mlir::FloatType>()}) {
-    return "f" + std::to_string(f.getWidth());
-  }
-  if (auto logical{t.dyn_cast<fir::LogicalType>()}) {
-    return "l" + std::to_string(logical.getFKind());
-  }
-  if (auto character{t.dyn_cast<fir::CharacterType>()}) {
-    return "c" + std::to_string(character.getFKind());
-  }
-  if (auto boxCharacter{t.dyn_cast<fir::BoxCharType>()}) {
-    return "bc" + std::to_string(boxCharacter.getEleTy().getFKind());
-  }
-  llvm_unreachable("no mangling for type");
-}
-
-std::string fir::mangleIntrinsicProcedure(llvm::StringRef intrinsic,
-                                          mlir::FunctionType funTy) {
-  std::string name = "fir.";
-  name.append(intrinsic.str()).append(".");
-  assert(funTy.getNumResults() == 1 && "only function mangling supported");
-  name.append(typeToString(funTy.getResult(0)));
-  unsigned e = funTy.getNumInputs();
-  for (decltype(e) i = 0; i < e; ++i)
-    name.append(".").append(typeToString(funTy.getInput(i)));
-  return name;
 }
 
 std::string Fortran::lower::mangle::globalNamelistDescriptorName(

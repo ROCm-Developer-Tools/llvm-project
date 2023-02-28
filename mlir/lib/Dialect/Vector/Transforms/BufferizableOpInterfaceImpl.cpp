@@ -42,7 +42,7 @@ struct TransferReadOpInterface
     return false;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     return {};
   }
@@ -111,7 +111,7 @@ struct GatherOpInterface
     return false;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     return {};
   }
@@ -137,9 +137,9 @@ struct GatherOpInterface
 struct MaskOpInterface
     : public BufferizableOpInterface::ExternalModel<MaskOpInterface,
                                                     vector::MaskOp> {
-  SmallVector<OpOperand *>
-  getAliasingOpOperand(Operation *op, OpResult opResult,
-                       const AnalysisState &state) const {
+  AliasingOpOperandList
+  getAliasingOpOperands(Operation *op, OpResult opResult,
+                        const AnalysisState &state) const {
     // MaskOps do not have tensor OpOperands. The yielded values are the result
     // of the wrapped op.
     auto maskOp = cast<vector::MaskOp>(op);
@@ -147,7 +147,7 @@ struct MaskOpInterface
                                      llvm::find(op->getOpResults(), opResult));
     auto yieldOp =
         cast<vector::YieldOp>(maskOp.getMaskRegion().front().getTerminator());
-    return {&yieldOp->getOpOperand(resultNum)};
+    return {{&yieldOp->getOpOperand(resultNum), BufferRelation::Equivalent}};
   }
 
   LogicalResult resolveConflicts(Operation *op, RewriterBase &rewriter,
@@ -217,11 +217,6 @@ struct MaskOpInterface
     replaceOpWithBufferizedValues(rewriter, maskOp, newReturnValues);
     return success();
   }
-
-  BufferRelation bufferRelation(Operation *op, OpResult opResult,
-                                const AnalysisState &state) const {
-    return BufferRelation::Equivalent;
-  }
 };
 
 /// Bufferization of vector.yield. Replaced with a new vector.yield that
@@ -239,9 +234,10 @@ struct YieldOpInterface
     return false;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
-    return {op->getParentOp()->getResult(opOperand.getOperandNumber())};
+    return {{op->getParentOp()->getResult(opOperand.getOperandNumber()),
+             BufferRelation::Equivalent}};
   }
 
   bool mustBufferizeInPlace(Operation *op, OpOperand &opOperand,

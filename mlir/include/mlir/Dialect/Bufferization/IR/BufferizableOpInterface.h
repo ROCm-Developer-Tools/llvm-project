@@ -25,6 +25,74 @@ namespace bufferization {
 class AnalysisState;
 class BufferizableOpInterface;
 
+/// Specifies a fine-grain relationship between buffers to enable more analysis.
+enum class BufferRelation {
+  Unknown,
+  // TODO: ResultContainsOperand,
+  // TODO: OperandContainsResult,
+  Equivalent
+};
+
+/// A maybe aliasing OpOperand. If `isDefinite` is `true`, the OpOperand is
+/// guaranteed to alias at runtime.
+struct AliasingOpOperand {
+  AliasingOpOperand(OpOperand *opOperand, BufferRelation relation,
+                    bool isDefinite = true)
+      : opOperand(opOperand), relation(relation), isDefinite(isDefinite) {}
+
+  OpOperand *opOperand;
+  BufferRelation relation;
+  bool isDefinite;
+};
+
+/// A maybe aliasing OpResult. If `isDefinite` is `true`, the OpResult is
+/// guaranteed to alias at runtime.
+struct AliasingOpResult {
+  AliasingOpResult(OpResult opResult, BufferRelation relation,
+                   bool isDefinite = true)
+      : opResult(opResult), relation(relation), isDefinite(isDefinite) {}
+
+  OpResult opResult;
+  BufferRelation relation;
+  bool isDefinite;
+};
+
+template <typename T> class AliasList {
+public:
+  /// Create an empty list of aliases.
+  AliasList<T>() = default;
+
+  /// Create a list of aliases.
+  AliasList<T>(std::initializer_list<T> elems) {
+    for (T alias : elems)
+      addAlias(alias);
+  }
+
+  /// Create a list of aliases.
+  AliasList<T>(SmallVector<T> &&aliases) : aliases(std::move(aliases)) {}
+
+  ArrayRef<T> getAliases() const { return aliases; }
+
+  size_t getNumAliases() const { return aliases.size(); }
+
+  void addAlias(T alias) { aliases.push_back(alias); }
+
+  auto begin() const { return aliases.begin(); }
+  auto end() const { return aliases.end(); }
+
+private:
+  /// The list of aliases.
+  SmallVector<T> aliases;
+};
+
+/// A list of possible aliasing OpOperands. This list models the runtime
+/// aliasing relationship for an OpResult.
+using AliasingOpOperandList = AliasList<AliasingOpOperand>;
+
+/// A list of possible aliasing OpResults. This list models the runtime
+/// aliasing relationship for an OpOperand.
+using AliasingOpResultList = AliasList<AliasingOpResult>;
+
 class OpFilter {
 public:
   /// An op filter entry. Filters can be used to specify which ops should be
@@ -300,14 +368,6 @@ struct BufferizationOptions {
   SmallVector<AnalysisStateInitFn> stateInitializers;
 };
 
-/// Specify fine-grain relationship between buffers to enable more analysis.
-enum class BufferRelation {
-  Unknown,
-  // TODO: ResultContainsOperand,
-  // TODO: OperandContainsResult,
-  Equivalent
-};
-
 /// Return `true` if the given value is a BlockArgument of a func::FuncOp.
 bool isFunctionArgument(Value value);
 
@@ -315,15 +375,15 @@ bool isFunctionArgument(Value value);
 /// tensor values.
 class AnalysisState {
 public:
-  /// Determine which OpOperand* will alias with `opResult` if the op is
+  /// Determine which OpOperand* will alias with `result` if the op is
   /// bufferized in place. Return all tensor OpOperand* if the op is not
   /// bufferizable.
-  SmallVector<OpOperand *> getAliasingOpOperand(OpResult opResult) const;
+  AliasingOpOperandList getAliasingOpOperands(OpResult result) const;
 
   /// Determine which OpResult will alias with `opOperand` if the op is
   /// bufferized in place. Return all tensor OpResults if the op is not
   /// bufferizable.
-  SmallVector<OpResult> getAliasingOpResult(OpOperand &opOperand) const;
+  AliasingOpResultList getAliasingOpResults(OpOperand &opOperand) const;
 
   /// Return true if `opOperand` bufferizes to a memory read. Return `true` if
   /// the op is not bufferizable.
@@ -404,14 +464,16 @@ public:
   /// in the operands) because their defining ops do not define the contents of
   /// the tensor.
   ///
+  /// Example:
+  /// %a = tensor.empty() : tensor<10xf32>
+  /// %b = arith.constant ... : tensor<10xf32>
+  /// %r = arith.select %cond, %a, %b : tensor<10xf32>
+  /// findDefinitions(%r) = {%b}. %a is excluded because it does not define the
+  /// contents of the tensor.
+  ///
   /// Note: OpResults of unknown ops are handled conservatively and assumed to
   /// be definitions.
-  ///
-  /// Note: When reaching an end of the reverse SSA use-def chain, that value
-  /// is included regardless of whether it is a definition or not unless
-  /// `alwaysIncludeLeaves` is unset.
-  SetVector<Value> findDefinitions(Value value,
-                                   bool alwaysIncludeLeaves = true) const;
+  SetVector<Value> findDefinitions(Value value) const;
 
   /// Return `true` if the given OpResult has been decided to bufferize inplace.
   virtual bool isInPlace(OpOperand &opOperand) const;
@@ -565,7 +627,18 @@ Region *getEnclosingRepetitiveRegion(Value value,
 Region *getEnclosingRepetitiveRegion(Block *block,
                                      const BufferizationOptions &options);
 
+/// Assuming that the given region is repetitive, find the next enclosing
+/// repetitive region.
+Region *getNextEnclosingRepetitiveRegion(Region *region,
+                                         const BufferizationOptions &options);
+
 namespace detail {
+/// This is the default implementation of
+/// BufferizableOpInterface::getAliasingOpOperands. Should not be called from
+/// other places.
+AliasingOpOperandList defaultGetAliasingOpOperands(OpResult opResult,
+                                                   const AnalysisState &state);
+
 /// This is the default implementation of
 /// BufferizableOpInterface::getBufferType. Should not be called from other
 /// places.
@@ -585,13 +658,13 @@ bool defaultResultBufferizesToMemoryWrite(OpResult opResult,
 bool defaultIsRepetitiveRegion(BufferizableOpInterface bufferizableOp,
                                unsigned index);
 
-/// This is the default implementation of getAliasingOpOperand in case the
+/// This is the default implementation of getAliasingOpOperands in case the
 /// defining op does not implement the BufferizableOpInterface.
-SmallVector<OpOperand *> unknownGetAliasingOpOperand(OpResult opResult);
+AliasingOpOperandList unknownGetAliasingOpOperands(OpResult opResult);
 
-/// This is the default implementation of getAliasingOpResult in case the
-/// defining op does not implement the BufferizableOpInterface.
-SmallVector<OpResult> unknownGetAliasingOpResult(OpOperand &opOperand);
+/// This is the default implementation of getAliasingOpResults in case the
+/// owner op does not implement the BufferizableOpInterface.
+AliasingOpResultList unknownGetAliasingOpResults(OpOperand &opOperand);
 } // namespace detail
 
 } // namespace bufferization

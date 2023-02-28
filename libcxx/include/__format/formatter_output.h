@@ -39,7 +39,7 @@
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#if _LIBCPP_STD_VER > 17
+#if _LIBCPP_STD_VER >= 20
 
 namespace __formatter {
 
@@ -384,7 +384,7 @@ _LIBCPP_HIDE_FROM_ABI auto __write_string(
   return __formatter::__write(__str.begin(), __str.end(), _VSTD::move(__out_it), __specs, __size);
 }
 
-#  if _LIBCPP_STD_VER > 20
+#  if _LIBCPP_STD_VER >= 23
 
 struct __nul_terminator {};
 
@@ -503,7 +503,7 @@ __escape(basic_string<_CharT>& __str, basic_string_view<_CharT> __values, __esca
   __unicode::__code_point_view<_CharT> __view{__values.begin(), __values.end()};
 
   while (!__view.__at_end()) {
-    const _CharT* __first                               = __view.__position();
+    auto __first                                        = __view.__position();
     typename __unicode::__consume_p2286_result __result = __view.__consume_p2286();
     if (__result.__ill_formed_size == 0) {
       if (!__formatter::__is_escaped_sequence_written(__str, __result.__value, __mark))
@@ -561,11 +561,11 @@ __format_escaped_string(basic_string_view<_CharT> __values,
   return __formatter::__write_string(basic_string_view{__str}, _VSTD::move(__out_it), __specs);
 }
 
-#  endif // _LIBCPP_STD_VER > 20
+#  endif // _LIBCPP_STD_VER >= 23
 
 } // namespace __formatter
 
-#endif //_LIBCPP_STD_VER > 17
+#endif //_LIBCPP_STD_VER >= 20
 
 _LIBCPP_END_NAMESPACE_STD
 
