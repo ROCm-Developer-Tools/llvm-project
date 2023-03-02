@@ -2188,7 +2188,11 @@ void Fortran::lower::genOpenMPDeclarativeConstruct(
           },
           [&](const Fortran::parser::OpenMPRequiresConstruct
                   &requiresConstruct) {
-            TODO(converter.getCurrentLocation(), "OpenMPRequiresConstruct");
+            // Requires directives are analyzed before any statements are
+            // lowered. Then, the result of combining the set of clauses of all
+            // requires directives present in the compilation unit is used to
+            // emit code, so no code is emitted independently for each
+            // "requires" instance.
           },
           [&](const Fortran::parser::OpenMPThreadprivate &threadprivate) {
             // The directive is lowered when instantiating the variable to
@@ -2393,4 +2397,121 @@ void Fortran::lower::removeStoreOp(mlir::Operation *reductionOp,
       }
     }
   }
+}
+
+mlir::omp::ClauseRequires Fortran::lower::getOpenMPRequiresFlags(
+    Fortran::lower::AbstractConverter &converter,
+    const Fortran::parser::OmpClauseList &clauseList) {
+  mlir::omp::ClauseRequires flags = mlir::omp::ClauseRequires::undefined;
+
+  for (const auto &clause : clauseList.v) {
+    if (const auto &atomicClause =
+            std::get_if<Fortran::parser::OmpClause::AtomicDefaultMemOrder>(
+                &clause.u)) {
+      switch (atomicClause->v.v) {
+      case Fortran::parser::OmpAtomicDefaultMemOrderClause::Type::SeqCst:
+        flags =
+            flags | mlir::omp::ClauseRequires::atomic_default_mem_order_seqcst;
+        break;
+      case Fortran::parser::OmpAtomicDefaultMemOrderClause::Type::AcqRel:
+        flags =
+            flags | mlir::omp::ClauseRequires::atomic_default_mem_order_acqrel;
+        break;
+      case Fortran::parser::OmpAtomicDefaultMemOrderClause::Type::Relaxed:
+        flags =
+            flags | mlir::omp::ClauseRequires::atomic_default_mem_order_relaxed;
+        break;
+      }
+    } else if (std::get_if<Fortran::parser::OmpClause::DynamicAllocators>(
+                   &clause.u)) {
+      flags = flags | mlir::omp::ClauseRequires::dynamic_allocators;
+    } else if (std::get_if<Fortran::parser::OmpClause::ReverseOffload>(
+                   &clause.u)) {
+      flags = flags | mlir::omp::ClauseRequires::reverse_offload;
+    } else if (std::get_if<Fortran::parser::OmpClause::UnifiedAddress>(
+                   &clause.u)) {
+      flags = flags | mlir::omp::ClauseRequires::unified_address;
+    } else if (std::get_if<Fortran::parser::OmpClause::UnifiedSharedMemory>(
+                   &clause.u)) {
+      flags = flags | mlir::omp::ClauseRequires::unified_shared_memory;
+    }
+  }
+
+  return flags == mlir::omp::ClauseRequires::undefined
+             ? mlir::omp::ClauseRequires::none
+             : flags;
+}
+
+void Fortran::lower::genOpenMPRequires(
+    Fortran::lower::AbstractConverter &converter, omp::ClauseRequires flags) {
+  auto *ctx = &converter.getMLIRContext();
+  auto mod = converter.getModuleOp();
+
+  std::optional<omp::ClauseMemoryOrderKind> memOrderKind;
+  if (bitEnumContainsAny(
+          flags, omp::ClauseRequires::atomic_default_mem_order_seqcst)) {
+    memOrderKind = omp::ClauseMemoryOrderKind::Seq_cst;
+  }
+  if (bitEnumContainsAny(
+          flags, omp::ClauseRequires::atomic_default_mem_order_acqrel)) {
+    assert(!memOrderKind.has_value() &&
+           "Multiple atomic_default_mem_order clauses");
+    memOrderKind = omp::ClauseMemoryOrderKind::Acq_rel;
+  }
+  if (bitEnumContainsAny(
+          flags, omp::ClauseRequires::atomic_default_mem_order_relaxed)) {
+    assert(!memOrderKind.has_value() &&
+           "Multiple atomic_default_mem_order clauses");
+    memOrderKind = omp::ClauseMemoryOrderKind::Relaxed;
+  }
+
+  // Store flags as module attributes
+  if (memOrderKind.has_value()) {
+    mod->setAttr(
+        omp::OpenMPDialect::getAtomicDefaultMemOrderAttrName(),
+        omp::ClauseMemoryOrderKindAttr::get(ctx, memOrderKind.value()));
+  }
+
+  // Pass through as omp.requires only flags that are not related to
+  // atomic_default_mem_order
+  const omp::ClauseRequires memOrderFlags =
+      omp::ClauseRequires::atomic_default_mem_order_seqcst |
+      omp::ClauseRequires::atomic_default_mem_order_acqrel |
+      omp::ClauseRequires::atomic_default_mem_order_relaxed;
+
+  flags = flags & ~memOrderFlags;
+  if (flags == omp::ClauseRequires::undefined)
+    mod->setAttr(
+        omp::OpenMPDialect::getRequiresAttrName(),
+        mlir::omp::ClauseRequiresAttr::get(ctx, omp::ClauseRequires::none));
+  else
+    mod->setAttr(omp::OpenMPDialect::getRequiresAttrName(),
+                 mlir::omp::ClauseRequiresAttr::get(ctx, flags));
+}
+
+bool Fortran::lower::isOpenMPTargetConstruct(
+    const Fortran::parser::OpenMPConstruct &omp) {
+  if (const auto *blockDir =
+          std::get_if<Fortran::parser::OpenMPBlockConstruct>(&omp.u)) {
+    const auto &beginBlockDir{
+        std::get<Fortran::parser::OmpBeginBlockDirective>(blockDir->t)};
+    const auto &beginDir{
+        std::get<Fortran::parser::OmpBlockDirective>(beginBlockDir.t)};
+
+    switch (beginDir.v) {
+    case llvm::omp::Directive::OMPD_target:
+    case llvm::omp::Directive::OMPD_target_parallel:
+    case llvm::omp::Directive::OMPD_target_parallel_do:
+    case llvm::omp::Directive::OMPD_target_parallel_do_simd:
+    case llvm::omp::Directive::OMPD_target_simd:
+    case llvm::omp::Directive::OMPD_target_teams:
+    case llvm::omp::Directive::OMPD_target_teams_distribute:
+    case llvm::omp::Directive::OMPD_target_teams_distribute_simd:
+      return true;
+    default:
+      break;
+    }
+  }
+
+  return false;
 }

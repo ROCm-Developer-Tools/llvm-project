@@ -15,6 +15,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "mlir/Target/LLVMIR/Dialect/OpenMPCommon.h"
 #include "mlir/Target/LLVMIR/ModuleTranslation.h"
 
@@ -24,6 +25,8 @@
 #include "llvm/Frontend/OpenMP/OMPIRBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
+#include <optional>
 
 using namespace mlir;
 
@@ -1031,11 +1034,31 @@ convertOmpSimdLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   return success();
 }
 
+static std::optional<omp::ClauseMemoryOrderKind>
+getAtomicDefaultMemOrder(Operation &opInst) {
+  // Find top-level parent operation, generally a builtin.module
+  Operation *topLevelOp = &opInst;
+  while (Operation *parentOp = topLevelOp->getParentOp())
+    topLevelOp = parentOp;
+
+  // Try to get the omp.atomic_default_mem_order attribute, if present
+  Attribute defaultOrderAttr = topLevelOp->getAttr(
+      omp::OpenMPDialect::getAtomicDefaultMemOrderAttrName());
+
+  if (defaultOrderAttr)
+    return defaultOrderAttr.cast<omp::ClauseMemoryOrderKindAttr>().getValue();
+
+  return std::nullopt;
+}
+
 /// Convert an Atomic Ordering attribute to llvm::AtomicOrdering.
-llvm::AtomicOrdering
-convertAtomicOrdering(std::optional<omp::ClauseMemoryOrderKind> ao) {
+static llvm::AtomicOrdering
+convertAtomicOrdering(std::optional<omp::ClauseMemoryOrderKind> ao,
+                      std::optional<omp::ClauseMemoryOrderKind> defaultAo) {
+  // If not specified, try using the default atomic ordering gathered from a
+  // requires atomic_mem_default_order clause, if present
   if (!ao)
-    return llvm::AtomicOrdering::Monotonic; // Default Memory Ordering
+    ao = defaultAo.value_or(omp::ClauseMemoryOrderKind::Relaxed);
 
   switch (*ao) {
   case omp::ClauseMemoryOrderKind::Seq_cst:
@@ -1056,13 +1079,14 @@ convertAtomicOrdering(std::optional<omp::ClauseMemoryOrderKind> ao) {
 static LogicalResult
 convertOmpAtomicRead(Operation &opInst, llvm::IRBuilderBase &builder,
                      LLVM::ModuleTranslation &moduleTranslation) {
-
   auto readOp = cast<omp::AtomicReadOp>(opInst);
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
 
-  llvm::AtomicOrdering AO = convertAtomicOrdering(readOp.getMemoryOrderVal());
+  auto defaultAO = getAtomicDefaultMemOrder(opInst);
+  llvm::AtomicOrdering AO =
+      convertAtomicOrdering(readOp.getMemoryOrderVal(), defaultAO);
   llvm::Value *x = moduleTranslation.lookupValue(readOp.getX());
   llvm::Value *v = moduleTranslation.lookupValue(readOp.getV());
 
@@ -1083,7 +1107,9 @@ convertOmpAtomicWrite(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-  llvm::AtomicOrdering ao = convertAtomicOrdering(writeOp.getMemoryOrderVal());
+  auto defaultAO = getAtomicDefaultMemOrder(opInst);
+  llvm::AtomicOrdering ao =
+      convertAtomicOrdering(writeOp.getMemoryOrderVal(), defaultAO);
   llvm::Value *expr = moduleTranslation.lookupValue(writeOp.getValue());
   llvm::Value *dest = moduleTranslation.lookupValue(writeOp.getAddress());
   llvm::Type *ty = moduleTranslation.convertType(writeOp.getValue().getType());
@@ -1147,8 +1173,9 @@ convertOmpAtomicUpdate(omp::AtomicUpdateOp &opInst,
                                                       /*isSigned=*/false,
                                                       /*isVolatile=*/false};
 
+  auto defaultAO = getAtomicDefaultMemOrder(*opInst.getOperation());
   llvm::AtomicOrdering atomicOrdering =
-      convertAtomicOrdering(opInst.getMemoryOrderVal());
+      convertAtomicOrdering(opInst.getMemoryOrderVal(), defaultAO);
 
   // Generate update code.
   LogicalResult updateGenStatus = success();
@@ -1236,8 +1263,9 @@ convertOmpAtomicCapture(omp::AtomicCaptureOp atomicCaptureOp,
                                                       /*isSigned=*/false,
                                                       /*isVolatile=*/false};
 
+  auto defaultAO = getAtomicDefaultMemOrder(*atomicCaptureOp.getOperation());
   llvm::AtomicOrdering atomicOrdering =
-      convertAtomicOrdering(atomicCaptureOp.getMemoryOrderVal());
+      convertAtomicOrdering(atomicCaptureOp.getMemoryOrderVal(), defaultAO);
 
   LogicalResult updateGenStatus = success();
   auto updateFn = [&](llvm::Value *atomicx,
@@ -1542,6 +1570,32 @@ convertOmpTargetData(Operation *op, llvm::IRBuilderBase &builder,
   return bodyGenStatus;
 }
 
+/// Converts the module-level set of OpenMP requires clauses into LLVM IR using
+/// OpenMPIRBuilder.
+static LogicalResult
+convertRequires(Operation &op, omp::ClauseRequiresAttr requiresAttr,
+                LLVM::ModuleTranslation &moduleTranslation) {
+  auto *ompBuilder = moduleTranslation.getOpenMPBuilder();
+
+  // requiresAttr should only contain the flags expected by the runtime at this
+  // point (atomic default memory order removed), so just pass them unmodified
+  // here
+  assert(!omp::bitEnumContainsAny(
+             requiresAttr.getValue(),
+             omp::ClauseRequires::atomic_default_mem_order_acqrel |
+                 omp::ClauseRequires::atomic_default_mem_order_seqcst |
+                 omp::ClauseRequires::atomic_default_mem_order_relaxed) &&
+         "Unexpected requires flags found!");
+
+  auto *regFn = ompBuilder->createRegisterRequires(
+      ".omp_offloading.requires_reg",
+      static_cast<int64_t>(requiresAttr.getValue()));
+
+  // Add registration function as global constructor
+  llvm::appendToGlobalCtors(ompBuilder->M, regFn, /* Priority = */ 0);
+  return success();
+}
+
 namespace {
 
 /// Implementation of the dialect interface that converts operations belonging
@@ -1556,6 +1610,12 @@ public:
   LogicalResult
   convertOperation(Operation *op, llvm::IRBuilderBase &builder,
                    LLVM::ModuleTranslation &moduleTranslation) const final;
+
+  /// Processes omp dialect attributes attached to operations from a different
+  /// dialect.
+  LogicalResult
+  amendOperation(Operation *op, NamedAttribute attribute,
+                 LLVM::ModuleTranslation &moduleTranslation) const final;
 };
 
 } // namespace
@@ -1663,6 +1723,22 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
         return inst->emitError("unsupported OpenMP operation: ")
                << inst->getName();
       });
+}
+
+LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
+    Operation *op, NamedAttribute attribute,
+    LLVM::ModuleTranslation &moduleTranslation) const {
+  auto attrName = attribute.getName().strref();
+
+  if (attrName == omp::OpenMPDialect::getRequiresAttrName()) {
+    auto requiresAttr = attribute.getValue().cast<omp::ClauseRequiresAttr>();
+    return convertRequires(*op, requiresAttr, moduleTranslation);
+  }
+
+  // The omp.atomic_default_mem_order attribute does not need lowering here, as
+  // it is read directly during OpenMP atomic ops lowering
+
+  return success();
 }
 
 void mlir::registerOpenMPDialectTranslation(DialectRegistry &registry) {

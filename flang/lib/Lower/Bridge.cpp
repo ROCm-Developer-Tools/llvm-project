@@ -51,6 +51,7 @@
 #include "flang/Semantics/runtime-type-info.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Transforms/RegionUtils.h"
@@ -265,7 +266,8 @@ class FirConverter : public Fortran::lower::AbstractConverter {
 public:
   explicit FirConverter(Fortran::lower::LoweringBridge &bridge)
       : Fortran::lower::AbstractConverter(bridge.getLoweringOptions()),
-        bridge{bridge}, foldingContext{bridge.createFoldingContext()} {}
+        bridge{bridge}, foldingContext{bridge.createFoldingContext()},
+        ompRequiresFlags{mlir::omp::ClauseRequires::undefined} {}
   virtual ~FirConverter() = default;
 
   /// Convert the PFT to FIR.
@@ -292,12 +294,16 @@ public:
                        if (f.isMainProgram())
                          hasMainProgram = true;
                        declareFunction(f);
+                       analyzeOpenMPDeclarative(f.evaluationList);
                      },
                      [&](Fortran::lower::pft::ModuleLikeUnit &m) {
                        lowerModuleDeclScope(m);
+                       analyzeOpenMPDeclarative(m.evaluationList);
                        for (Fortran::lower::pft::FunctionLikeUnit &f :
-                            m.nestedFunctions)
+                            m.nestedFunctions) {
                          declareFunction(f);
+                         analyzeOpenMPDeclarative(f.evaluationList);
+                       }
                      },
                      [&](Fortran::lower::pft::BlockDataUnit &b) {},
                      [&](Fortran::lower::pft::CompilerDirectiveUnit &d) {},
@@ -347,6 +353,12 @@ public:
         fir::runtime::genEnvironmentDefaults(*builder, toLocation(),
                                              bridge.getEnvironmentDefaults());
       });
+
+    // Create the module attributes related to OpenMP requires directives
+    // TODO Only generate if we're not emitting for the device and there is
+    // something to be offloaded in this compilation unit (i.e.
+    // ompTargetRegionFound=true, ompDeclareTargetRegionFound=true...)
+    genOpenMPRequires(*this, ompRequiresFlags);
   }
 
   /// Declare a function.
@@ -1139,6 +1151,66 @@ private:
     assert(!activeConstructStack.empty() && "invalid active construct stack");
     activeConstructStack.back().eval.activeConstruct = false;
     activeConstructStack.pop_back();
+  }
+
+  /// Perform a pass to gather compilation unit-level data from OpenMP
+  /// declarative constructs. This must be done prior to lowering, to ensure
+  /// data is available to the lowering pass.
+  void analyzeOpenMPDeclarative(
+      const Fortran::lower::pft::EvaluationList &evaluationList) {
+    // Populate ompTargetRegionFound and ompDeclareTargetRegionFound during
+    // analysis, so that semantically necessary ordering information between
+    // the requires directive and other OpenMP directives is present.
+    auto analyzeRequires =
+        [&](const Fortran::parser::OpenMPRequiresConstruct &ompReq) {
+          using mlir::omp::ClauseRequires;
+
+          auto flags = Fortran::lower::getOpenMPRequiresFlags(
+              *this, std::get<Fortran::parser::OmpClauseList>(ompReq.t));
+
+          if (bitEnumContainsAny(flags,
+                                 ClauseRequires::reverse_offload |
+                                     ClauseRequires::unified_address |
+                                     ClauseRequires::unified_shared_memory) &&
+              (ompTargetRegionFound || ompDeclareTargetRegionFound))
+            mlir::emitError(toLocation(),
+                            "requires directive specifies a reverse_offload, "
+                            "unified_address or unified_shared_memory "
+                            "requirement lexically after a device construct");
+
+          if (ompRequiresFlags == ClauseRequires::none)
+            ompRequiresFlags = flags;
+          else if (ompRequiresFlags == ClauseRequires::undefined ||
+                   flags != ClauseRequires::none)
+            ompRequiresFlags = ompRequiresFlags | flags;
+        };
+
+    auto analyzeDeclareTarget =
+        [&](const Fortran::parser::OpenMPDeclareTargetConstruct &ompReq) {
+          // Only register that a "declare target" region is found here, until
+          // support for this construct is added.
+          ompDeclareTargetRegionFound = true;
+        };
+
+    for (const Fortran::lower::pft::Evaluation &eval : evaluationList) {
+      if (const auto *ompDecl =
+              eval.getIf<Fortran::parser::OpenMPDeclarativeConstruct>()) {
+        std::visit(
+            Fortran::common::visitors{
+                analyzeRequires,
+                analyzeDeclareTarget,
+                // Add other OpenMP declarative constructs currently skipped
+                [&](const auto &) {},
+            },
+            ompDecl->u);
+      } else if (const auto *ompDecl =
+                     eval.getIf<Fortran::parser::OpenMPConstruct>()) {
+        // Register if a target region is found
+        ompTargetRegionFound =
+            ompTargetRegionFound ||
+            Fortran::lower::isOpenMPTargetConstruct(*ompDecl);
+      }
+    }
   }
 
   //===--------------------------------------------------------------------===//
@@ -4064,6 +4136,12 @@ private:
 
   /// Tuple of host associated variables
   mlir::Value hostAssocTuple;
+
+  /// OpenMP Requires flags
+  mlir::omp::ClauseRequires ompRequiresFlags;
+
+  bool ompTargetRegionFound = false;
+  bool ompDeclareTargetRegionFound = false;
 };
 
 } // namespace

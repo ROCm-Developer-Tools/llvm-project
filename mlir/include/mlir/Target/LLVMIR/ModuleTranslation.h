@@ -274,6 +274,7 @@ private:
   ~ModuleTranslation();
 
   /// Converts individual components.
+  LogicalResult convertModule(Operation &op);
   LogicalResult convertOperation(Operation &op, llvm::IRBuilderBase &builder);
   LogicalResult convertFunctionSignatures();
   LogicalResult convertFunctions();

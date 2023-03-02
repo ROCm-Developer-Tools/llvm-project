@@ -21,10 +21,12 @@
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/MDBuilder.h"
@@ -5106,6 +5108,31 @@ void OpenMPIRBuilder::loadOffloadInfoMetadata(
       break;
     }
   }
+}
+
+Function *OpenMPIRBuilder::createRegisterRequires(StringRef Name,
+                                                  int64_t Flags) {
+  Builder.ClearInsertionPoint();
+
+  // Create registration function prototype
+  auto *RegFnTy = FunctionType::get(Builder.getVoidTy(), {});
+  auto *RegFn = Function::Create(
+      RegFnTy, GlobalVariable::LinkageTypes::InternalLinkage, Name, M);
+  RegFn->setSection(".text.startup");
+  RegFn->addFnAttr(Attribute::NoInline);
+  RegFn->addFnAttr(Attribute::NoUnwind);
+
+  // Create registration function body
+  auto *BB = BasicBlock::Create(M.getContext(), "entry", RegFn);
+  ConstantInt *FlagsVal = ConstantInt::getSigned(Builder.getInt64Ty(), Flags);
+  Function *RTLRegFn = getOrCreateRuntimeFunctionPtr(
+      omp::RuntimeFunction::OMPRTL___tgt_register_requires);
+
+  Builder.SetInsertPoint(BB);
+  Builder.CreateCall(RTLRegFn, {FlagsVal});
+  Builder.CreateRetVoid();
+
+  return RegFn;
 }
 
 bool OffloadEntriesInfoManager::empty() const {

@@ -36,6 +36,13 @@ def OpenMP_Dialect : Dialect {
     // Return the value of the omp.is_device attribute stored in the module if it
     // exists, otherwise return false by default
     static bool getIsDevice(Operation* module);
+
+    // TODO Replace by getters-setters
+    static StringRef getRequiresAttrName() { return "omp.requires"; }
+
+    static StringRef getAtomicDefaultMemOrderAttrName() {
+      return "omp.atomic_default_mem_order";
+    }
   }];
 }
 
@@ -1601,6 +1608,46 @@ def ReductionOp : OpenMP_Op<"reduction"> {
     $operand `,` $accumulator attr-dict `:` type($operand) `,` type($accumulator)
   }];
   let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// 8.2 requires directive
+//===----------------------------------------------------------------------===//
+
+def ClauseRequiresUndefined : I32BitEnumAttrCaseNone<"undefined">;
+def ClauseRequiresNone : I32BitEnumAttrCaseBit<"none", 0>;
+def ClauseRequiresReverseOffload : I32BitEnumAttrCaseBit<"reverse_offload", 1>;
+def ClauseRequiresUnifiedAddress : I32BitEnumAttrCaseBit<"unified_address", 2>;
+def ClauseRequiresUnifiedSharedMemory
+    : I32BitEnumAttrCaseBit<"unified_shared_memory", 3>;
+def ClauseRequiresDynamicAllocators
+    : I32BitEnumAttrCaseBit<"dynamic_allocators", 4>;
+def ClauseRequiresAtomicDefaultMemOrderSeqCst
+    : I32BitEnumAttrCaseBit<"atomic_default_mem_order_seqcst", 5>;
+def ClauseRequiresAtomicDefaultMemOrderAcqRel
+    : I32BitEnumAttrCaseBit<"atomic_default_mem_order_acqrel", 6>;
+def ClauseRequiresAtomicDefaultMemOrderRelaxed
+    : I32BitEnumAttrCaseBit<"atomic_default_mem_order_relaxed", 7>;
+
+def ClauseRequires : I32BitEnumAttr<
+    "ClauseRequires",
+    "requires clause",
+    [
+      ClauseRequiresUndefined,
+      ClauseRequiresNone,
+      ClauseRequiresReverseOffload,
+      ClauseRequiresUnifiedAddress,
+      ClauseRequiresUnifiedSharedMemory,
+      ClauseRequiresDynamicAllocators,
+      ClauseRequiresAtomicDefaultMemOrderSeqCst,
+      ClauseRequiresAtomicDefaultMemOrderAcqRel,
+      ClauseRequiresAtomicDefaultMemOrderRelaxed
+    ]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::omp";
+}
+def ClauseRequiresAttr :
+  EnumAttr<OpenMP_Dialect, ClauseRequires, "clause_requires"> {
 }
 
 #endif // OPENMP_OPS

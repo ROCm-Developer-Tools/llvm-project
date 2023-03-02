@@ -13,12 +13,8 @@
 #ifndef FORTRAN_LOWER_OPENMP_H
 #define FORTRAN_LOWER_OPENMP_H
 
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include <cinttypes>
-
-namespace mlir {
-class Value;
-class Operation;
-} // namespace mlir
 
 namespace fir {
 class FirOpBuilder;
@@ -56,6 +52,14 @@ fir::ConvertOp getConvertFromReductionOp(mlir::Operation *, mlir::Value);
 void updateReduction(mlir::Operation *, fir::FirOpBuilder &, mlir::Value,
                      mlir::Value, fir::ConvertOp * = nullptr);
 void removeStoreOp(mlir::Operation *, mlir::Value);
+
+mlir::omp::ClauseRequires
+getOpenMPRequiresFlags(AbstractConverter &,
+                       const Fortran::parser::OmpClauseList &);
+void genOpenMPRequires(AbstractConverter &, mlir::omp::ClauseRequires);
+
+bool isOpenMPTargetConstruct(const parser::OpenMPConstruct &);
+
 } // namespace lower
 } // namespace Fortran
 

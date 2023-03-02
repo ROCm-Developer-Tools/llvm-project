@@ -1931,6 +1931,18 @@ public:
   /// \param Name Name of the variable.
   GlobalVariable *getOrCreateInternalVariable(Type *Ty, const StringRef &Name,
                                               unsigned AddressSpace = 0);
+
+  /// Create a global function to register OpenMP requires flags into the
+  /// runtime.
+  ///
+  /// This function should be added to the list of constructors for the
+  /// compilation unit in order to be called before other OpenMP runtime
+  /// functions.
+  ///
+  /// \param Name  Name of the created function.
+  /// \param Flags Flags representing the clauses specified to the 'requires'
+  /// directive.
+  Function *createRegisterRequires(StringRef Name, int64_t Flags);
 };
 
 /// Data structure to contain the information needed to uniquely identify

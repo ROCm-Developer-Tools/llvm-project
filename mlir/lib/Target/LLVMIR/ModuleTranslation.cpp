@@ -575,6 +575,12 @@ llvm::Value *mlir::LLVM::detail::createIntrinsicCall(
 
 /// Given a single MLIR operation, create the corresponding LLVM IR operation
 /// using the `builder`.
+LogicalResult ModuleTranslation::convertModule(Operation &op) {
+  return convertDialectAttributes(&op);
+}
+
+/// Given a single MLIR operation, create the corresponding LLVM IR operation
+/// using the `builder`.
 LogicalResult
 ModuleTranslation::convertOperation(Operation &op,
                                     llvm::IRBuilderBase &builder) {
