@@ -2582,6 +2582,12 @@ static bool isADDLike(SDValue V, const SelectionDAG &DAG) {
   return false;
 }
 
+static bool
+areBitwiseNotOfEachother(SDValue Op0, SDValue Op1) {
+  return (isBitwiseNot(Op0) && Op0.getOperand(0) == Op1) ||
+         (isBitwiseNot(Op1) && Op1.getOperand(0) == Op0);
+}
+
 /// Try to fold a node that behaves like an ADD (note that N isn't necessarily
 /// an ISD::ADD here, it could for example be an ISD::OR if we know that there
 /// are no common bits set in the operands).
@@ -2605,6 +2611,10 @@ SDValue DAGCombiner::visitADDLike(SDNode *N) {
   if (DAG.isConstantIntBuildVectorOrConstantInt(N0) &&
       !DAG.isConstantIntBuildVectorOrConstantInt(N1))
     return DAG.getNode(ISD::ADD, DL, VT, N1, N0);
+
+  if (areBitwiseNotOfEachother(N0, N1))
+    return DAG.getConstant(APInt::getAllOnes(VT.getScalarSizeInBits()),
+                           SDLoc(N), VT);
 
   // fold vector ops
   if (VT.isVector()) {
@@ -5073,9 +5083,6 @@ SDValue DAGCombiner::visitABD(SDNode *N) {
   // fold (abd c1, c2)
   if (SDValue C = DAG.FoldConstantArithmetic(Opcode, DL, VT, {N0, N1}))
     return C;
-  // reassociate if possible
-  if (SDValue C = reassociateOps(Opcode, DL, N0, N1, N->getFlags()))
-    return C;
 
   // canonicalize constant to RHS.
   if (DAG.isConstantIntBuildVectorOrConstantInt(N0) &&
@@ -6627,6 +6634,10 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
   if (DAG.isConstantIntBuildVectorOrConstantInt(N0) &&
       !DAG.isConstantIntBuildVectorOrConstantInt(N1))
     return DAG.getNode(ISD::AND, SDLoc(N), VT, N1, N0);
+
+  if (areBitwiseNotOfEachother(N0, N1))
+    return DAG.getConstant(APInt::getZero(VT.getScalarSizeInBits()), SDLoc(N),
+                           VT);
 
   // fold vector ops
   if (VT.isVector()) {
@@ -12859,7 +12870,8 @@ SDValue DAGCombiner::visitSIGN_EXTEND(SDNode *N) {
   if (N0.getOpcode() == ISD::SIGN_EXTEND_INREG) {
     SDValue N00 = N0.getOperand(0);
     EVT ExtVT = cast<VTSDNode>(N0->getOperand(1))->getVT();
-    if (N00.getOpcode() == ISD::TRUNCATE && (!LegalOperations || TLI.isTypeLegal(ExtVT))) {
+    if (N00.getOpcode() == ISD::TRUNCATE &&
+        (!LegalTypes || TLI.isTypeLegal(ExtVT))) {
       SDValue T = DAG.getNode(ISD::TRUNCATE, DL, ExtVT, N00.getOperand(0));
       return DAG.getNode(ISD::SIGN_EXTEND, DL, VT, T);
     }
@@ -17772,8 +17784,8 @@ SDValue DAGCombiner::ForwardStoreValueToDirectLoad(LoadSDNode *LD) {
   //  2. The store is scalable and the load is fixed width. We could
   //     potentially support a limited number of cases here, but there has been
   //     no cost-benefit analysis to prove it's worth it.
-  bool LdStScalable = LDMemType.isScalableVector();
-  if (LdStScalable != STMemType.isScalableVector())
+  bool LdStScalable = LDMemType.isScalableVT();
+  if (LdStScalable != STMemType.isScalableVT())
     return SDValue();
 
   // If we are dealing with scalable vectors on a big endian platform the
@@ -19928,7 +19940,7 @@ bool DAGCombiner::mergeConsecutiveStores(StoreSDNode *St) {
   // store since we know <vscale x 16 x i8> is exactly twice as large as
   // <vscale x 8 x i8>). Until then, bail out for scalable vectors.
   EVT MemVT = St->getMemoryVT();
-  if (MemVT.isScalableVector())
+  if (MemVT.isScalableVT())
     return false;
   if (!MemVT.isSimple() || MemVT.getSizeInBits() * 2 > MaximumLegalStoreInBits)
     return false;
@@ -22391,7 +22403,7 @@ static SDValue combineConcatVectorOfScalars(SDNode *N, SelectionDAG &DAG) {
   EVT OpVT = N->getOperand(0).getValueType();
 
   // If the operands are legal vectors, leave them alone.
-  if (TLI.isTypeLegal(OpVT))
+  if (TLI.isTypeLegal(OpVT) || OpVT.isScalableVector())
     return SDValue();
 
   SDLoc DL(N);
@@ -26810,7 +26822,7 @@ bool DAGCombiner::parallelizeChainedStores(StoreSDNode *St) {
   // BaseIndexOffset assumes that offsets are fixed-size, which
   // is not valid for scalable vectors where the offsets are
   // scaled by `vscale`, so bail out early.
-  if (St->getMemoryVT().isScalableVector())
+  if (St->getMemoryVT().isScalableVT())
     return false;
 
   // Add ST's interval.

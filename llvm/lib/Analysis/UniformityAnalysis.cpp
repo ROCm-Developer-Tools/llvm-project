@@ -32,12 +32,10 @@ bool llvm::GenericUniformityAnalysisImpl<SSAContext>::markDefsDivergent(
 
 template <> void llvm::GenericUniformityAnalysisImpl<SSAContext>::initialize() {
   for (auto &I : instructions(F)) {
-    if (TTI->isSourceOfDivergence(&I)) {
-      assert(!I.isTerminator());
+    if (TTI->isSourceOfDivergence(&I))
       markDivergent(I);
-    } else if (TTI->isAlwaysUniform(&I)) {
+    else if (TTI->isAlwaysUniform(&I))
       addUniformOverride(I);
-    }
   }
   for (auto &Arg : F.args()) {
     if (TTI->isSourceOfDivergence(&Arg)) {
@@ -73,8 +71,7 @@ void llvm::GenericUniformityAnalysisImpl<SSAContext>::pushUsers(
 template <>
 bool llvm::GenericUniformityAnalysisImpl<SSAContext>::usesValueFromCycle(
     const Instruction &I, const Cycle &DefCycle) const {
-  if (isAlwaysUniform(I))
-    return false;
+  assert(!isAlwaysUniform(I));
   for (const Use &U : I.operands()) {
     if (auto *I = dyn_cast<Instruction>(&U)) {
       if (DefCycle.contains(I->getParent()))

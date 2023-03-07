@@ -47,11 +47,28 @@ namespace {
 
 /// Iteration graph sorting.
 enum SortMask {
-  kSparseOnly = 0x0,
-  kIncludeDense = 0x1,
-  kIncludeUndef = 0x2,
-  kIncludeAll = 0x3
+  // The individual mask bits.
+  kIncludeDenseOutput = 0x1, // b001
+  kIncludeDenseInput = 0x2,  // b010
+  kIncludeUndef = 0x4,       // b100
+  // The subsets of mask bits.
+  kIncludeAll = 0x7,   // b111
+  kIncludeDense = 0x3, // b011
+  kSparseOnly = 0x0,   // b000
 };
+
+/// SortMask tests on individual bits.
+inline static bool includeDenseInput(unsigned mask) {
+  return mask & SortMask::kIncludeDenseInput;
+}
+
+inline static bool includeDenseOutput(unsigned mask) {
+  return mask & SortMask::kIncludeDenseOutput;
+}
+
+inline static bool includeUndef(unsigned mask) {
+  return mask & SortMask::kIncludeUndef;
+}
 
 /// A helper class that visits an affine expression and tries to find an
 /// AffineDimExpr to which the corresponding iterator from a GenericOp matches
@@ -433,12 +450,12 @@ static void tryLoosenAffineDenseConstraints(linalg::GenericOp op,
   }
 }
 
-/// Computes a topologically sorted iteration graph for the linalg
-/// operation. Ensures all tensors are visited in natural index order. This
-/// is essential for sparse storage formats since these only support access
-/// along fixed dimensions. Even for dense storage formats, however, the
-/// natural index order yields innermost unit-stride access with better
-/// spatial locality.
+/// Computes a topologically sorted iteration graph for the linalg operation.
+/// Ensures all tensors are visited in natural coordinate order.  This is
+/// essential for sparse storage formats since these only support access
+/// along fixed levels.  Even for dense storage formats, however, the natural
+/// coordinate order yields innermost unit-stride access with better spatial
+/// locality.
 static bool computeIterationGraph(CodegenEnv &env, unsigned mask,
                                   OpOperand *skip = nullptr) {
   // Set up an n x n from/to adjacency matrix of the iteration graph
@@ -453,9 +470,35 @@ static bool computeIterationGraph(CodegenEnv &env, unsigned mask,
     const auto map = env.op().getMatchingIndexingMap(&t);
     const auto enc = getSparseTensorEncoding(t.get().getType());
     assert(map.getNumDims() + getNumCompoundAffineOnSparseDims(env.op()) == n);
-    // Skip dense tensor constraints when not requested.
-    if (!(mask & SortMask::kIncludeDense) && !enc)
+
+    bool isDenseInput = !enc && env.op().isDpsInput(&t);
+    bool isDenseOutput = !enc && !isDenseInput;
+
+    // Skips dense inputs/outputs when not requested.
+    if ((isDenseInput && !includeDenseInput(mask)) ||
+        (isDenseOutput && !includeDenseOutput(mask)))
       continue;
+
+    // Push unrelated loops into sparse iteration space, so these
+    // will be skipped more often.
+    // TODO: Do we really need this?
+    if (includeUndef(mask)) {
+      unsigned tensor = t.getOperandNumber();
+      for (unsigned i = 0; i < n; i++) {
+        if (isCompressedDLT(env.dlt(tensor, i)) ||
+            isSingletonDLT(env.dlt(tensor, i))) {
+          for (unsigned j = 0; j < n; j++)
+            if (isUndefDLT(env.dlt(tensor, j))) {
+              adjM[i][j] = true;
+              inDegree[j]++;
+            }
+        } else {
+          assert(isDenseDLT(env.dlt(tensor, i)) ||
+                 isUndefDLT(env.dlt(tensor, i)));
+        }
+      }
+    }
+
     // Each tensor expression and optional dimension ordering (row-major
     // by default) puts an ordering constraint on the loop indices. For
     // example, the tensor expresion A_ijk forces the ordering i < j < k
@@ -506,24 +549,6 @@ static bool computeIterationGraph(CodegenEnv &env, unsigned mask,
         // filter_loop_d-1 < filter_loop_d depending on whether fa/ta is reset
         // above.
         addAffineOrderings(adjM, inDegree, fa, ta, fldx, tldx);
-      }
-    }
-    // Push unrelated loops into sparse iteration space, so these
-    // will be skipped more often.
-    if (mask & SortMask::kIncludeUndef) {
-      unsigned tensor = t.getOperandNumber();
-      for (unsigned i = 0; i < n; i++) {
-        if (isCompressedDLT(env.dlt(tensor, i)) ||
-            isSingletonDLT(env.dlt(tensor, i))) {
-          for (unsigned j = 0; j < n; j++)
-            if (isUndefDLT(env.dlt(tensor, j))) {
-              adjM[i][j] = true;
-              inDegree[j]++;
-            }
-        } else {
-          assert(isDenseDLT(env.dlt(tensor, i)) ||
-                 isUndefDLT(env.dlt(tensor, i)));
-        }
       }
     }
   }
@@ -580,6 +605,9 @@ static void genBuffers(CodegenEnv &env, OpBuilder &builder) {
 }
 
 /// Generates index for load/store on sparse tensor.
+// FIXME: It's not entirely clear what "index" means here (i.e., is it
+// a "coordinate", or "Ldx", or what).  So the function should be renamed
+// and/or the documentation expanded in order to clarify.
 static Value genIndex(CodegenEnv &env, OpOperand *t) {
   auto map = env.op().getMatchingIndexingMap(t);
   const auto stt = getSparseTensorType(t->get());
@@ -619,7 +647,7 @@ static Value genInsertionLoad(CodegenEnv &env, OpBuilder &builder,
                               OpOperand *t) {
   linalg::GenericOp op = env.op();
   Location loc = op.getLoc();
-  // Direct lexicographic index order, tensor loads as zero.
+  // Direct lexicographic coordinate order, tensor loads as zero.
   if (!env.isExpand()) {
     Type tp = getElementTypeOrSelf(t->get().getType());
     return constantZero(builder, loc, tp);
@@ -635,7 +663,7 @@ static Value genInsertionLoadReduce(CodegenEnv &env, OpBuilder &builder,
   linalg::GenericOp op = env.op();
   Location loc = op.getLoc();
   Value identity = env.getCustomRedId();
-  // Direct lexicographic index order, tensor loads as identity.
+  // Direct lexicographic coordinate order, tensor loads as identity.
   if (!env.isExpand())
     return identity;
   // Load from expanded access pattern if filled, identity otherwise.
@@ -652,9 +680,12 @@ static void genInsertionStore(CodegenEnv &env, OpBuilder &builder, OpOperand *t,
                               Value rhs) {
   linalg::GenericOp op = env.op();
   Location loc = op.getLoc();
-  // Direct insertion in lexicographic index order.
+  // Direct insertion in lexicographic coordinate order.
   if (!env.isExpand()) {
     unsigned rank = op.getRank(t);
+    // FIXME: It's not entirely clear what "indices" means here (i.e.,
+    // are they "coordinates"? and if so, then are they level-coords or
+    // dim-coords?)
     SmallVector<Value> indices;
     for (unsigned i = 0; i < rank; i++) {
       assert(env.emitter().getLoopIV(i));
@@ -797,11 +828,6 @@ inline static Value genInvariantValue(CodegenEnv &env, unsigned exp) {
   return env.exp(exp).val;
 }
 
-/// Generates an index value.
-inline static Value genIndexValue(CodegenEnv &env, unsigned idx) {
-  return env.getLoopIdxValue(idx);
-}
-
 /// Semi-ring branches are simply inlined by the sparse compiler. Prior
 /// analysis has verified that all computations are "local" to the inlined
 /// branch or otherwise invariantly defined outside the loop nest, with the
@@ -811,11 +837,14 @@ static Value relinkBranch(CodegenEnv &env, RewriterBase &rewriter, Block *block,
                           Value e, unsigned ldx) {
   if (Operation *def = e.getDefiningOp()) {
     if (auto indexOp = dyn_cast<linalg::IndexOp>(def))
-      return genIndexValue(env, indexOp.getDim());
+      return env.getLoopIdxValue(indexOp.getDim());
     if (def->getBlock() == block) {
-      for (unsigned i = 0, n = def->getNumOperands(); i < n; i++)
-        def->setOperand(
-            i, relinkBranch(env, rewriter, block, def->getOperand(i), ldx));
+      for (unsigned i = 0, n = def->getNumOperands(); i < n; i++) {
+        rewriter.updateRootInPlace(def, [&]() {
+          def->setOperand(
+              i, relinkBranch(env, rewriter, block, def->getOperand(i), ldx));
+        });
+      }
     }
   }
   return e;
@@ -834,7 +863,7 @@ static Value genExp(CodegenEnv &env, RewriterBase &rewriter, unsigned exp,
   if (env.exp(exp).kind == Kind::kInvariant)
     return genInvariantValue(env, exp);
   if (env.exp(exp).kind == Kind::kIndex)
-    return genIndexValue(env, env.exp(exp).index);
+    return env.getLoopIdxValue(env.exp(exp).index);
 
   if (env.exp(exp).kind == Kind::kReduce)
     env.startCustomReduc(exp); // enter custom
@@ -1532,8 +1561,12 @@ public:
 
     // An const list of all masks that we used for interation graph
     // computation. Must be ordered from more strict to less strict.
-    const auto allMask = {SortMask::kIncludeAll, SortMask::kIncludeUndef,
-                          SortMask::kIncludeDense, SortMask::kSparseOnly};
+    // Ideally (though might not be guaranteed), the eariler a constraint mask
+    // can be satisfied, the faster the generated kernel will be.
+    const auto allMask = {
+        SortMask::kIncludeAll,        SortMask::kIncludeDense,
+        SortMask::kIncludeDenseInput, SortMask::kIncludeDenseOutput,
+        SortMask::kIncludeUndef,      SortMask::kSparseOnly};
     for (auto mask : allMask) {
       if (computeIterationGraph(env, mask)) {
         hasCycle = false;
@@ -1581,12 +1614,13 @@ private:
       auto dstEnc = SparseTensorEncodingAttr::get(
           getContext(), srcEnc.getDimLevelType(),
           permute(env, env.op().getMatchingIndexingMap(t)), // new order
-          srcEnc.getHigherOrdering(), srcEnc.getPointerBitWidth(),
-          srcEnc.getIndexBitWidth());
+          srcEnc.getHigherOrdering(), srcEnc.getPosWidth(),
+          srcEnc.getCrdWidth());
       auto dstTp = RankedTensorType::get(srcTp.getShape(),
                                          srcTp.getElementType(), dstEnc);
       auto convert = rewriter.create<ConvertOp>(tval.getLoc(), dstTp, tval);
-      env.op()->setOperand(tensor, convert);
+      rewriter.updateRootInPlace(
+          env.op(), [&]() { env.op()->setOperand(tensor, convert); });
       rewriter.setInsertionPointAfter(env.op());
       rewriter.create<bufferization::DeallocTensorOp>(tval.getLoc(), convert);
       return success();

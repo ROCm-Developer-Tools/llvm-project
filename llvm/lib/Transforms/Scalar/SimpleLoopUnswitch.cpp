@@ -791,13 +791,23 @@ static bool unswitchTrivialSwitch(Loop &L, SwitchInst &SI, DominatorTree &DT,
   Loop *OuterL = &L;
 
   if (DefaultExitBB) {
-    // Clear out the default destination temporarily to allow accurate
-    // predecessor lists to be examined below.
-    SI.setDefaultDest(nullptr);
     // Check the loop containing this exit.
     Loop *ExitL = LI.getLoopFor(DefaultExitBB);
     if (!ExitL || ExitL->contains(OuterL))
       OuterL = ExitL;
+  }
+
+  if (SE) {
+    if (OuterL)
+      SE->forgetLoop(OuterL);
+    else
+      SE->forgetTopmostLoop(&L);
+  }
+
+  if (DefaultExitBB) {
+    // Clear out the default destination temporarily to allow accurate
+    // predecessor lists to be examined below.
+    SI.setDefaultDest(nullptr);
   }
 
   // Store the exit cases into a separate data structure and remove them from
@@ -820,13 +830,6 @@ static bool unswitchTrivialSwitch(Loop &L, SwitchInst &SI, DominatorTree &DT,
     ExitCases.emplace_back(CaseI->getCaseValue(), CaseI->getCaseSuccessor(), W);
     // Delete the unswitched cases.
     SIW.removeCase(CaseI);
-  }
-
-  if (SE) {
-    if (OuterL)
-      SE->forgetLoop(OuterL);
-    else
-      SE->forgetTopmostLoop(&L);
   }
 
   // Check if after this all of the remaining cases point at the same
@@ -3009,8 +3012,16 @@ injectPendingInvariantConditions(NonTrivialUnswitchCandidate Candidate, Loop &L,
   assert(!L.contains(OutOfLoopSucc) && "Not supported yet!");
   auto &Ctx = BB->getContext();
 
-  assert(LHS->getType() == RHS->getType() && "Type mismatch!");
-  // Do not use builder here: CreateICmp may simplify this intro a constant and
+  IRBuilder<> Builder(Preheader->getTerminator());
+  assert(ICmpInst::isUnsigned(Pred) && "Not supported yet!");
+  if (LHS->getType() != RHS->getType()) {
+    if (LHS->getType()->getIntegerBitWidth() <
+        RHS->getType()->getIntegerBitWidth())
+      LHS = Builder.CreateZExt(LHS, RHS->getType(), LHS->getName() + ".wide");
+    else
+      RHS = Builder.CreateZExt(RHS, LHS->getType(), RHS->getName() + ".wide");
+  }
+  // Do not use builder here: CreateICmp may simplify this into a constant and
   // unswitching will break. Better optimize it away later.
   auto *InjectedCond =
       ICmpInst::Create(Instruction::ICmp, Pred, LHS, RHS, "injected.cond",
@@ -3019,7 +3030,7 @@ injectPendingInvariantConditions(NonTrivialUnswitchCandidate Candidate, Loop &L,
 
   BasicBlock *CheckBlock = BasicBlock::Create(Ctx, BB->getName() + ".check",
                                               BB->getParent(), InLoopSucc);
-  IRBuilder<> Builder(TI);
+  Builder.SetInsertPoint(TI);
   auto *InvariantBr =
       Builder.CreateCondBr(InjectedCond, InLoopSucc, CheckBlock);
 
@@ -3157,7 +3168,11 @@ static bool collectUnswitchCandidatesWithInjections(
       continue;
     if (!shouldTryInjectBasingOnMetadata(cast<BranchInst>(Term), IfTrue))
       continue;
+    // Strip ZEXT for unsigned predicate.
+    // TODO: once signed predicates are supported, also strip SEXT.
     CompareDesc Desc(cast<BranchInst>(Term), RHS, IfTrue);
+    while (auto *Zext = dyn_cast<ZExtInst>(LHS))
+      LHS = Zext->getOperand(0);
     CandidatesULT[LHS].push_back(Desc);
   }
 

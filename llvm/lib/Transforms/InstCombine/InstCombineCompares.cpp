@@ -1382,11 +1382,8 @@ Instruction *InstCombinerImpl::foldICmpWithDominatingICmp(ICmpInst &Cmp) {
   if (TrueBB == FalseBB)
     return nullptr;
 
-  // Try to simplify this compare to T/F based on the dominating condition.
-  std::optional<bool> Imp =
-      isImpliedCondition(DomCond, &Cmp, DL, TrueBB == CmpBB);
-  if (Imp)
-    return replaceInstUsesWith(Cmp, ConstantInt::get(Cmp.getType(), *Imp));
+  // We already checked simple implication in InstSimplify, only handle complex
+  // cases here.
 
   CmpInst::Predicate Pred = Cmp.getPredicate();
   Value *X = Cmp.getOperand(0), *Y = Cmp.getOperand(1);
@@ -3284,6 +3281,11 @@ Instruction *InstCombinerImpl::foldICmpEqIntrinsicWithConstant(
     // bswap(A) == C  ->  A == bswap(C)
     return new ICmpInst(Pred, II->getArgOperand(0),
                         ConstantInt::get(Ty, C.byteSwap()));
+
+  case Intrinsic::bitreverse:
+    // bitreverse(A) == C  ->  A == bitreverse(C)
+    return new ICmpInst(Pred, II->getArgOperand(0),
+                        ConstantInt::get(Ty, C.reverseBits()));
 
   case Intrinsic::ctlz:
   case Intrinsic::cttz: {

@@ -243,19 +243,15 @@ source_filename = "debug-info.ll"
 define void @intrinsic(i64 %0, ptr %1) {
   ; CHECK: llvm.intr.dbg.value #[[$VAR0]] = %[[ARG0]] : i64 loc(#[[LOC0:.+]])
   call void @llvm.dbg.value(metadata i64 %0, metadata !5, metadata !DIExpression()), !dbg !7
-  ; CHECK: llvm.intr.dbg.addr #[[$VAR1]] = %[[ARG1]] : !llvm.ptr loc(#[[LOC1:.+]])
-  call void @llvm.dbg.addr(metadata ptr %1, metadata !6, metadata !DIExpression()), !dbg !8
-  ; CHECK: llvm.intr.dbg.declare #[[$VAR1]] = %[[ARG1]] : !llvm.ptr loc(#[[LOC2:.+]])
+  ; CHECK: llvm.intr.dbg.declare #[[$VAR1]] = %[[ARG1]] : !llvm.ptr loc(#[[LOC1:.+]])
   call void @llvm.dbg.declare(metadata ptr %1, metadata !6, metadata !DIExpression()), !dbg !9
   ret void
 }
 
 ; CHECK: #[[LOC0]] = loc(fused<#[[$SP]]>[{{.*}}])
 ; CHECK: #[[LOC1]] = loc(fused<#[[$SP]]>[{{.*}}])
-; CHECK: #[[LOC2]] = loc(fused<#[[$SP]]>[{{.*}}])
 
 declare void @llvm.dbg.value(metadata, metadata, metadata)
-declare void @llvm.dbg.addr(metadata, metadata, metadata)
 declare void @llvm.dbg.declare(metadata, metadata, metadata)
 
 !llvm.dbg.cu = !{!1}
@@ -410,3 +406,18 @@ declare void @llvm.dbg.value(metadata, metadata, metadata)
 !7 = !DILocalVariable(scope: !8)
 !8 = distinct !DISubprogram(name: "noname_variable", scope: !2, file: !2, unit: !1);
 !9 = !DILocation(line: 1, column: 2, scope: !8)
+
+; // -----
+
+; CHECK: #[[SUBPROGRAM:.*]] = #llvm.di_subprogram<compileUnit = #{{.*}}, scope = #{{.*}}, file = #{{.*}}, subprogramFlags = Definition>
+; CHECK: #[[FUNC_LOC:.*]] = loc(fused<#[[SUBPROGRAM]]>[{{.*}}])
+define void @noname_subprogram(ptr %arg) !dbg !8 {
+  ret void
+}
+
+!llvm.dbg.cu = !{!1}
+!llvm.module.flags = !{!0}
+!0 = !{i32 2, !"Debug Info Version", i32 3}
+!1 = distinct !DICompileUnit(language: DW_LANG_C, file: !2)
+!2 = !DIFile(filename: "debug-info.ll", directory: "/")
+!8 = distinct !DISubprogram(scope: !2, file: !2, spFlags: DISPFlagDefinition, unit: !1);

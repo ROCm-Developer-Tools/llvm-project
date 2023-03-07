@@ -778,6 +778,14 @@ void UnOpInit::Profile(FoldingSetNodeID &ID) const {
 Init *UnOpInit::Fold(Record *CurRec, bool IsFinal) const {
   RecordKeeper &RK = getRecordKeeper();
   switch (getOpcode()) {
+  case TOLOWER:
+    if (StringInit *LHSs = dyn_cast<StringInit>(LHS))
+      return StringInit::get(RK, LHSs->getValue().lower());
+    break;
+  case TOUPPER:
+    if (StringInit *LHSs = dyn_cast<StringInit>(LHS))
+      return StringInit::get(RK, LHSs->getValue().upper());
+    break;
   case CAST:
     if (isa<StringRecTy>(getType())) {
       if (StringInit *LHSs = dyn_cast<StringInit>(LHS))
@@ -927,6 +935,12 @@ std::string UnOpInit::getAsString() const {
   case EMPTY: Result = "!empty"; break;
   case GETDAGOP: Result = "!getdagop"; break;
   case LOG2 : Result = "!logtwo"; break;
+  case TOLOWER:
+    Result = "!tolower";
+    break;
+  case TOUPPER:
+    Result = "!toupper";
+    break;
   }
   return Result + "(" + LHS->getAsString() + ")";
 }
@@ -1772,34 +1786,34 @@ void ExistsOpInit::Profile(FoldingSetNodeID &ID) const {
 
 Init *ExistsOpInit::Fold(Record *CurRec, bool IsFinal) const {
   if (StringInit *Name = dyn_cast<StringInit>(Expr)) {
-    if (!CurRec && !IsFinal)
-      return const_cast<ExistsOpInit *>(this);
-
-    // Self-references are allowed, but their resolution is delayed until
-    // the final resolve to ensure that we get the correct type for them.
-    auto *Anonymous = dyn_cast<AnonymousNameInit>(CurRec->getNameInit());
-    if (Name == CurRec->getNameInit() ||
-        (Anonymous && Name == Anonymous->getNameInit())) {
-      if (!IsFinal)
-        return const_cast<ExistsOpInit *>(this);
-
-      // No doubt that there exists a record, so we should check if types are
-      // compatiable.
-      return IntInit::get(getRecordKeeper(),
-                          CurRec->getType()->typeIsA(CheckType));
-    }
 
     // Look up all defined records to see if we can find one.
     Record *D = CheckType->getRecordKeeper().getDef(Name->getValue());
-    if (!D) {
-      if (IsFinal)
-        return IntInit::get(getRecordKeeper(), 0);
-      return const_cast<ExistsOpInit *>(this);
+    if (D) {
+      // Check if types are compatible.
+      return IntInit::get(getRecordKeeper(),
+                          DefInit::get(D)->getType()->typeIsA(CheckType));
     }
 
-    // Check if types are compatiable.
-    return IntInit::get(getRecordKeeper(),
-                        DefInit::get(D)->getType()->typeIsA(CheckType));
+    if (CurRec) {
+      // Self-references are allowed, but their resolution is delayed until
+      // the final resolve to ensure that we get the correct type for them.
+      auto *Anonymous = dyn_cast<AnonymousNameInit>(CurRec->getNameInit());
+      if (Name == CurRec->getNameInit() ||
+          (Anonymous && Name == Anonymous->getNameInit())) {
+        if (!IsFinal)
+          return const_cast<ExistsOpInit *>(this);
+
+        // No doubt that there exists a record, so we should check if types are
+        // compatible.
+        return IntInit::get(getRecordKeeper(),
+                            CurRec->getType()->typeIsA(CheckType));
+      }
+    }
+
+    if (IsFinal)
+      return IntInit::get(getRecordKeeper(), 0);
+    return const_cast<ExistsOpInit *>(this);
   }
   return const_cast<ExistsOpInit *>(this);
 }
@@ -2259,7 +2273,7 @@ Init *CondOpInit::Fold(Record *CurRec) const {
   }
 
   PrintFatalError(CurRec->getLoc(),
-                  CurRec->getName() +
+                  CurRec->getNameInitAsString() +
                   " does not have any true condition in:" +
                   this->getAsString());
   return nullptr;

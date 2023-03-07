@@ -2812,15 +2812,16 @@ private:
 
 #ifndef NDEBUG
   void dumpTreeCosts(const TreeEntry *E, InstructionCost ReuseShuffleCost,
-                     InstructionCost VecCost,
-                     InstructionCost ScalarCost) const {
-    dbgs() << "SLP: Calculated costs for Tree:\n"; E->dump();
+                     InstructionCost VecCost, InstructionCost ScalarCost,
+                     StringRef Banner) const {
+    dbgs() << "SLP: " << Banner << ":\n";
+    E->dump();
     dbgs() << "SLP: Costs:\n";
     dbgs() << "SLP:     ReuseShuffleCost = " << ReuseShuffleCost << "\n";
     dbgs() << "SLP:     VectorCost = " << VecCost << "\n";
     dbgs() << "SLP:     ScalarCost = " << ScalarCost << "\n";
-    dbgs() << "SLP:     ReuseShuffleCost + VecCost - ScalarCost = " <<
-               ReuseShuffleCost + VecCost - ScalarCost << "\n";
+    dbgs() << "SLP:     ReuseShuffleCost + VecCost - ScalarCost = "
+           << ReuseShuffleCost + VecCost - ScalarCost << "\n";
   }
 #endif
 
@@ -7143,12 +7144,8 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
         }
 
         InstructionCost VecCost = VectorCost(CommonCost);
-        LLVM_DEBUG(
-            dumpTreeCosts(E, CommonCost, VecCost - CommonCost, ScalarCost));
-        // Disable warnings for `this` and `E` are unused. Required for
-        // `dumpTreeCosts`.
-        (void)this;
-        (void)E;
+        LLVM_DEBUG(dumpTreeCosts(E, CommonCost, VecCost - CommonCost,
+                                 ScalarCost, "Calculated costs for Tree"));
         return VecCost - ScalarCost;
       };
   // Calculate cost difference from vectorizing set of GEPs.
@@ -12238,6 +12235,7 @@ class HorizontalReduction {
   static Value *createOp(IRBuilder<> &Builder, RecurKind Kind, Value *LHS,
                          Value *RHS, const Twine &Name, bool UseSelect) {
     unsigned RdxOpcode = RecurrenceDescriptor::getOpcode(Kind);
+    bool IsConstant = isConstant(LHS) && isConstant(RHS);
     switch (Kind) {
     case RecurKind::Or:
       if (UseSelect &&
@@ -12259,29 +12257,37 @@ class HorizontalReduction {
       return Builder.CreateBinOp((Instruction::BinaryOps)RdxOpcode, LHS, RHS,
                                  Name);
     case RecurKind::FMax:
+      if (IsConstant)
+        return ConstantFP::get(LHS->getType(),
+                               maxnum(cast<ConstantFP>(LHS)->getValueAPF(),
+                                      cast<ConstantFP>(RHS)->getValueAPF()));
       return Builder.CreateBinaryIntrinsic(Intrinsic::maxnum, LHS, RHS);
     case RecurKind::FMin:
+      if (IsConstant)
+        return ConstantFP::get(LHS->getType(),
+                               minnum(cast<ConstantFP>(LHS)->getValueAPF(),
+                                      cast<ConstantFP>(RHS)->getValueAPF()));
       return Builder.CreateBinaryIntrinsic(Intrinsic::minnum, LHS, RHS);
     case RecurKind::SMax:
-      if (UseSelect) {
+      if (IsConstant || UseSelect) {
         Value *Cmp = Builder.CreateICmpSGT(LHS, RHS, Name);
         return Builder.CreateSelect(Cmp, LHS, RHS, Name);
       }
       return Builder.CreateBinaryIntrinsic(Intrinsic::smax, LHS, RHS);
     case RecurKind::SMin:
-      if (UseSelect) {
+      if (IsConstant || UseSelect) {
         Value *Cmp = Builder.CreateICmpSLT(LHS, RHS, Name);
         return Builder.CreateSelect(Cmp, LHS, RHS, Name);
       }
       return Builder.CreateBinaryIntrinsic(Intrinsic::smin, LHS, RHS);
     case RecurKind::UMax:
-      if (UseSelect) {
+      if (IsConstant || UseSelect) {
         Value *Cmp = Builder.CreateICmpUGT(LHS, RHS, Name);
         return Builder.CreateSelect(Cmp, LHS, RHS, Name);
       }
       return Builder.CreateBinaryIntrinsic(Intrinsic::umax, LHS, RHS);
     case RecurKind::UMin:
-      if (UseSelect) {
+      if (IsConstant || UseSelect) {
         Value *Cmp = Builder.CreateICmpULT(LHS, RHS, Name);
         return Builder.CreateSelect(Cmp, LHS, RHS, Name);
       }
@@ -13157,7 +13163,7 @@ public:
         for (Value *RdxVal : VL) {
           Value *OrigV = TrackedToOrig.find(RdxVal)->second;
           if (IsSupportedHorRdxIdentityOp) {
-            VectorizedVals.try_emplace(OrigV, SameValuesCounter[OrigV]);
+            VectorizedVals.try_emplace(OrigV, SameValuesCounter[RdxVal]);
             continue;
           }
           ++VectorizedVals.try_emplace(OrigV, 0).first->getSecond();

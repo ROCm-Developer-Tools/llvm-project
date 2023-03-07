@@ -75,8 +75,10 @@ public:
 
   bool shouldExpandReduction(const IntrinsicInst *II) const;
   bool supportsScalableVectors() const { return ST->hasVInstructions(); }
+  bool enableOrderedReductions() const { return true; }
   bool enableScalableVectorization() const { return ST->hasVInstructions(); }
-  TailFoldingStyle getPreferredTailFoldingStyle() const {
+  TailFoldingStyle
+  getPreferredTailFoldingStyle(bool IVUpdateMayOverflow) const {
     return ST->hasVInstructions() ? TailFoldingStyle::Data
                                   : TailFoldingStyle::DataWithoutLaneMask;
   }

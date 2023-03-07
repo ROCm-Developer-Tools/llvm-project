@@ -167,6 +167,8 @@ private:
 
   SDValue performUCharToFloatCombine(SDNode *N,
                                      DAGCombinerInfo &DCI) const;
+  SDValue performFCopySignCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+
   SDValue performSHLPtrCombine(SDNode *N,
                                unsigned AS,
                                EVT MemVT,
@@ -191,7 +193,8 @@ private:
   SDValue performFPMed3ImmCombine(SelectionDAG &DAG, const SDLoc &SL,
                                   SDValue Op0, SDValue Op1) const;
   SDValue performIntMed3ImmCombine(SelectionDAG &DAG, const SDLoc &SL,
-                                   SDValue Op0, SDValue Op1, bool Signed) const;
+                                   SDValue Src, SDValue MinVal, SDValue MaxVal,
+                                   bool Signed) const;
   SDValue performMinMaxCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performFMed3Combine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performCvtPkRTZCombine(SDNode *N, DAGCombinerInfo &DCI) const;

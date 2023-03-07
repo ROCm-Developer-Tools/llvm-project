@@ -1215,7 +1215,7 @@ defm xl_pragma_pack : BoolFOption<"xl-pragma-pack",
 def shared_libsan : Flag<["-"], "shared-libsan">,
   HelpText<"Dynamically link the sanitizer runtime">;
 def static_libsan : Flag<["-"], "static-libsan">,
-  HelpText<"Statically link the sanitizer runtime">;
+  HelpText<"Statically link the sanitizer runtime (Not supported for ASan, TSan or UBSan on darwin)">;
 def : Flag<["-"], "shared-libasan">, Alias<shared_libsan>;
 def fasm : Flag<["-"], "fasm">, Group<f_Group>;
 
@@ -4345,8 +4345,8 @@ def print_supported_cpus : Flag<["-", "--"], "print-supported-cpus">,
   HelpText<"Print supported cpu models for the given target (if target is not specified,"
            " it will print the supported cpus for the default target)">,
   MarshallingInfoFlag<FrontendOpts<"PrintSupportedCPUs">>;
-def mcpu_EQ_QUESTION : Flag<["-"], "mcpu=?">, Alias<print_supported_cpus>;
-def mtune_EQ_QUESTION : Flag<["-"], "mtune=?">, Alias<print_supported_cpus>;
+def : Flag<["-"], "mcpu=help">, Alias<print_supported_cpus>;
+def : Flag<["-"], "mtune=help">, Alias<print_supported_cpus>;
 def time : Flag<["-"], "time">,
   HelpText<"Time individual commands">;
 def traditional_cpp : Flag<["-", "--"], "traditional-cpp">, Flags<[CC1Option]>,
@@ -6530,7 +6530,7 @@ def fno_cuda_host_device_constexpr : Flag<["-"], "fno-cuda-host-device-constexpr
 
 def fopenmp_is_device : Flag<["-"], "fopenmp-is-device">,
   HelpText<"Generate code only for an OpenMP target device.">,
-  Flags<[CC1Option, NoDriverOption]>;
+  Flags<[CC1Option, FC1Option, NoDriverOption]>;
 def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
   HelpText<"Path to the IR file produced by the frontend for the host.">,
   Flags<[CC1Option, NoDriverOption]>;
@@ -7043,6 +7043,16 @@ def _SLASH_Gv : CLFlag<"Gv">,
   HelpText<"Set __vectorcall as a default calling convention">;
 def _SLASH_Gregcall : CLFlag<"Gregcall">,
   HelpText<"Set __regcall as a default calling convention">;
+
+// GNU Driver aliases
+
+def : Separate<["-"], "Xmicrosoft-visualc-tools-root">, Alias<_SLASH_vctoolsdir>;
+def : Separate<["-"], "Xmicrosoft-visualc-tools-version">,
+    Alias<_SLASH_vctoolsversion>;
+def : Separate<["-"], "Xmicrosoft-windows-sdk-root">,
+    Alias<_SLASH_winsdkdir>;
+def : Separate<["-"], "Xmicrosoft-windows-sdk-version">,
+    Alias<_SLASH_winsdkversion>;
 
 // Ignored:
 

@@ -155,11 +155,11 @@ public:
   const std::vector<std::vector<Value>> &getPidxs() const { return pidxs; };
   const std::vector<std::vector<Value>> &getCoord() const { return coord; };
   const std::vector<std::vector<Value>> &getHighs() const { return highs; };
-  const std::vector<std::vector<Value>> &getPtrBuffer() const {
-    return ptrBuffer;
+  const std::vector<std::vector<Value>> &getPosBuffer() const {
+    return posBuffer;
   };
-  const std::vector<std::vector<Value>> &getIdxBuffer() const {
-    return idxBuffer;
+  const std::vector<std::vector<Value>> &getCrdBuffer() const {
+    return crdBuffer;
   };
   const std::vector<Value> &getValBuffer() const { return valBuffer; };
 
@@ -189,6 +189,13 @@ private:
   /// Linearizes address for dense dimension (i.e., p = (i * d0) + j).
   Value genAddress(OpBuilder &builder, Location loc, size_t tid, size_t dim,
                    Value iv);
+
+  /// Generates instructions to compute the coordinate of tensors[tid][lvl]
+  /// under the current loop context.  The final argument is the
+  /// collapsed-output level, whereas this function handles converting
+  /// that to the uncollapsed-input level
+  Value genSparseCrd(OpBuilder &builder, Location loc, size_t tid,
+                     size_t dstLvl);
 
   bool isOutputTensor(size_t tid) {
     return hasOutput && tid == tensors.size() - 1;
@@ -253,11 +260,13 @@ private:
   std::vector<std::vector<DimLevelType>> dimTypes;
   /// Sparse iteration information (by tensor and dim). These arrays
   /// are updated to remain current within the current loop.
+  // TODO: we may want to rename "pidx(s)" to `posCursor(s)` or similar.
   std::vector<std::vector<Value>> pidxs;
   std::vector<std::vector<Value>> coord;
   std::vector<std::vector<Value>> highs;
-  std::vector<std::vector<Value>> ptrBuffer; // to_pointers
-  std::vector<std::vector<Value>> idxBuffer; // to_indices
+  std::vector<std::vector<Value>> lvlSizes;
+  std::vector<std::vector<Value>> posBuffer; // to_positions
+  std::vector<std::vector<Value>> crdBuffer; // to_coordinates
   std::vector<Value> valBuffer;              // to_value
 
   /// Whether the sparse input is a slice.
@@ -275,6 +284,28 @@ private:
   /// TODO: We should probably use a callback function here to make it more
   /// general.
   std::vector<unsigned> sparsiferLoopLvlMap;
+
+  //
+  // View based reshape related-fields and methods
+  //
+
+  /// Collapse Reassociations related to a specific tensor
+  // TODO: support expand.
+  std::vector<ArrayAttr> collapseReassoc;
+
+  /// Get the collapse reassociation for tensors[tid] on l. For unreshaped
+  /// operands, the reassociation is simply an identity transformation.
+  SmallVector<int64_t, 2> getCollapseReassociation(unsigned tid, unsigned l) {
+    // Returns for SmallVector<int64_t, 2> just like `ReassociaionIndices`
+    if (auto reass = collapseReassoc[tid]) {
+      auto attr = reass[l];
+      return llvm::to_vector<2>(
+          llvm::map_range(attr.cast<ArrayAttr>(), [&](Attribute indexAttr) {
+            return indexAttr.cast<IntegerAttr>().getInt();
+          }));
+    }
+    return {l};
+  }
 
   /// TODO: not yet used, it should track the current level for each tensor
   /// to help eliminate `dim` paramters from above APIs.

@@ -2444,6 +2444,18 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                                    Intrinsic::round,
                                    Intrinsic::experimental_constrained_round));
 
+    case Builtin::BIroundeven:
+    case Builtin::BIroundevenf:
+    case Builtin::BIroundevenl:
+    case Builtin::BI__builtin_roundeven:
+    case Builtin::BI__builtin_roundevenf:
+    case Builtin::BI__builtin_roundevenf16:
+    case Builtin::BI__builtin_roundevenl:
+    case Builtin::BI__builtin_roundevenf128:
+      return RValue::get(emitUnaryMaybeConstrainedFPBuiltin(*this, E,
+                                   Intrinsic::roundeven,
+                                   Intrinsic::experimental_constrained_roundeven));
+                                   
     case Builtin::BIsin:
     case Builtin::BIsinf:
     case Builtin::BIsinl:
@@ -18228,7 +18240,9 @@ CodeGenFunction::EmitNVPTXBuiltinExpr(unsigned BuiltinID, const CallExpr *E) {
     // elements, its alignment is set to number of elements times the alignment
     // of its member: n*alignof(t)."
     return MakeLdg(Intrinsic::nvvm_ldg_global_i);
+  case NVPTX::BI__nvvm_ldg_h:
   case NVPTX::BI__nvvm_ldg_f:
+  case NVPTX::BI__nvvm_ldg_h2:
   case NVPTX::BI__nvvm_ldg_f2:
   case NVPTX::BI__nvvm_ldg_f4:
   case NVPTX::BI__nvvm_ldg_d:

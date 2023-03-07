@@ -6,15 +6,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/ilist.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/ilist.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <optional>
+#include <type_traits>
+#include <vector>
 
 using namespace llvm;
+using testing::ElementsAre;
 
 namespace {
 
@@ -430,6 +434,108 @@ TEST(ZipIteratorTest, ZipEqualBasic) {
   EXPECT_EQ(iters, 6u);
 }
 
+template <typename T>
+constexpr bool IsConstRef =
+    std::is_reference_v<T> && std::is_const_v<std::remove_reference_t<T>>;
+
+template <typename T>
+constexpr bool IsBoolConstRef =
+    std::is_same_v<llvm::remove_cvref_t<T>, std::vector<bool>::const_reference>;
+
+/// Returns a `const` copy of the passed value. The `const` on the returned
+/// value is intentional here so that `MakeConst` can be used in range-for
+/// loops.
+template <typename T> const T MakeConst(T &&value) {
+  return std::forward<T>(value);
+}
+
+TEST(ZipIteratorTest, ZipEqualConstCorrectness) {
+  const std::vector<unsigned> c_first = {3, 1, 4};
+  std::vector<unsigned> first = c_first;
+  const SmallVector<bool> c_second = {1, 1, 0};
+  SmallVector<bool> second = c_second;
+
+  for (auto [a, b, c, d] : zip_equal(c_first, first, c_second, second)) {
+    b = 0;
+    d = true;
+    static_assert(IsConstRef<decltype(a)>);
+    static_assert(!IsConstRef<decltype(b)>);
+    static_assert(IsConstRef<decltype(c)>);
+    static_assert(!IsConstRef<decltype(d)>);
+  }
+
+  EXPECT_THAT(first, ElementsAre(0, 0, 0));
+  EXPECT_THAT(second, ElementsAre(true, true, true));
+
+  std::vector<bool> nemesis = {true, false, true};
+  const std::vector<bool> c_nemesis = nemesis;
+
+  for (auto &&[a, b, c, d] : zip_equal(first, c_first, nemesis, c_nemesis)) {
+    a = 2;
+    c = true;
+    static_assert(!IsConstRef<decltype(a)>);
+    static_assert(IsConstRef<decltype(b)>);
+    static_assert(!IsBoolConstRef<decltype(c)>);
+    static_assert(IsBoolConstRef<decltype(d)>);
+  }
+
+  EXPECT_THAT(first, ElementsAre(2, 2, 2));
+  EXPECT_THAT(nemesis, ElementsAre(true, true, true));
+
+  unsigned iters = 0;
+  for (const auto &[a, b, c, d] :
+       zip_equal(first, c_first, nemesis, c_nemesis)) {
+    static_assert(!IsConstRef<decltype(a)>);
+    static_assert(IsConstRef<decltype(b)>);
+    static_assert(!IsBoolConstRef<decltype(c)>);
+    static_assert(IsBoolConstRef<decltype(d)>);
+    ++iters;
+  }
+  EXPECT_EQ(iters, 3u);
+  iters = 0;
+
+  for (const auto &[a, b, c, d] :
+       MakeConst(zip_equal(first, c_first, nemesis, c_nemesis))) {
+    static_assert(!IsConstRef<decltype(a)>);
+    static_assert(IsConstRef<decltype(b)>);
+    static_assert(!IsBoolConstRef<decltype(c)>);
+    static_assert(IsBoolConstRef<decltype(d)>);
+    ++iters;
+  }
+  EXPECT_EQ(iters, 3u);
+}
+
+TEST(ZipIteratorTest, ZipEqualTemporaries) {
+  unsigned iters = 0;
+
+  // These temporary ranges get moved into the `tuple<...> storage;` inside
+  // `zippy`. From then on, we can use references obtained from this storage to
+  // access them. This does not rely on any lifetime extensions on the
+  // temporaries passed to `zip_equal`.
+  for (auto [a, b, c] : zip_equal(SmallVector<int>{1, 2, 3}, std::string("abc"),
+                                  std::vector<bool>{true, false, true})) {
+    a = 3;
+    b = 'c';
+    c = false;
+    static_assert(!IsConstRef<decltype(a)>);
+    static_assert(!IsConstRef<decltype(b)>);
+    static_assert(!IsBoolConstRef<decltype(c)>);
+    ++iters;
+  }
+  EXPECT_EQ(iters, 3u);
+  iters = 0;
+
+  for (auto [a, b, c] :
+       MakeConst(zip_equal(SmallVector<int>{1, 2, 3}, std::string("abc"),
+                           std::vector<bool>{true, false, true}))) {
+    static_assert(IsConstRef<decltype(a)>);
+    static_assert(IsConstRef<decltype(b)>);
+    static_assert(IsBoolConstRef<decltype(c)>);
+    ++iters;
+  }
+  EXPECT_EQ(iters, 3u);
+}
+
 #if !defined(NDEBUG) && GTEST_HAS_DEATH_TEST
 // Check that an assertion is triggered when ranges passed to `zip_equal` differ
 // in length.
@@ -584,6 +690,49 @@ TEST(ZipIteratorTest, Reverse) {
 
   // Ensure that in-place mutation works.
   EXPECT_TRUE(all_of(ascending, [](unsigned n) { return (n & 0x01) == 0; }));
+}
+
+// Int iterator that keeps track of the number of its copies.
+struct CountingIntIterator : IntIterator {
+  unsigned *cnt;
+
+  CountingIntIterator(int *it, unsigned &counter)
+      : IntIterator(it), cnt(&counter) {}
+
+  CountingIntIterator(const CountingIntIterator &other)
+      : IntIterator(other.I), cnt(other.cnt) {
+    ++(*cnt);
+  }
+  CountingIntIterator &operator=(const CountingIntIterator &other) {
+    this->I = other.I;
+    this->cnt = other.cnt;
+    ++(*cnt);
+    return *this;
+  }
+};
+
+// Check that the iterators do not get copied with each `zippy` iterator
+// increment.
+TEST(ZipIteratorTest, IteratorCopies) {
+  std::vector<int> ints(1000, 42);
+  unsigned total_copy_count = 0;
+  CountingIntIterator begin(ints.data(), total_copy_count);
+  CountingIntIterator end(ints.data() + ints.size(), total_copy_count);
+
+  size_t iters = 0;
+  auto zippy = zip_equal(ints, llvm::make_range(begin, end));
+  const unsigned creation_copy_count = total_copy_count;
+
+  for (auto [a, b] : zippy) {
+    EXPECT_EQ(a, b);
+    ++iters;
+  }
+  EXPECT_EQ(iters, ints.size());
+
+  // We expect the number of copies to be much smaller than the number of loop
+  // iterations.
+  unsigned loop_copy_count = total_copy_count - creation_copy_count;
+  EXPECT_LT(loop_copy_count, 10u);
 }
 
 TEST(RangeTest, Distance) {

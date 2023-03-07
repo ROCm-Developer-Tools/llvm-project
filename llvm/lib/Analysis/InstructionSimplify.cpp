@@ -1445,10 +1445,11 @@ static Value *simplifyShlInst(Value *Op0, Value *Op1, bool IsNSW, bool IsNUW,
           simplifyShift(Instruction::Shl, Op0, Op1, IsNSW, Q, MaxRecurse))
     return V;
 
+  Type *Ty = Op0->getType();
   // undef << X -> 0
   // undef << X -> undef if (if it's NSW/NUW)
   if (Q.isUndefValue(Op0))
-    return IsNSW || IsNUW ? Op0 : Constant::getNullValue(Op0->getType());
+    return IsNSW || IsNUW ? Op0 : Constant::getNullValue(Ty);
 
   // (X >> A) << A -> X
   Value *X;
@@ -1461,6 +1462,13 @@ static Value *simplifyShlInst(Value *Op0, Value *Op1, bool IsNSW, bool IsNUW,
     return Op0;
   // NOTE: could use computeKnownBits() / LazyValueInfo,
   // but the cost-benefit analysis suggests it isn't worth it.
+
+  // "nuw" guarantees that only zeros are shifted out, and "nsw" guarantees
+  // that the sign-bit does not change, so the only input that does not
+  // produce poison is 0, and "0 << (bitwidth-1) --> 0".
+  if (IsNSW && IsNUW &&
+      match(Op1, m_SpecificInt(Ty->getScalarSizeInBits() - 1)))
+    return Constant::getNullValue(Ty);
 
   return nullptr;
 }
@@ -3955,6 +3963,10 @@ static Value *simplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
   if (Value *V = simplifyICmpWithDominatingAssume(Pred, LHS, RHS, Q))
     return V;
 
+  if (std::optional<bool> Res =
+          isImpliedByDomCondition(Pred, LHS, RHS, Q.CxtI, Q.DL))
+    return ConstantInt::getBool(ITy, *Res);
+
   // Simplify comparisons of related pointers using a powerful, recursive
   // GEP-walk when we have target data available..
   if (LHS->getType()->isPointerTy())
@@ -6186,13 +6198,6 @@ static Value *simplifyBinaryIntrinsic(Function *F, Value *Op0, Value *Op1,
       return Op0;
     if (isICmpTrue(Pred, Op1, Op0, Q.getWithoutUndef(), RecursionLimit))
       return Op1;
-
-    if (std::optional<bool> Imp =
-            isImpliedByDomCondition(Pred, Op0, Op1, Q.CxtI, Q.DL))
-      return *Imp ? Op0 : Op1;
-    if (std::optional<bool> Imp =
-            isImpliedByDomCondition(Pred, Op1, Op0, Q.CxtI, Q.DL))
-      return *Imp ? Op1 : Op0;
 
     break;
   }
