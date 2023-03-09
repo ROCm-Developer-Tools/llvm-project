@@ -65,6 +65,7 @@ public:
   void init(s32 ReleaseToOsInterval) NO_THREAD_SAFETY_ANALYSIS {
     DCHECK(isAligned(reinterpret_cast<uptr>(this), alignof(ThisT)));
     DCHECK_EQ(PrimaryBase, 0U);
+
     // Reserve the space required for the Primary.
     PrimaryBase = reinterpret_cast<uptr>(map(
         nullptr, PrimarySize, "scudo:primary_reserve", MAP_NOACCESS, &Data));
@@ -78,13 +79,15 @@ public:
       RegionInfo *Region = getRegionInfo(I);
       // The actual start of a region is offset by a random number of pages
       // when PrimaryEnableRandomOffset is set.
-      Region->RegionBeg = getRegionBaseByClassId(I) +
+      Region->RegionBeg = (PrimaryBase + (I << Config::PrimaryRegionSizeLog)) +
                           (Config::PrimaryEnableRandomOffset
                                ? ((getRandomModN(&Seed, 16) + 1) * PageSize)
                                : 0);
       Region->RandState = getRandomU32(&Seed);
       Region->ReleaseInfo.LastReleaseAtNs = Time;
     }
+    shuffle(RegionInfoArray, NumClasses, &Seed);
+
     setOption(Option::ReleaseInterval, static_cast<sptr>(ReleaseToOsInterval));
   }
 
@@ -420,8 +423,10 @@ private:
     return &RegionInfoArray[ClassId];
   }
 
-  uptr getRegionBaseByClassId(uptr ClassId) const {
-    return PrimaryBase + (ClassId << Config::PrimaryRegionSizeLog);
+  uptr getRegionBaseByClassId(uptr ClassId) {
+    return roundDown(getRegionInfo(ClassId)->RegionBeg - PrimaryBase,
+                     RegionSize) +
+           PrimaryBase;
   }
 
   static CompactPtrT compactPtrInternal(uptr Base, uptr Ptr) {
@@ -935,9 +940,8 @@ private:
     const uptr ReleaseOffset = ReleaseBase - Region->RegionBeg;
 
     ReleaseRecorder Recorder(Region->RegionBeg, ReleaseOffset, &Region->Data);
-    PageReleaseContext Context(
-        BlockSize, Region->AllocatedUser, /*NumberOfRegions=*/1U,
-        ReleaseRangeSize, ReleaseOffset);
+    PageReleaseContext Context(BlockSize, /*NumberOfRegions=*/1U,
+                               ReleaseRangeSize, ReleaseOffset);
 
     for (BatchGroup &BG : GroupToRelease) {
       BG.PushedBlocksAtLastCheckpoint = BG.PushedBlocks;
@@ -949,6 +953,8 @@ private:
                                           ? GroupSize
                                           : AllocatedUserEnd - BatchGroupBase;
       const uptr BatchGroupUsedEnd = BatchGroupBase + AllocatedGroupSize;
+      const bool MayContainLastBlockInRegion =
+          BatchGroupUsedEnd == AllocatedUserEnd;
       const bool BlockAlignedWithUsedEnd =
           (BatchGroupUsedEnd - Region->RegionBeg) % BlockSize == 0;
 
@@ -965,13 +971,16 @@ private:
             DCHECK_EQ(compactPtrGroup(It.get(I)), BG.CompactPtrGroupBase);
 
         Context.markRangeAsAllCounted(BatchGroupBase, BatchGroupUsedEnd,
-                                      Region->RegionBeg);
+                                      Region->RegionBeg, /*RegionIndex=*/0,
+                                      Region->AllocatedUser);
       } else {
         DCHECK_LT(NumBlocks, MaxContainedBlocks);
         // Note that we don't always visit blocks in each BatchGroup so that we
         // may miss the chance of releasing certain pages that cross
         // BatchGroups.
-        Context.markFreeBlocks(BG.Batches, DecompactPtr, Region->RegionBeg);
+        Context.markFreeBlocksInRegion(
+            BG.Batches, DecompactPtr, Region->RegionBeg, /*RegionIndex=*/0,
+            Region->AllocatedUser, MayContainLastBlockInRegion);
       }
     }
 
