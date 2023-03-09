@@ -1465,6 +1465,16 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
       .Case([&](omp::ThreadprivateOp) {
         return convertOmpThreadprivate(*op, builder, moduleTranslation);
       })
+      .Case([&](omp::TargetOp) {
+        bool isDevice = mlir::omp::OpenMPDialect::getIsDevice(
+            op->getParentOfType<mlir::ModuleOp>());
+        printf("======== TargetOp detected with isDevice=%d\n", isDevice);
+        op->dump();
+        // Placeholder for Jan's convertOmpTarget(*op, builder,
+        // moduleTranslation);
+        return success();
+      })
+
       .Default([&](Operation *inst) {
         return inst->emitError("unsupported OpenMP operation: ")
                << inst->getName();

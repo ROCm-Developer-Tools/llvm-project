@@ -368,6 +368,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
+  if (JA.isDeviceOffloading(Action::OFK_OpenMP))
+    CmdArgs.push_back("-fopenmp-is-device");
+
   addDashXForInput(Args, Input, CmdArgs);
 
   CmdArgs.push_back(Input.getFilename());

@@ -1099,6 +1099,13 @@ genOMP(Fortran::lower::AbstractConverter &converter,
                    &opClauseList);
   } else if (blockDirective.v == llvm::omp::OMPD_target_data) {
     createTargetDataOp(converter, opClauseList, blockDirective.v, &eval);
+  } else if (blockDirective.v == llvm::omp::OMPD_target) {
+    // @@@Jan: Just testing to create a TargetOp
+    auto targetOp = firOpBuilder.create<mlir::omp::TargetOp>(
+        currentLocation, /*if_clause*/ mlir::Value(), /*device*/ mlir::Value(),
+        /*thread_limit*/ mlir::Value(),
+        /*nowait*/ nullptr);
+    createBodyOfOp(targetOp, converter, currentLocation, eval, &opClauseList);
   } else {
     TODO(converter.getCurrentLocation(), "Unhandled block directive");
   }
