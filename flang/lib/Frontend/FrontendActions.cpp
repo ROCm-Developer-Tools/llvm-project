@@ -202,8 +202,7 @@ bool CodeGenAction::beginSourceFileAction() {
   // Add OpenMP-related passes
   if (ci.getInvocation().getFrontendOpts().features.IsEnabled(
           Fortran::common::LanguageFeature::OpenMP)) {
-    pm.addNestedPass<mlir::func::FuncOp>(
-        fir::createCaptureImplicitlyDeclareTargetPass());
+    pm.addPass(fir::createCaptureImplicitlyDeclareTargetPass());
   }
 
   if (mlir::failed(pm.run(*mlirModule))) {

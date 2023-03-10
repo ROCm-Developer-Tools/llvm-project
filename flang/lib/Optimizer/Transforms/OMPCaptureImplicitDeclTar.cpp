@@ -26,14 +26,11 @@ class CaptureImplicitlyDeclareTargetPass
 
   // TODO: deal with finding the same function twice, with different device_type
   // should be combined into Any, or Any should supersede what was before
-  void markNestedFuncs(mlir::func::FuncOp functionOp,
-                       mlir::Operation *moduleOp) {
+  void markNestedFuncs(mlir::func::FuncOp functionOp, mlir::ModuleOp moduleOp) {
     llvm::errs() << "CurrentFuncName: " << functionOp.getName() << "\n";
     for (auto callOp : functionOp.getOps<fir::CallOp>()) {
-      auto currFOp = llvm::dyn_cast_or_null<mlir::func::FuncOp>(
-          mlir::SymbolTable::lookupSymbolIn(moduleOp,
-                                            callOp.getCallee().value()));
-      if (currFOp) {
+      if (auto currFOp = moduleOp.lookupSymbol<mlir::func::FuncOp>(
+              callOp.getCallee().value())) {
         mlir::omp::OpenMPDialect::setDeclareTarget(
             currFOp,
             mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(functionOp));
@@ -43,12 +40,11 @@ class CaptureImplicitlyDeclareTargetPass
   }
 
   void runOnOperation() override {
-    mlir::func::FuncOp functionOp = getOperation();
-    if (mlir::omp::OpenMPDialect::isDeclareTarget(functionOp)) {
-      auto *moduleOp =
-          functionOp->getParentWithTrait<mlir::OpTrait::SymbolTable>();
-      assert(moduleOp && "Expected function to be inside a module");
-      markNestedFuncs(functionOp, moduleOp);
+    mlir::ModuleOp moduleOp = getOperation();
+    for (auto functionOp : moduleOp.getOps<mlir::func::FuncOp>()) {
+      if (mlir::omp::OpenMPDialect::isDeclareTarget(functionOp)) {
+        markNestedFuncs(functionOp, moduleOp);
+      }
     }
   }
 };
@@ -56,7 +52,7 @@ class CaptureImplicitlyDeclareTargetPass
 } // namespace
 
 namespace fir {
-std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
+std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createCaptureImplicitlyDeclareTargetPass() {
   return std::make_unique<CaptureImplicitlyDeclareTargetPass>();
 }
