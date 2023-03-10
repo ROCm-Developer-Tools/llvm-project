@@ -22,6 +22,7 @@
 #include "flang/Optimizer/Dialect/Support/KindMapping.h"
 #include "flang/Optimizer/Support/InitFIR.h"
 #include "flang/Optimizer/Support/Utils.h"
+#include "flang/Optimizer/Transforms/Passes.h"
 #include "flang/Parser/dump-parse-tree.h"
 #include "flang/Parser/parsing.h"
 #include "flang/Parser/provenance.h"
@@ -197,6 +198,13 @@ bool CodeGenAction::beginSourceFileAction() {
                        mlir::OpPassManager::Nesting::Implicit);
   pm.enableVerifier(/*verifyPasses=*/true);
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
+
+  // Add OpenMP-related passes
+  if (ci.getInvocation().getFrontendOpts().features.IsEnabled(
+          Fortran::common::LanguageFeature::OpenMP)) {
+    pm.addNestedPass<mlir::func::FuncOp>(
+        fir::createCaptureImplicitlyDeclareTargetPass());
+  }
 
   if (mlir::failed(pm.run(*mlirModule))) {
     unsigned diagID = ci.getDiagnostics().getCustomDiagID(
@@ -562,6 +570,9 @@ void CodeGenAction::generateLLVMIR() {
         clang::DiagnosticsEngine::Error, "Lowering to LLVM IR failed");
     ci.getDiagnostics().Report(diagID);
   }
+
+  //  Add another save-temps here to write host|device-LLVMIR.mlir
+  //  The savetemps will occur after savetemps for host|device-FIR.mlir
 
   // Translate to LLVM IR
   std::optional<llvm::StringRef> moduleName = mlirModule->getName();

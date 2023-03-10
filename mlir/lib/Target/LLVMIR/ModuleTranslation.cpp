@@ -995,10 +995,8 @@ LogicalResult ModuleTranslation::convertFunctions() {
     //        For now, we assume no declare target functions.
     //        Target regions will have there own kernels generated.
     printf("  FFFF Function name %s\n", function.getName().str().c_str());
-    bool isDeclareTargetFunction = false;
-    if (function.getName().equals(
-            "dec_arrayval")) // hack for driver_test till FIX
-      isDeclareTargetFunction = true;
+    bool isDeclareTargetFunction =
+        mlir::omp::OpenMPDialect::isDeclareTarget(function);
     if (isDevice && !isDeclareTargetFunction)
       continue;
 

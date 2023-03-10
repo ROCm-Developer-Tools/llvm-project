@@ -284,5 +284,11 @@ def PolymorphicOpConversion : Pass<"fir-polymorphic-op", "::mlir::func::FuncOp">
   ];
 }
 
-  
+def CaptureImplicitlyDeclareTargetPass
+    : Pass<"capture-implicitly-declare-target", "mlir::func::FuncOp"> {
+  let summary = "Marks all functions referenced by a declare target function as declare target";
+  let constructor = "::fir::createCaptureImplicitlyDeclareTargetPass()";
+  let dependentDialects = ["mlir::omp::OpenMPDialect"];
+}
+
 #endif // FLANG_OPTIMIZER_TRANSFORMS_PASSES

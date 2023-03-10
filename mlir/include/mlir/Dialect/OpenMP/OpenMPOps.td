@@ -36,6 +36,11 @@ def OpenMP_Dialect : Dialect {
     // Return the value of the omp.is_device attribute stored in the module if it
     // exists, otherwise return false by default
     static bool getIsDevice(Operation* module);
+
+    // @@@AG: Make this into a well defined attribute if we maintain its use
+    static void setDeclareTarget(Operation *func, StringRef deviceType);
+    static bool isDeclareTarget(Operation *func);
+    static StringRef getDeclareTargetDeviceType(Operation *func);
   }];
 }
 

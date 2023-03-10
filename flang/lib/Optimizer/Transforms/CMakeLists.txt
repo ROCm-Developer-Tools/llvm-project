@@ -15,7 +15,8 @@ add_flang_library(FIRTransforms
   SimplifyIntrinsics.cpp
   AddDebugFoundation.cpp
   PolymorphicOpConversion.cpp
-
+  OMPCaptureImplicitDeclTar.cpp
+  
   DEPENDS
   FIRDialect
   FIROptTransformsPassIncGen
