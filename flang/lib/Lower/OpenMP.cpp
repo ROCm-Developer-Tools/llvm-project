@@ -2295,7 +2295,6 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
 
   // The default capture type
   auto deviceType = Fortran::parser::OmpDeviceTypeClause::Type::Any;
-
   if (const auto *objectList{
           Fortran::parser::Unwrap<Fortran::parser::OmpObjectList>(spec.u)}) {
     // Case: declare target(func, var1, var2)
@@ -2326,75 +2325,17 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
       }
     }
   }
-  // TODO for func:
-  // 1) handle link: done, can't use with function
-  // 2) handle to: done
-  // 3) the default case where neither are specified: done
-  // 4) nested implicit functions
-
-  // TODO for data:
-  // 1) lots... need to make test case first.
-
-  // might have to do the implicit capture further in during rewrite?
-  // Or if there is an end of module action
-  // or earlier during parsing...
-  // auto markAllFuncs = [&](mlir::func::FuncOp fOp) {
-  //   for (auto block = fOp.getBody().getBlocks().begin();
-  //        block != fOp.getBody().getBlocks().end(); ++block) {
-  //     llvm::errs() << "iterate on body \n";
-  //     for (auto op = block->begin(); op != block->end(); ++op) {
-  //       llvm::errs() << "iterate on op \n";
-  //       op->dump();
-  //       // probably needs to be a fir.CallOp, and then find the FuncOp
-  //       if (auto funcOp = mlir::dyn_cast<mlir::func::FuncOp>(op)) {
-  //         // markAllFuncs on func
-  //         // check if attr exists, if not apply it.
-  //         llvm::errs() << "markAllFuncs: " << funcOp->getName() << "\n";
-  //       }
-  //     }
-  //   }
-  // };
-
-  // mod.dump();
 
   for (auto sym : symbols) {
     auto *op = mod.lookupSymbol(converter.mangleName(sym));
-
-    // find any functions that are implicitly captured by this
-    // declare target and mark them with declare_target_type.
-    //
-    // This may be better to do at the parser/semantic level
-
-    // could be done inside of Bridge.cpp lowerFunc or lowerModule
-    // if (auto funcOp = mlir::dyn_cast<mlir::func::FuncOp>(op))
-    // markAllFuncs(funcOp);
-
-    // delete function early if we know it is going to be discared, if
-    // it is device_type any we keep it. This feels a little
-    // inconsistent as we can only remove things we know are unneeded
-    // at this stage, so we'll still end up with a module of mixed
-    // functions with some needing removal at a later stage in either
-    // case.
-    if ((deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost &&
-         !isOpenMPDevice) ||
-        (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Host &&
-         isOpenMPDevice)) {
-      op->dropAllUses();
-      op->dropAllReferences();
-      op->dropAllDefinedValueUses();
-      op->remove();
-    } else {
-      // Method 1: Remove function here if not desired and add adhoc
-      // attribute to the MLIR Funcs for special handling later
-      if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost) {
-        mlir::omp::OpenMPDialect::setDeclareTarget(op, "nohost");
-      } else if (deviceType ==
-                 Fortran::parser::OmpDeviceTypeClause::Type::Host) {
-        mlir::omp::OpenMPDialect::setDeclareTarget(op, "host");
-      } else if (deviceType ==
-                 Fortran::parser::OmpDeviceTypeClause::Type::Any) {
-        mlir::omp::OpenMPDialect::setDeclareTarget(op, "any");
-      }
+    // Method 1: Remove function here if not desired and add adhoc
+    // attribute to the MLIR Funcs for special handling later
+    if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost) {
+      mlir::omp::OpenMPDialect::setDeclareTarget(op, "nohost");
+    } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Host) {
+      mlir::omp::OpenMPDialect::setDeclareTarget(op, "host");
+    } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Any) {
+      mlir::omp::OpenMPDialect::setDeclareTarget(op, "any");
     }
   }
 }
