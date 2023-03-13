@@ -18,22 +18,29 @@ namespace fir {
 } // namespace fir
 
 namespace {
-// TODO: Handle case where a function is marked twice by declare target and it's
-// two different target types
 class CaptureImplicitlyDeclareTargetPass
     : public fir::impl::CaptureImplicitlyDeclareTargetPassBase<
           CaptureImplicitlyDeclareTargetPass> {
 
-  // TODO: deal with finding the same function twice, with different device_type
-  // should be combined into Any, or Any should supersede what was before
   void markNestedFuncs(mlir::func::FuncOp functionOp, mlir::ModuleOp moduleOp) {
-    llvm::errs() << "CurrentFuncName: " << functionOp.getName() << "\n";
     for (auto callOp : functionOp.getOps<fir::CallOp>()) {
       if (auto currFOp = moduleOp.lookupSymbol<mlir::func::FuncOp>(
               callOp.getCallee().value())) {
-        mlir::omp::OpenMPDialect::setDeclareTarget(
-            currFOp,
-            mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(functionOp));
+        auto parentDt =
+            mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(functionOp);
+        if (mlir::omp::OpenMPDialect::isDeclareTarget(currFOp)) {
+          auto currentDt =
+              mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(currFOp);
+
+          // Found the same function twice, with different device_types, mark as
+          // Any as it belongs to both
+          if (currentDt != parentDt && currentDt != "any") {
+            mlir::omp::OpenMPDialect::setDeclareTarget(currFOp, "any");
+          }
+        } else {
+          mlir::omp::OpenMPDialect::setDeclareTarget(currFOp, parentDt);
+        }
+
         markNestedFuncs(currFOp, moduleOp);
       }
     }
