@@ -40,6 +40,7 @@
 #include "mlir/Target/LLVMIR/ModuleTranslation.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticFrontend.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -53,7 +54,9 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <memory>
@@ -211,6 +214,29 @@ bool CodeGenAction::beginSourceFileAction() {
         "verification of lowering to FIR failed");
     ci.getDiagnostics().Report(diagID);
     return false;
+  }
+
+  //  FIR.mlir: This is 1st -save-temps file created for mlir
+  if (getInstance().getInvocation().getCodeGenOpts().HasSaveTemps) {
+    std::string SaveTempsDir =
+        getInstance().getInvocation().getCodeGenOpts().SaveTempsDir;
+    SaveTempsDir = llvm::sys::fs::is_directory(SaveTempsDir)
+                       ? SaveTempsDir.append("/")
+                       : "";
+    std::string FileName = ci.getInvocation().getLangOpts().OpenMPIsDevice
+                               ? SaveTempsDir.append("device-%%%%%-FIR.mlir")
+                               : SaveTempsDir.append("host-%%%%%-FIR.mlir");
+    llvm::SmallString<128> tempFilename;
+    int fd;
+    if (llvm::sys::fs::createUniqueFile(FileName, fd, tempFilename,
+                                        llvm::sys::fs::OF_Text)) {
+      llvm::errs() << "termporary file creation error\n";
+      abort();
+    }
+    llvm::ToolOutputFile out(tempFilename, fd);
+    mlirModule->print(out.os());
+    out.os().close();
+    out.keep();
   }
 
   return true;
@@ -570,8 +596,28 @@ void CodeGenAction::generateLLVMIR() {
     ci.getDiagnostics().Report(diagID);
   }
 
-  //  Add another save-temps here to write host|device-LLVMIR.mlir
-  //  The savetemps will occur after savetemps for host|device-FIR.mlir
+  //  LLVMIR.mlir: This is 2nd -save-temps file created for mlir
+  if (getInstance().getInvocation().getCodeGenOpts().HasSaveTemps) {
+    std::string SaveTempsDir =
+        getInstance().getInvocation().getCodeGenOpts().SaveTempsDir;
+    SaveTempsDir = llvm::sys::fs::is_directory(SaveTempsDir)
+                       ? SaveTempsDir.append("/")
+                       : "";
+    std::string FileName = ci.getInvocation().getLangOpts().OpenMPIsDevice
+                               ? SaveTempsDir.append("device-%%%%%-LLVMIR.mlir")
+                               : SaveTempsDir.append("host-%%%%%-LLVMIR.mlir");
+    llvm::SmallString<128> tempFilename;
+    int fd;
+    if (llvm::sys::fs::createUniqueFile(FileName, fd, tempFilename,
+                                        llvm::sys::fs::OF_Text)) {
+      llvm::errs() << "termporary file creation error\n";
+      abort();
+    }
+    llvm::ToolOutputFile out(tempFilename, fd);
+    mlirModule->print(out.os());
+    out.os().close();
+    out.keep();
+  }
 
   // Translate to LLVM IR
   std::optional<llvm::StringRef> moduleName = mlirModule->getName();

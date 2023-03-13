@@ -53,6 +53,9 @@ public:
   /// are offloading binaries containing device images and metadata.
   std::vector<std::string> OffloadObjects;
 
+  /// The directory where temp files are stored if specified by -save-temps
+  std::string SaveTempsDir;
+
   // Define accessors/mutators for code generation options of enumeration type.
 #define CODEGENOPT(Name, Bits, Default)
 #define ENUM_CODEGENOPT(Name, Type, Bits, Default)                             \

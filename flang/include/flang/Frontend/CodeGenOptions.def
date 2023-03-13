@@ -31,6 +31,7 @@ CODEGENOPT(PrepareForFullLTO , 1, 0) ///< Set when -flto is enabled on the
 CODEGENOPT(PrepareForThinLTO , 1, 0) ///< Set when -flto=thin is enabled on the
                                      ///< compile step.
 CODEGENOPT(StackArrays, 1, 0) ///< -fstack-arrays (enable the stack-arrays pass)
+CODEGENOPT(HasSaveTemps, 1, 0) ///FC1 was passed -save-temps flag
 
 CODEGENOPT(Underscoring, 1, 1)
 ENUM_CODEGENOPT(RelocationModel, llvm::Reloc::Model, 3, llvm::Reloc::PIC_) ///< Name of the relocation model to use.
