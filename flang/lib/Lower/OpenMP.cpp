@@ -2331,11 +2331,14 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
     // Method 1: Remove function here if not desired and add adhoc
     // attribute to the MLIR Funcs for special handling later
     if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost) {
-      mlir::omp::OpenMPDialect::setDeclareTarget(op, "nohost");
+      mlir::omp::OpenMPDialect::setDeclareTarget(
+          op, mlir::omp::DeclareTargetDeviceType::nohost);
     } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Host) {
-      mlir::omp::OpenMPDialect::setDeclareTarget(op, "host");
+      mlir::omp::OpenMPDialect::setDeclareTarget(
+          op, mlir::omp::DeclareTargetDeviceType::host);
     } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Any) {
-      mlir::omp::OpenMPDialect::setDeclareTarget(op, "any");
+      mlir::omp::OpenMPDialect::setDeclareTarget(
+          op, mlir::omp::DeclareTargetDeviceType::any);
     }
   }
 }

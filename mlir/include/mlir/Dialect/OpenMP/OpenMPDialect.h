@@ -21,6 +21,10 @@
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
+namespace mlir::omp {
+    enum class DeclareTargetDeviceType : uint32_t;
+} // namespace mlir::omp
+
 #include "mlir/Dialect/OpenMP/OpenMPOpsDialect.h.inc"
 #include "mlir/Dialect/OpenMP/OpenMPOpsEnums.h.inc"
 #include "mlir/Dialect/OpenMP/OpenMPTypeInterfaces.h.inc"

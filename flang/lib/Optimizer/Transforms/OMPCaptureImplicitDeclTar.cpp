@@ -34,8 +34,10 @@ class CaptureImplicitlyDeclareTargetPass
 
           // Found the same function twice, with different device_types, mark as
           // Any as it belongs to both
-          if (currentDt != parentDt && currentDt != "any") {
-            mlir::omp::OpenMPDialect::setDeclareTarget(currFOp, "any");
+          if (currentDt != parentDt &&
+              currentDt != mlir::omp::DeclareTargetDeviceType::any) {
+            mlir::omp::OpenMPDialect::setDeclareTarget(
+                currFOp, mlir::omp::DeclareTargetDeviceType::any);
           }
         } else {
           mlir::omp::OpenMPDialect::setDeclareTarget(currFOp, parentDt);

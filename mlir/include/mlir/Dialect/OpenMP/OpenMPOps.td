@@ -33,7 +33,7 @@ def OpenMP_Dialect : Dialect {
     // @@@AG: Make this into a well defined attribute if we maintain its use
     static void setDeclareTarget(Operation *func, StringRef deviceType);
     static bool isDeclareTarget(Operation *func);
-    static StringRef getDeclareTargetDeviceType(Operation *func);
+    static mlir::omp::DeclareTargetDeviceType getDeclareTargetDeviceType(Operation *func);
   }];
 }
 
@@ -93,6 +93,27 @@ def IntLikeType : AnyTypeOf<[AnyInteger, Index]>;
 
 def OpenMP_PointerLikeType : TypeAlias<OpenMP_PointerLikeTypeInterface,
 	"OpenMP-compatible variable type">;
+
+//===----------------------------------------------------------------------===//
+//  2.12.7 Declare Target Directive
+//===----------------------------------------------------------------------===//
+
+def DeviceTypeAny : I32EnumAttrCase<"any", 0>;
+def DeviceTypeHost   : I32EnumAttrCase<"host", 1>;
+def DeviceTypeNoHost   : I32EnumAttrCase<"nohost", 2>;
+
+def DeclareTargetDeviceType : I32EnumAttr<
+    "DeclareTargetDeviceType",
+    "device_type clause",
+    [DeviceTypeAny, DeviceTypeHost, DeviceTypeNoHost]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::omp";
+}
+
+def DeclareTargetDeviceTypeAttr : EnumAttr<OpenMP_Dialect, DeclareTargetDeviceType, 
+                                    "device_type"> {
+  let assemblyFormat = "`(` $value `)`";
+}
 
 //===----------------------------------------------------------------------===//
 // 2.6 parallel Construct

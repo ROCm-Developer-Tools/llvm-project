@@ -1451,13 +1451,14 @@ void OpenMPDialect::setDeclareTarget(Operation *func, StringRef deviceType) {
 }
 
 bool OpenMPDialect::isDeclareTarget(Operation *func) {
-  return func->hasAttr("omp.declare_target_type");
+  return func->hasAttr("omp.declare_target");
 }
 
-StringRef OpenMPDialect::getDeclareTargetDeviceType(Operation *func) {
-  if (mlir::Attribute declTar = func->getAttr("omp.declare_target_type")) {
-    if (declTar.isa<mlir::StringAttr>())
-      return declTar.cast<mlir::StringAttr>().getValue();
+mlir::omp::DeclareTargetDeviceType
+OpenMPDialect::getDeclareTargetDeviceType(Operation *func) {
+  if (mlir::Attribute declTar = func->getAttr("omp.declare_target")) {
+    if (declTar.isa<mlir::omp::DeclareTargetDeviceTypeAttr>())
+      return declTar.cast<mlir::omp::DeclareTargetDeviceTypeAttr>().getValue();
   }
   return {};
 }
