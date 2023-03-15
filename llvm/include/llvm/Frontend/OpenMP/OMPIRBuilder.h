@@ -157,6 +157,9 @@ public:
   void setHasRequiresUnifiedSharedMemory(bool Value) {
     HasRequiresUnifiedSharedMemory = Value;
   }
+  void setOpenMPOffloadMandatory(bool Value) {
+    OpenMPOffloadMandatory = Value;
+  }
   void setFirstSeparator(StringRef FS) { FirstSeparator = FS; }
   void setSeparator(StringRef S) { Separator = S; }
 };

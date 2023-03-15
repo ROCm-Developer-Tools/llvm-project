@@ -11,12 +11,15 @@
 //
 //===----------------------------------------------------------------------===//
 #include "mlir/Target/LLVMIR/Dialect/OpenMP/OpenMPToLLVMIRTranslation.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMOps.cpp.inc"
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Target/LLVMIR/Dialect/OpenMPCommon.h"
 #include "mlir/Target/LLVMIR/ModuleTranslation.h"
+#include "mlir/Transforms/RegionUtils.h"
 
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -24,6 +27,10 @@
 #include "llvm/Frontend/OpenMP/OMPIRBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Support/Alignment.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Object/OffloadBinary.h"
 
 using namespace mlir;
 
@@ -1542,6 +1549,161 @@ convertOmpTargetData(Operation *op, llvm::IRBuilderBase &builder,
   return bodyGenStatus;
 }
 
+static llvm::TargetRegionEntryInfo
+getTargetEntryUniqueInfo(Location loc, llvm::StringRef parentName = "") {
+  auto fileLoc = loc->findInstanceOf<FileLineColLoc>();
+
+  assert(fileLoc && "No file found from location");
+  StringRef fileName = fileLoc.getFilename().getValue();
+
+  llvm::sys::fs::UniqueID id;
+  if (auto ec = llvm::sys::fs::getUniqueID(fileName, id)) {
+    // FIXME(JAN): emit error
+  }
+
+  uint64_t line = fileLoc.getLine();
+  return llvm::TargetRegionEntryInfo(parentName, id.getDevice(), id.getFile(),
+                                     line);
+}
+
+// Takes a TargetOp and creates an outlined function
+static llvm::Function *
+createOutlinedfunction(omp::TargetOp targetOp, StringRef functionName,
+                       llvm::IRBuilderBase &builder,
+                       LLVM::ModuleTranslation &moduleTranslation,
+                       llvm::SmallVectorImpl<Value> &operands) {
+  Region &targetRegion = targetOp.getRegion();
+
+  llvm::SetVector<Value> operandSet;
+  getUsedValuesDefinedAbove(targetRegion, operandSet);
+
+  // Convert the operand types to llvm::Type for
+  // constructing parameter type
+  llvm::SmallVector<llvm::Type *, 4> parameterTypes;
+  for (Value operand : operandSet) {
+    parameterTypes.push_back(moduleTranslation.convertType(operand.getType()));
+    operands.push_back(operand);
+  }
+
+  // Create function type and function
+  auto functionType =
+      llvm::FunctionType::get(builder.getVoidTy(), parameterTypes,
+                              /*isVarArg*/ false);
+  auto function = llvm::Function::Create(
+      functionType, llvm::GlobalValue::InternalLinkage, functionName,
+      builder.GetInsertBlock()->getModule());
+
+  // TODO(Jan): set function attributes
+
+  // Save insert point
+  auto oldInsertPoint = builder.GetInsertPoint();
+  auto oldInsertBlock = builder.GetInsertBlock();
+
+  // Generate the region into the function
+  llvm::BasicBlock *EntryBB = llvm::BasicBlock::Create(
+      moduleTranslation.getLLVMContext(), "entry", function);
+  builder.SetInsertPoint(EntryBB);
+  LogicalResult bodyGenStatus = success();
+  llvm::BasicBlock *exitBlock = convertOmpOpRegions(
+      targetRegion, "omp.target", builder, moduleTranslation, bodyGenStatus);
+
+  // Rewrite uses of input valus to parameters
+  for (auto op_arg : zip(operands, function->args())) {
+    auto operand = std::get<0>(op_arg);
+    auto &arg = std::get<1>(op_arg);
+    auto oldValue = moduleTranslation.lookupValue(operand);
+    llvm::SmallVector<llvm::Instruction *, 2> users;
+    // Collect all the instructions
+    for (llvm::User *user : llvm::make_early_inc_range(oldValue->users())) {
+      if (auto instr = dyn_cast<llvm::Instruction>(user)) {
+        if (instr->getFunction() == function) {
+          instr->replaceUsesOfWith(oldValue, &arg);
+        }
+      }
+    }
+  }
+
+  // Insert return instruction
+  builder.SetInsertPoint(exitBlock);
+  builder.CreateRetVoid();
+
+  // Restore insert point
+  builder.SetInsertPoint(oldInsertBlock, oldInsertPoint);
+
+  return function;
+}
+
+static void emitTargetOutlinedFunction(
+    omp::TargetOp targetOp, StringRef parentName, llvm::Function *&outlinedFn,
+    llvm::Constant *&outlinedFnID, bool IsOffloadEntry,
+    llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
+    llvm::SmallVectorImpl<Value> &operands) {
+
+  llvm::TargetRegionEntryInfo entryInfo =
+      getTargetEntryUniqueInfo(targetOp.getLoc(), parentName);
+  int32_t defaultValTeams = -1;
+  int32_t defaultValThreads = -1;
+
+  llvm::OpenMPIRBuilder::FunctionGenCallback &&generateOutlinedFunction =
+      [&targetOp, &builder, &moduleTranslation,
+       &operands](llvm::StringRef entryFnName) {
+        return createOutlinedfunction(targetOp, entryFnName, builder,
+                                      moduleTranslation, operands);
+      };
+
+  moduleTranslation.getOpenMPBuilder()->emitTargetRegionFunction(
+      entryInfo, generateOutlinedFunction, defaultValTeams, defaultValThreads,
+      true, outlinedFn, outlinedFnID);
+}
+
+static void emitTargetCall(llvm::IRBuilderBase &builder,
+                           llvm::Function *OutlinedFn,
+                           llvm::Value *OutlinedFnID,
+                           LLVM::ModuleTranslation &moduleTranslation,
+                           llvm::SmallVectorImpl<Value> &operands) {
+  // Skipping device call, only emitting fallback for now.
+  builder.CreateCall(OutlinedFn, moduleTranslation.lookupValues(operands));
+}
+
+static LogicalResult
+convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
+                 LLVM::ModuleTranslation &moduleTranslation) {
+  bool isDevice = false;
+  if (auto offloadMod = dyn_cast<mlir::omp::OffloadModuleInterface>(
+          opInst.getParentOfType<mlir::ModuleOp>().getOperation())) {
+    isDevice = offloadMod.getIsDevice();
+  }
+  if (isDevice) // Skip device codegen.
+    return success();
+  auto targetOp = cast<omp::TargetOp>(opInst);
+
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  ompBuilder->Config.setIsEmbedded(false);
+  ompBuilder->Config.setIsTargetCodegen(false);
+  ompBuilder->Config.setHasRequiresUnifiedSharedMemory(false);
+  ompBuilder->Config.setOpenMPOffloadMandatory(false);
+
+  StringRef parentName = opInst.getParentOfType<LLVM::LLVMFuncOp>().getName();
+  llvm::Function *outlinedFn;
+  llvm::Constant *outlinedFnID;
+  llvm::SmallVector<Value, 4> operands;
+  emitTargetOutlinedFunction(targetOp, parentName, outlinedFn, outlinedFnID,
+                             /* IsOffloadEntry */ true, builder,
+                             moduleTranslation, operands);
+
+  llvm::OpenMPIRBuilder::EmitMetadataErrorReportFunctionTy &&errorReportFn =
+      [](llvm::OpenMPIRBuilder::EmitMetadataErrorKind kind,
+         const llvm::TargetRegionEntryInfo &entryInfo) -> void {
+    llvm::errs() << "Error emitting metadata!!!";
+  };
+
+  ompBuilder->createOffloadEntriesAndInfoMetadata(errorReportFn);
+
+  emitTargetCall(builder, outlinedFn, outlinedFnID, moduleTranslation,
+                 operands);
+  return success();
+}
+
 namespace {
 
 /// Implementation of the dialect interface that converts operations belonging
@@ -1668,9 +1830,7 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
 
         printf("======== TargetOp detected with isDevice=%d\n", isDevice);
         op->dump();
-        // Placeholder for Jan's convertOmpTarget(*op, builder,
-        // moduleTranslation);
-        return success();
+        return convertOmpTarget(*op, builder, moduleTranslation);
       })
       .Default([&](Operation *inst) {
         return inst->emitError("unsupported OpenMP operation: ")
