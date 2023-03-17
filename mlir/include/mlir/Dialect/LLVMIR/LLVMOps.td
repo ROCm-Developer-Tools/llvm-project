@@ -771,17 +771,22 @@ def LLVM_ShuffleVectorOp : LLVM_Op<"shufflevector",
 // Misc operations.
 def LLVM_SelectOp
     : LLVM_Op<"select",
-          [Pure, AllTypesMatch<["trueValue", "falseValue", "res"]>]>,
+          [Pure, AllTypesMatch<["trueValue", "falseValue", "res"]>,
+           DeclareOpInterfaceMethods<FastmathFlagsInterface>]>,
       LLVM_Builder<
           "$res = builder.CreateSelect($condition, $trueValue, $falseValue);"> {
   let arguments = (ins LLVM_ScalarOrVectorOf<I1>:$condition,
-                   LLVM_Type:$trueValue, LLVM_Type:$falseValue);
+                   LLVM_Type:$trueValue, LLVM_Type:$falseValue,
+                   DefaultValuedAttr<LLVM_FastmathFlagsAttr,
+                                     "{}">:$fastmathFlags);
   let results = (outs LLVM_Type:$res);
   let assemblyFormat = "operands attr-dict `:` type($condition) `,` type($res)";
   string llvmInstName = "Select";
   string mlirBuilder = [{
-    $res = $_builder.create<LLVM::SelectOp>(
+    auto op = $_builder.create<LLVM::SelectOp>(
       $_location, $_resultType, $condition, $trueValue, $falseValue);
+    moduleImport.setFastmathFlagsAttr(inst, op);
+    $res = op;
   }];
 }
 def LLVM_FreezeOp : LLVM_Op<"freeze", [SameOperandsAndResultType]> {
@@ -1301,7 +1306,8 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
     OptionalAttr<I64Attr>:$alignment,
     DefaultValuedAttr<ConfinedAttr<I32Attr, [IntNonNegative]>, "0">:$addr_space,
     OptionalAttr<UnnamedAddr>:$unnamed_addr,
-    OptionalAttr<StrAttr>:$section
+    OptionalAttr<StrAttr>:$section,
+    DefaultValuedAttr<Visibility, "mlir::LLVM::Visibility::Default">:$visibility_
   );
   let summary = "LLVM dialect global.";
   let description = [{
@@ -1546,7 +1552,8 @@ def LLVM_LLVMFuncOp : LLVM_Op<"func", [
     OptionalAttr<DictArrayAttr>:$arg_attrs,
     OptionalAttr<DictArrayAttr>:$res_attrs,
     OptionalAttr<I64Attr>:$function_entry_count,
-    OptionalAttr<LLVM_MemoryEffectsAttr>:$memory
+    OptionalAttr<LLVM_MemoryEffectsAttr>:$memory,
+    DefaultValuedAttr<Visibility, "mlir::LLVM::Visibility::Default">:$visibility_
   );
 
   let regions = (region AnyRegion:$body);

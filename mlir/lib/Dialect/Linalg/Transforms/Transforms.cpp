@@ -857,7 +857,7 @@ PadOpTransformationPattern::matchAndRewrite(tensor::PadOp padOp,
 /// Filling `dest` using FillOp constant padding value if possible.
 /// Otherwise, generate a tensor::GenerateOp.
 Value GeneralizePadOpPattern::createFillOrGenerateOp(
-    PatternRewriter &rewriter, tensor::PadOp padOp, Value dest,
+    RewriterBase &rewriter, tensor::PadOp padOp, Value dest,
     const SmallVector<Value> &dynSizes) const {
   auto padValue = padOp.getConstantPaddingValue();
   if (padValue)
@@ -952,12 +952,14 @@ LogicalResult ExtractSliceOfPadTensorSwapPattern::matchAndRewrite(
       return failure();
   }
 
-  Operation *tiledPadOp =
+  FailureOr<TilingResult> tilingResult =
       tensor::bubbleUpPadSlice(rewriter, padOp, sliceOp.getMixedOffsets(),
                                sliceOp.getMixedSizes(), zeroSliceGuard);
+  if (failed(tilingResult))
+    return failure();
   // All shapes are static and the data source is actually used. Rewrite into
   // pad(extract_slice(x)).
-  rewriter.replaceOp(sliceOp, tiledPadOp->getResults());
+  rewriter.replaceOp(sliceOp, tilingResult->tiledValues);
   return success();
 }
 

@@ -35,6 +35,7 @@
 #include <__type_traits/disjunction.h>
 #include <__type_traits/is_array.h>
 #include <__type_traits/is_bounded_array.h>
+#include <__type_traits/is_convertible.h>
 #include <__type_traits/is_move_constructible.h>
 #include <__type_traits/is_reference.h>
 #include <__type_traits/is_unbounded_array.h>
@@ -46,6 +47,7 @@
 #include <__utility/forward.h>
 #include <__utility/move.h>
 #include <__utility/swap.h>
+#include <__verbose_abort>
 #include <cstddef>
 #include <cstdlib> // abort
 #include <iosfwd>
@@ -135,7 +137,7 @@ void __throw_bad_weak_ptr()
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
     throw bad_weak_ptr();
 #else
-    _VSTD::abort();
+    std::__libcpp_verbose_abort("bad_weak_ptr was thrown in -fno-exceptions mode");
 #endif
 }
 

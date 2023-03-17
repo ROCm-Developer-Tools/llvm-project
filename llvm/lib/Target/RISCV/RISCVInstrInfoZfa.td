@@ -93,6 +93,7 @@ class FPUnaryOp_r_rtz<bits<7> funct7, bits<5> rs2val, DAGOperand rdty,
 //===----------------------------------------------------------------------===//
 
 let Predicates = [HasStdExtZfa] in {
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def FLI_S : FPUnaryOp_imm<0b1111000, 0b00001, 0b000, OPC_OP_FP, (outs FPR32:$rd),
             (ins loadfp32imm:$imm), "fli.s", "$rd, $imm">;
 
@@ -107,6 +108,7 @@ def FLEQ_S : FPCmp_rr<0b1010000, 0b100, "fleq.s", FPR32>;
 } // Predicates = [HasStdExtZfa]
 
 let Predicates = [HasStdExtZfa, HasStdExtD] in {
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def FLI_D : FPUnaryOp_imm<0b1111001, 0b00001, 0b000, OPC_OP_FP, (outs FPR64:$rd),
             (ins loadfp64imm:$imm), "fli.d", "$rd, $imm">;
 
@@ -135,10 +137,12 @@ def FMV_X_W_FPR64 : FPUnaryOp_r<0b1110000, 0b00000, 0b000, GPR, FPR64,
                     Sched<[WriteFMovF32ToI32, ReadFMovF32ToI32]>;
 } // Predicates = [HasStdExtZfa, HasStdExtD, IsRV32]
 
-let Predicates = [HasStdExtZfa, HasStdExtZfh] in {
+let Predicates = [HasStdExtZfa, HasStdExtZfhOrZvfh] in
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def FLI_H : FPUnaryOp_imm<0b1111010, 0b00001, 0b000, OPC_OP_FP, (outs FPR16:$rd),
             (ins loadfp16imm:$imm), "fli.h", "$rd, $imm">;
 
+let Predicates = [HasStdExtZfa, HasStdExtZfh] in {
 def FMINM_H: FPALU_rr<0b0010110, 0b010, "fminm.h", FPR16, /*Commutable*/ 1>;
 def FMAXM_H: FPALU_rr<0b0010110, 0b011, "fmaxm.h", FPR16, /*Commutable*/ 1>;
 
@@ -178,20 +182,13 @@ def : InstAlias<"fgeq.h $rd, $rs, $rt",
 // Codegen patterns
 //===----------------------------------------------------------------------===//
 
-def fp32imm_to_loadfpimm : SDNodeXForm<fpimm, [{
-  return CurDAG->getTargetConstant(RISCVLoadFPImm::getLoadFP32Imm(N->getValueAPF()),
+def fpimm_to_loadfpimm : SDNodeXForm<fpimm, [{
+  return CurDAG->getTargetConstant(RISCVLoadFPImm::getLoadFPImm(N->getValueAPF()),
                                    SDLoc(N), Subtarget->getXLenVT());}]>;
 
-def fp64imm_to_loadfpimm : SDNodeXForm<fpimm, [{
-  return CurDAG->getTargetConstant(RISCVLoadFPImm::getLoadFP64Imm(N->getValueAPF()),
-                                   SDLoc(N), Subtarget->getXLenVT());}]>;
-
-def fp16imm_to_loadfpimm : SDNodeXForm<fpimm, [{
-  return CurDAG->getTargetConstant(RISCVLoadFPImm::getLoadFP16Imm(N->getValueAPF()),
-                                   SDLoc(N), Subtarget->getXLenVT());}]>;
 
 let Predicates = [HasStdExtZfa] in {
-def : Pat<(f32 fpimm:$imm), (FLI_S (fp32imm_to_loadfpimm fpimm:$imm))>;
+def : Pat<(f32 fpimm:$imm), (FLI_S (fpimm_to_loadfpimm fpimm:$imm))>;
 
 def: PatFprFpr<fminimum, FMINM_S, FPR32>;
 def: PatFprFpr<fmaximum, FMAXM_S, FPR32>;
@@ -215,7 +212,7 @@ def: PatSetCC<FPR32, strict_fsetcc, SETOLE, FLEQ_S>;
 } // Predicates = [HasStdExtZfa]
 
 let Predicates = [HasStdExtZfa, HasStdExtD] in {
-def : Pat<(f64 fpimm:$imm), (FLI_D (fp64imm_to_loadfpimm fpimm:$imm))>;
+def : Pat<(f64 fpimm:$imm), (FLI_D (fpimm_to_loadfpimm fpimm:$imm))>;
 
 def: PatFprFpr<fminimum, FMINM_D, FPR64>;
 def: PatFprFpr<fmaximum, FMAXM_D, FPR64>;
@@ -245,7 +242,7 @@ def : Pat<(RISCVBuildPairF64 GPR:$rs1, GPR:$rs2),
 }
 
 let Predicates = [HasStdExtZfa, HasStdExtZfh] in {
-def : Pat<(f16 fpimm:$imm), (FLI_H (fp16imm_to_loadfpimm fpimm:$imm))>;
+def : Pat<(f16 fpimm:$imm), (FLI_H (fpimm_to_loadfpimm fpimm:$imm))>;
 
 def: PatFprFpr<fminimum, FMINM_H, FPR16>;
 def: PatFprFpr<fmaximum, FMAXM_H, FPR16>;

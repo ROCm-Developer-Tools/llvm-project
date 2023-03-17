@@ -329,8 +329,8 @@ typedef enum {
  * Index initialization options.
  *
  * 0 is the default value of each member of this struct except for Size.
- * Initialize the struct in one of the following two ways to avoid adapting code
- * each time a new member is added to it:
+ * Initialize the struct in one of the following three ways to avoid adapting
+ * code each time a new member is added to it:
  * \code
  * CXIndexOptions Opts;
  * memset(&Opts, 0, sizeof(Opts));
@@ -339,6 +339,11 @@ typedef enum {
  * or explicitly initialize the first data member and zero-initialize the rest:
  * \code
  * CXIndexOptions Opts = { sizeof(CXIndexOptions) };
+ * \endcode
+ * or to prevent the -Wmissing-field-initializers warning for the above version:
+ * \code
+ * CXIndexOptions Opts{};
+ * Opts.Size = sizeof(CXIndexOptions);
  * \endcode
  */
 typedef struct CXIndexOptions {
@@ -368,9 +373,17 @@ typedef struct CXIndexOptions {
    */
   unsigned DisplayDiagnostics : 1;
   /**
+   * Store PCH in memory. If zero, PCH are stored in temporary files.
+   */
+  unsigned StorePreamblesInMemory : 1;
+  unsigned /*Reserved*/ : 13;
+
+  /**
    * The path to a directory, in which to store temporary PCH files. If null or
    * empty, the default system temporary directory is used. These PCH files are
    * deleted on clean exit but stay on disk if the program crashes or is killed.
+   *
+   * This option is ignored if \a StorePreamblesInMemory is non-zero.
    *
    * Libclang does not create the directory at the specified path in the file
    * system. Therefore it must exist, or storing PCH files will fail.
@@ -432,7 +445,9 @@ clang_createIndexWithOptions(const CXIndexOptions *options);
 /**
  * Sets general options associated with a CXIndex.
  *
- * This function is DEPRECATED. Set CXIndexOptions::GlobalOptions and call
+ * This function is DEPRECATED. Set
+ * CXIndexOptions::ThreadBackgroundPriorityForIndexing and/or
+ * CXIndexOptions::ThreadBackgroundPriorityForEditing and call
  * clang_createIndexWithOptions() instead.
  *
  * For example:
@@ -2916,10 +2931,15 @@ enum CXTypeKind {
   CXType_OCLIntelSubgroupAVCImeResult = 169,
   CXType_OCLIntelSubgroupAVCRefResult = 170,
   CXType_OCLIntelSubgroupAVCSicResult = 171,
+  CXType_OCLIntelSubgroupAVCImeResultSingleReferenceStreamout = 172,
+  CXType_OCLIntelSubgroupAVCImeResultDualReferenceStreamout = 173,
+  CXType_OCLIntelSubgroupAVCImeSingleReferenceStreamin = 174,
+  CXType_OCLIntelSubgroupAVCImeDualReferenceStreamin = 175,
+
+  /* Old aliases for AVC OpenCL extension types. */
   CXType_OCLIntelSubgroupAVCImeResultSingleRefStreamout = 172,
   CXType_OCLIntelSubgroupAVCImeResultDualRefStreamout = 173,
   CXType_OCLIntelSubgroupAVCImeSingleRefStreamin = 174,
-
   CXType_OCLIntelSubgroupAVCImeDualRefStreamin = 175,
 
   CXType_ExtVector = 176,
@@ -3017,9 +3037,25 @@ CINDEX_LINKAGE unsigned long long
 clang_getEnumConstantDeclUnsignedValue(CXCursor C);
 
 /**
- * Retrieve the bit width of a bit field declaration as an integer.
+ * Returns non-zero if the cursor specifies a Record member that is a bit-field.
+ */
+CINDEX_LINKAGE unsigned clang_Cursor_isBitField(CXCursor C);
+
+/**
+ * Retrieve the bit width of a bit-field declaration as an integer.
  *
- * If a cursor that is not a bit field declaration is passed in, -1 is returned.
+ * If the cursor does not reference a bit-field, or if the bit-field's width
+ * expression cannot be evaluated, -1 is returned.
+ *
+ * For example:
+ * \code
+ * if (clang_Cursor_isBitField(Cursor)) {
+ *   int Width = clang_getFieldDeclBitWidth(Cursor);
+ *   if (Width != -1) {
+ *     // The bit-field width is not value-dependent.
+ *   }
+ * }
+ * \endcode
  */
 CINDEX_LINKAGE int clang_getFieldDeclBitWidth(CXCursor C);
 
@@ -3647,12 +3683,6 @@ CINDEX_LINKAGE CXType clang_Type_getTemplateArgumentAsType(CXType T,
  * or non-C++ declarations, CXRefQualifier_None is returned.
  */
 CINDEX_LINKAGE enum CXRefQualifierKind clang_Type_getCXXRefQualifier(CXType T);
-
-/**
- * Returns non-zero if the cursor specifies a Record member that is a
- *   bitfield.
- */
-CINDEX_LINKAGE unsigned clang_Cursor_isBitField(CXCursor C);
 
 /**
  * Returns 1 if the base class specified by the cursor with kind

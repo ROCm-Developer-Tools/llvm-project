@@ -527,11 +527,10 @@ define i1 @foo(float %a, float %b, float %c, <4 x float> %vec, i64 %idx2) {
 ; SSE-LABEL: @foo(
 ; SSE-NEXT:    [[VECEXT_I291_I166:%.*]] = extractelement <4 x float> [[VEC:%.*]], i64 0
 ; SSE-NEXT:    [[SUB14_I167:%.*]] = fsub float undef, [[VECEXT_I291_I166]]
-; SSE-NEXT:    [[VECEXT_I276_I169:%.*]] = extractelement <4 x float> [[VEC]], i64 1
 ; SSE-NEXT:    [[TMP1:%.*]] = insertelement <2 x float> poison, float [[A:%.*]], i32 0
 ; SSE-NEXT:    [[TMP2:%.*]] = insertelement <2 x float> [[TMP1]], float [[C:%.*]], i32 1
-; SSE-NEXT:    [[TMP3:%.*]] = insertelement <2 x float> poison, float [[SUB14_I167]], i32 0
-; SSE-NEXT:    [[TMP4:%.*]] = insertelement <2 x float> [[TMP3]], float [[VECEXT_I276_I169]], i32 1
+; SSE-NEXT:    [[TMP3:%.*]] = shufflevector <4 x float> [[VEC]], <4 x float> poison, <2 x i32> <i32 undef, i32 1>
+; SSE-NEXT:    [[TMP4:%.*]] = insertelement <2 x float> [[TMP3]], float [[SUB14_I167]], i32 0
 ; SSE-NEXT:    [[TMP5:%.*]] = fmul <2 x float> [[TMP2]], [[TMP4]]
 ; SSE-NEXT:    [[TMP6:%.*]] = insertelement <2 x float> <float poison, float 3.000000e+01>, float [[B:%.*]], i32 0
 ; SSE-NEXT:    [[TMP7:%.*]] = fsub <2 x float> [[TMP5]], [[TMP6]]
@@ -643,12 +642,11 @@ define double @splat_loads(ptr %array1, ptr %array2, ptr %ptrA, ptr %ptrB) {
 ; SSE-NEXT:    [[TMP1:%.*]] = load <2 x double>, ptr [[ARRAY2:%.*]], align 8
 ; SSE-NEXT:    [[TMP2:%.*]] = shufflevector <2 x double> [[TMP1]], <2 x double> poison, <2 x i32> <i32 1, i32 0>
 ; SSE-NEXT:    [[TMP3:%.*]] = fmul <2 x double> [[TMP0]], [[TMP2]]
-; SSE-NEXT:    [[TMP4:%.*]] = shufflevector <2 x double> [[TMP2]], <2 x double> poison, <2 x i32> <i32 1, i32 0>
-; SSE-NEXT:    [[TMP5:%.*]] = fmul <2 x double> [[TMP0]], [[TMP4]]
-; SSE-NEXT:    [[TMP6:%.*]] = fadd <2 x double> [[TMP3]], [[TMP5]]
-; SSE-NEXT:    [[TMP7:%.*]] = extractelement <2 x double> [[TMP6]], i32 0
-; SSE-NEXT:    [[TMP8:%.*]] = extractelement <2 x double> [[TMP6]], i32 1
-; SSE-NEXT:    [[ADD3:%.*]] = fadd double [[TMP7]], [[TMP8]]
+; SSE-NEXT:    [[TMP4:%.*]] = fmul <2 x double> [[TMP0]], [[TMP1]]
+; SSE-NEXT:    [[TMP5:%.*]] = fadd <2 x double> [[TMP3]], [[TMP4]]
+; SSE-NEXT:    [[TMP6:%.*]] = extractelement <2 x double> [[TMP5]], i32 0
+; SSE-NEXT:    [[TMP7:%.*]] = extractelement <2 x double> [[TMP5]], i32 1
+; SSE-NEXT:    [[ADD3:%.*]] = fadd double [[TMP6]], [[TMP7]]
 ; SSE-NEXT:    ret double [[ADD3]]
 ;
 ; AVX-LABEL: @splat_loads(
@@ -700,14 +698,13 @@ define double @splat_loads_with_internal_uses(ptr %array1, ptr %array2, ptr %ptr
 ; SSE-NEXT:    [[TMP1:%.*]] = load <2 x double>, ptr [[ARRAY2:%.*]], align 8
 ; SSE-NEXT:    [[TMP2:%.*]] = shufflevector <2 x double> [[TMP1]], <2 x double> poison, <2 x i32> <i32 1, i32 0>
 ; SSE-NEXT:    [[TMP3:%.*]] = fmul <2 x double> [[TMP0]], [[TMP2]]
-; SSE-NEXT:    [[TMP4:%.*]] = shufflevector <2 x double> [[TMP2]], <2 x double> poison, <2 x i32> <i32 1, i32 0>
-; SSE-NEXT:    [[TMP5:%.*]] = fmul <2 x double> [[TMP0]], [[TMP4]]
-; SSE-NEXT:    [[TMP6:%.*]] = fadd <2 x double> [[TMP3]], [[TMP5]]
-; SSE-NEXT:    [[TMP7:%.*]] = shufflevector <2 x double> [[TMP2]], <2 x double> poison, <2 x i32> <i32 1, i32 1>
-; SSE-NEXT:    [[TMP8:%.*]] = fsub <2 x double> [[TMP6]], [[TMP7]]
-; SSE-NEXT:    [[TMP9:%.*]] = extractelement <2 x double> [[TMP8]], i32 0
-; SSE-NEXT:    [[TMP10:%.*]] = extractelement <2 x double> [[TMP8]], i32 1
-; SSE-NEXT:    [[RES:%.*]] = fadd double [[TMP9]], [[TMP10]]
+; SSE-NEXT:    [[TMP4:%.*]] = fmul <2 x double> [[TMP0]], [[TMP1]]
+; SSE-NEXT:    [[TMP5:%.*]] = fadd <2 x double> [[TMP3]], [[TMP4]]
+; SSE-NEXT:    [[TMP6:%.*]] = shufflevector <2 x double> [[TMP1]], <2 x double> poison, <2 x i32> zeroinitializer
+; SSE-NEXT:    [[TMP7:%.*]] = fsub <2 x double> [[TMP5]], [[TMP6]]
+; SSE-NEXT:    [[TMP8:%.*]] = extractelement <2 x double> [[TMP7]], i32 0
+; SSE-NEXT:    [[TMP9:%.*]] = extractelement <2 x double> [[TMP7]], i32 1
+; SSE-NEXT:    [[RES:%.*]] = fadd double [[TMP8]], [[TMP9]]
 ; SSE-NEXT:    ret double [[RES]]
 ;
 ; AVX-LABEL: @splat_loads_with_internal_uses(

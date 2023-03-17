@@ -78,6 +78,12 @@ MCInst RISCVInstrInfo::getNop() const {
 }
 
 unsigned RISCVInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
+                                             int &FrameIndex) const {
+  unsigned Dummy;
+  return isLoadFromStackSlot(MI, FrameIndex, Dummy);
+}
+
+unsigned RISCVInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
                                              int &FrameIndex,
                                              unsigned &MemBytes) const {
   switch (MI.getOpcode()) {
@@ -110,6 +116,12 @@ unsigned RISCVInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
   }
 
   return 0;
+}
+
+unsigned RISCVInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
+                                            int &FrameIndex) const {
+  unsigned Dummy;
+  return isStoreToStackSlot(MI, FrameIndex, Dummy);
 }
 
 unsigned RISCVInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
@@ -1639,11 +1651,11 @@ bool RISCVInstrInfo::verifyInstruction(const MachineInstr &MI,
                                        StringRef &ErrInfo) const {
   MCInstrDesc const &Desc = MI.getDesc();
 
-  for (auto &OI : enumerate(Desc.operands())) {
-    unsigned OpType = OI.value().OperandType;
+  for (const auto &[Index, Operand] : enumerate(Desc.operands())) {
+    unsigned OpType = Operand.OperandType;
     if (OpType >= RISCVOp::OPERAND_FIRST_RISCV_IMM &&
         OpType <= RISCVOp::OPERAND_LAST_RISCV_IMM) {
-      const MachineOperand &MO = MI.getOperand(OI.index());
+      const MachineOperand &MO = MI.getOperand(Index);
       if (MO.isImm()) {
         int64_t Imm = MO.getImm();
         bool Ok;

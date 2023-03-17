@@ -2415,8 +2415,6 @@ bool pointerInvalidatedByBlock(BasicBlock &BB, MemorySSA &MSSA, MemoryUse &MU) {
 
 static bool hoistMinMax(Instruction &I, Loop &L, ICFLoopSafetyInfo &SafetyInfo,
                         MemorySSAUpdater &MSSAU) {
-  auto *Preheader = L.getLoopPreheader();
-  assert(Preheader && "Loop is not in simplify form?");
   bool Inverse = false;
   bool IsLogical = false;
   using namespace PatternMatch;
@@ -2436,6 +2434,8 @@ static bool hoistMinMax(Instruction &I, Loop &L, ICFLoopSafetyInfo &SafetyInfo,
   auto MatchICmpAgainstInvariant = [&](Value *C, ICmpInst::Predicate &P,
                                        Value *&LHS, Value *&RHS) {
     if (!match(C, m_OneUse(m_ICmp(P, m_Value(LHS), m_Value(RHS)))))
+      return false;
+    if (!LHS->getType()->isIntegerTy())
       return false;
     if (!ICmpInst::isRelational(P))
       return false;
@@ -2465,6 +2465,8 @@ static bool hoistMinMax(Instruction &I, Loop &L, ICFLoopSafetyInfo &SafetyInfo,
   Intrinsic::ID id = ICmpInst::isSigned(P1)
                          ? (UseMin ? Intrinsic::smin : Intrinsic::smax)
                          : (UseMin ? Intrinsic::umin : Intrinsic::umax);
+  auto *Preheader = L.getLoopPreheader();
+  assert(Preheader && "Loop is not in simplify form?");
   IRBuilder<> Builder(Preheader->getTerminator());
   // We are about to create a new guaranteed use for RHS2 which might not exist
   // before (if it was a non-taken input of logical and/or instruction). If it

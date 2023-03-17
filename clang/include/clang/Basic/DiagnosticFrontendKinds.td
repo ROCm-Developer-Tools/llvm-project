@@ -11,7 +11,7 @@ class BackendInfo : CatBackend, ShowInSystemHeader;
 let Component = "Frontend" in {
 
 def err_fe_error_opening : Error<"error opening '%0': %1">;
-def err_fe_error_reading : Error<"error reading '%0'">;
+def err_fe_error_reading : Error<"error reading '%0': %1">;
 def err_fe_error_reading_stdin : Error<"error reading stdin: %0">;
 def err_fe_error_backend : Error<"error in backend: %0">, DefaultFatal;
 
@@ -308,6 +308,10 @@ def warn_atomic_op_oversized : Warning<
   "significant performance penalty"
   "; the access size (%0 bytes) exceeds the max lock-free size (%1  bytes)">,
 InGroup<AtomicAlignment>;
+
+def warn_sync_op_misaligned : Warning<
+  "__sync builtin operation MUST have natural alignment (consider using __atomic).">,
+  InGroup<SyncAlignment>;
 
 def warn_alias_with_section : Warning<
   "%select{alias|ifunc}1 will not be in section '%0' but in the same section "

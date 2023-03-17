@@ -269,6 +269,8 @@ struct IntrinsicLibrary {
   template <typename Shift>
   mlir::Value genMask(mlir::Type, llvm::ArrayRef<mlir::Value>);
   fir::ExtendedValue genMatmul(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
+  fir::ExtendedValue genMatmulTranspose(mlir::Type,
+                                        llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genMaxloc(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genMaxval(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
   fir::ExtendedValue genMerge(mlir::Type, llvm::ArrayRef<fir::ExtendedValue>);
@@ -679,6 +681,10 @@ static constexpr IntrinsicHandler handlers[]{
      &I::genMatmul,
      {{{"matrix_a", asAddr}, {"matrix_b", asAddr}}},
      /*isElemental=*/false},
+    {"matmul_transpose",
+     &I::genMatmulTranspose,
+     {{{"matrix_a", asAddr}, {"matrix_b", asAddr}}},
+     /*isElemental=*/false},
     {"max", &I::genExtremum<Extremum::Max, ExtremumBehavior::MinMaxss>},
     {"maxloc",
      &I::genMaxloc,
@@ -1087,16 +1093,54 @@ static mlir::Value genLibCall(fir::FirOpBuilder &builder, mlir::Location loc,
   LLVM_DEBUG(llvm::dbgs() << "Generating '" << libFuncName
                           << "' call with type ";
              libFuncType.dump(); llvm::dbgs() << "\n");
-  mlir::func::FuncOp funcOp =
-      builder.addNamedFunction(loc, libFuncName, libFuncType);
-  // C-interoperability rules apply to these library functions.
-  funcOp->setAttr(fir::getSymbolAttrName(),
-                  mlir::StringAttr::get(builder.getContext(), libFuncName));
-  // TODO: ensure 'strictfp' setting on the call for "precise/strict"
-  //       FP mode. Set appropriate Fast-Math Flags otherwise.
-  // TODO: we should also mark as many libm function as possible
-  //       with 'pure' attribute (of course, not in strict FP mode).
-  auto libCall = builder.create<fir::CallOp>(loc, funcOp, args);
+  mlir::func::FuncOp funcOp = builder.getNamedFunction(libFuncName);
+
+  if (!funcOp) {
+    funcOp = builder.addNamedFunction(loc, libFuncName, libFuncType);
+    // C-interoperability rules apply to these library functions.
+    funcOp->setAttr(fir::getSymbolAttrName(),
+                    mlir::StringAttr::get(builder.getContext(), libFuncName));
+    // Set fir.runtime attribute to distinguish the function that
+    // was just created from user functions with the same name.
+    funcOp->setAttr(fir::FIROpsDialect::getFirRuntimeAttrName(),
+                    builder.getUnitAttr());
+    auto libCall = builder.create<fir::CallOp>(loc, funcOp, args);
+    // TODO: ensure 'strictfp' setting on the call for "precise/strict"
+    //       FP mode. Set appropriate Fast-Math Flags otherwise.
+    // TODO: we should also mark as many libm function as possible
+    //       with 'pure' attribute (of course, not in strict FP mode).
+    LLVM_DEBUG(libCall.dump(); llvm::dbgs() << "\n");
+    return libCall.getResult(0);
+  }
+
+  // The function with the same name already exists.
+  fir::CallOp libCall;
+  mlir::Type soughtFuncType = funcOp.getFunctionType();
+
+  if (soughtFuncType == libFuncType) {
+    libCall = builder.create<fir::CallOp>(loc, funcOp, args);
+  } else {
+    // A function with the same name might have been declared
+    // before (e.g. with an explicit interface and a binding label).
+    // It is in general incorrect to use the same definition for the library
+    // call, but we have no other options. Type cast the function to match
+    // the requested signature and generate an indirect call to avoid
+    // later failures caused by the signature mismatch.
+    LLVM_DEBUG(mlir::emitWarning(
+        loc, llvm::Twine("function signature mismatch for '") +
+                 llvm::Twine(libFuncName) +
+                 llvm::Twine("' may lead to undefined behavior.")));
+    mlir::SymbolRefAttr funcSymbolAttr = builder.getSymbolRefAttr(libFuncName);
+    mlir::Value funcPointer =
+        builder.create<fir::AddrOfOp>(loc, soughtFuncType, funcSymbolAttr);
+    funcPointer = builder.createConvert(loc, libFuncType, funcPointer);
+
+    llvm::SmallVector<mlir::Value, 3> operands{funcPointer};
+    operands.append(args.begin(), args.end());
+    libCall = builder.create<fir::CallOp>(loc, libFuncType.getResults(),
+                                          nullptr, operands);
+  }
+
   LLVM_DEBUG(libCall.dump(); llvm::dbgs() << "\n");
   return libCall.getResult(0);
 }
@@ -3977,6 +4021,33 @@ IntrinsicLibrary::genMatmul(mlir::Type resultType,
   return readAndAddCleanUp(resultMutableBox, resultType, "MATMUL");
 }
 
+// MATMUL_TRANSPOSE
+fir::ExtendedValue
+IntrinsicLibrary::genMatmulTranspose(mlir::Type resultType,
+                                     llvm::ArrayRef<fir::ExtendedValue> args) {
+  assert(args.size() == 2);
+
+  // Handle required matmul_transpose arguments
+  fir::BoxValue matrixTmpA = builder.createBox(loc, args[0]);
+  mlir::Value matrixA = fir::getBase(matrixTmpA);
+  fir::BoxValue matrixTmpB = builder.createBox(loc, args[1]);
+  mlir::Value matrixB = fir::getBase(matrixTmpB);
+  unsigned resultRank =
+      (matrixTmpA.rank() == 1 || matrixTmpB.rank() == 1) ? 1 : 2;
+
+  // Create mutable fir.box to be passed to the runtime for the result.
+  mlir::Type resultArrayType = builder.getVarLenSeqTy(resultType, resultRank);
+  fir::MutableBoxValue resultMutableBox =
+      fir::factory::createTempMutableBox(builder, loc, resultArrayType);
+  mlir::Value resultIrBox =
+      fir::factory::getMutableIRBox(builder, loc, resultMutableBox);
+  // Call runtime. The runtime is allocating the result.
+  fir::runtime::genMatmulTranspose(builder, loc, resultIrBox, matrixA, matrixB);
+  // Read result from mutable fir.box and add it to the list of temps to be
+  // finalized by the StatementContext.
+  return readAndAddCleanUp(resultMutableBox, resultType, "MATMUL_TRANSPOSE");
+}
+
 // MERGE
 fir::ExtendedValue
 IntrinsicLibrary::genMerge(mlir::Type,
@@ -3997,10 +4068,18 @@ IntrinsicLibrary::genMerge(mlir::Type,
   mlir::Value fsourceCast = fsource;
   if (fir::isPolymorphicType(tsource.getType()) &&
       !fir::isPolymorphicType(fsource.getType())) {
-    tsourceCast = builder.createConvert(loc, fsource.getType(), tsource);
+    tsourceCast = builder.create<fir::ReboxOp>(loc, fsource.getType(), tsource,
+                                               /*shape*/ mlir::Value{},
+                                               /*slice=*/mlir::Value{});
+
+    // builder.createConvert(loc, fsource.getType(), tsource);
   } else if (!fir::isPolymorphicType(tsource.getType()) &&
              fir::isPolymorphicType(fsource.getType())) {
-    fsourceCast = builder.createConvert(loc, tsource.getType(), fsource);
+    fsourceCast = builder.create<fir::ReboxOp>(loc, tsource.getType(), fsource,
+                                               /*shape*/ mlir::Value{},
+                                               /*slice=*/mlir::Value{});
+
+    // fsourceCast = builder.createConvert(loc, tsource.getType(), fsource);
   } else {
     // FSOURCE and TSOURCE are not polymorphic.
     // FSOURCE has the same type as TSOURCE, but they may not have the same MLIR

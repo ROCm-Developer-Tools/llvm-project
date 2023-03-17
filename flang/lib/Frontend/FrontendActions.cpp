@@ -709,7 +709,7 @@ void CodeGenAction::runOptimizationPipeline(llvm::raw_pwrite_stream &os) {
   std::optional<llvm::PGOOptions> pgoOpt;
   llvm::StandardInstrumentations si(llvmModule->getContext(),
                                     opts.DebugPassManager);
-  si.registerCallbacks(pic, &fam);
+  si.registerCallbacks(pic, &mam);
   llvm::PassBuilder pb(tm.get(), pto, pgoOpt, &pic);
 
   // Attempt to load pass plugins and register their callbacks with PB.
@@ -736,10 +736,7 @@ void CodeGenAction::runOptimizationPipeline(llvm::raw_pwrite_stream &os) {
 
   // Create the pass manager.
   llvm::ModulePassManager mpm;
-  if (opts.OptimizationLevel == 0)
-    mpm = pb.buildO0DefaultPipeline(level, opts.PrepareForFullLTO ||
-                                               opts.PrepareForThinLTO);
-  else if (opts.PrepareForFullLTO)
+  if (opts.PrepareForFullLTO)
     mpm = pb.buildLTOPreLinkDefaultPipeline(level);
   else if (opts.PrepareForThinLTO)
     mpm = pb.buildThinLTOPreLinkDefaultPipeline(level);

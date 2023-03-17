@@ -612,7 +612,7 @@ public:
     return isOneOf(tok::kw_const, tok::kw_restrict, tok::kw_volatile,
                    tok::kw___attribute, tok::kw__Nonnull, tok::kw__Nullable,
                    tok::kw__Null_unspecified, tok::kw___ptr32, tok::kw___ptr64,
-                   TT_AttributeMacro);
+                   tok::kw___funcref, TT_AttributeMacro);
   }
 
   /// Determine whether the token is a simple-type-specifier.
@@ -1799,6 +1799,13 @@ struct AdditionalKeywords {
            (Tok.is(tok::kw_default) &&
             !(Next && Next->isOneOf(tok::colon, tok::semi, kw_clocking, kw_iff,
                                     kw_input, kw_output, kw_sequence)));
+  }
+
+  /// Returns whether \p Tok is a Verilog keyword that starts a
+  /// structured procedure like 'always'.
+  bool isVerilogStructuredProcedure(const FormatToken &Tok) const {
+    return Tok.isOneOf(kw_always, kw_always_comb, kw_always_ff, kw_always_latch,
+                       kw_final, kw_forever, kw_initial);
   }
 
   bool isVerilogQualifier(const FormatToken &Tok) const {

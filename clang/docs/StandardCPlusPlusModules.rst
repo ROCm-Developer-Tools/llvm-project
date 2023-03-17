@@ -591,6 +591,19 @@ The result would be ``NS::foo@M()``, which reads as ``NS::foo()`` in module ``M`
 The ABI implies that we can't declare something in a module unit and define it in a non-module unit (or vice-versa),
 as this would result in linking errors.
 
+If we still want to implement declarations within the compatible ABI in module unit,
+we can use the language-linkage specifier. Since the declarations in the language-linkage specifier
+is attached to the global module fragments. For example:
+
+.. code-block:: c++
+
+  export module M;
+  namespace NS {
+    export extern "C++" int foo();
+  }
+
+Now the linkage name of ``NS::foo()`` will be ``_ZN2NS3fooEv``.
+
 Known Problems
 --------------
 
@@ -602,6 +615,50 @@ please start the title with ``[C++20] [Modules]`` (or ``[C++2b] [Modules]``, etc
 and add the label ``clang:modules`` (if you have permissions for that).
 
 For higher level support for proposals, you could visit https://clang.llvm.org/cxx_status.html.
+
+Including headers after import is problematic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For example, the following example can be accept:
+
+.. code-block:: c++
+
+  #include <iostream>
+  import foo; // assume module 'foo' contain the declarations from `<iostream>`
+
+  int main(int argc, char *argv[])
+  {
+      std::cout << "Test\n";
+      return 0;
+  }
+
+but it will get rejected if we reverse the order of ``#include <iostream>`` and
+``import foo;``:
+
+.. code-block:: c++
+
+  import foo; // assume module 'foo' contain the declarations from `<iostream>`
+  #include <iostream>
+
+  int main(int argc, char *argv[])
+  {
+      std::cout << "Test\n";
+      return 0;
+  }
+
+Both of the above examples should be accepted.
+
+This is a limitation in the implementation. In the first example,
+the compiler will see and parse <iostream> first then the compiler will see the import.
+So the ODR Checking and declarations merging will happen in the deserializer.
+In the second example, the compiler will see the import first and the include second.
+As a result, the ODR Checking and declarations merging will happen in the semantic analyzer.
+
+So there is divergence in the implementation path. It might be understandable that why
+the orders matter here in the case.
+(Note that "understandable" is different from "makes sense").
+
+This is tracked in: https://github.com/llvm/llvm-project/issues/61465
 
 Ambiguous deduction guide
 ~~~~~~~~~~~~~~~~~~~~~~~~~
