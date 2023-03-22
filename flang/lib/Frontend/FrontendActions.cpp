@@ -55,6 +55,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/TargetParser/TargetParser.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <memory>
 
@@ -88,6 +89,59 @@ bool PrescanAndSemaDebugAction::beginSourceFileAction() {
   // compiler workflows!
   return runPrescan() && runParse() && (runSemanticChecks() || true) &&
          (generateRtTypeTables() || true);
+}
+
+// Get feature string which represents combined explicit target features
+// for AMD GPU and the target features specified by the user
+static std::string
+getExplicitAndImplicitAMDGPUTargetFeatures(CompilerInstance &ci,
+                                           const TargetOptions &targetOpts,
+                                           const llvm::Triple triple) {
+  llvm::StringRef cpu = targetOpts.cpu;
+  llvm::StringMap<bool> implicitFeaturesMap;
+  std::string errorMsg;
+  // Get the set of implicit target features
+  llvm::AMDGPU::fillAMDGPUFeatureMap(cpu, triple, implicitFeaturesMap);
+  if (!llvm::AMDGPU::insertWaveSizeFeature(cpu, triple, implicitFeaturesMap,
+                                           errorMsg)) {
+    llvm::SMDiagnostic err;
+    err.print(errorMsg.data(), llvm::errs());
+    unsigned diagID = ci.getDiagnostics().getCustomDiagID(
+        clang::DiagnosticsEngine::Error, "Unsupported feature ID");
+    ci.getDiagnostics().Report(diagID);
+    return std::string();
+  }
+
+  // Add target features specified by the user
+  for (auto &userFeature : targetOpts.featuresAsWritten) {
+    std::string userKeyString = userFeature.substr(1);
+    implicitFeaturesMap[userKeyString] = (userFeature[0] == '+');
+  }
+  llvm::SmallVector<std::string> featuresVec;
+  for (auto &implicitFeatureItem : implicitFeaturesMap) {
+    featuresVec.push_back((llvm::Twine(implicitFeatureItem.second ? "+" : "-") +
+                           implicitFeatureItem.first().str())
+                              .str());
+  }
+
+  return llvm::join(featuresVec, ",");
+}
+
+// Produces the string which represents target feature
+static std::string getTargetFeatures(CompilerInstance &ci) {
+  const TargetOptions &targetOpts = ci.getInvocation().getTargetOpts();
+  const llvm::Triple triple(targetOpts.triple);
+
+  if (!triple.isAMDGPU()) {
+    return llvm::join(targetOpts.featuresAsWritten.begin(),
+                      targetOpts.featuresAsWritten.end(), ",");
+  }
+
+  // Clang does not append all target features to the clang -cc1 invocation.
+  // Some AMDGPU features are passed implicitly by the Clang frontend.
+  // That's why we need to extract implicit AMDGPU target features and add
+  // them to the target features specified by the user
+  return getExplicitAndImplicitAMDGPUTargetFeatures(ci, targetOpts, triple);
 }
 
 static void setMLIRDataLayout(mlir::ModuleOp &mlirModule,
@@ -619,8 +673,7 @@ bool CodeGenAction::setUpTargetMachine() {
       llvm::CodeGenOpt::getLevel(CGOpts.OptimizationLevel);
   assert(OptLevelOrNone && "Invalid optimization level!");
   llvm::CodeGenOpt::Level OptLevel = *OptLevelOrNone;
-  std::string featuresStr = llvm::join(targetOpts.featuresAsWritten.begin(),
-                                       targetOpts.featuresAsWritten.end(), ",");
+  std::string featuresStr = getTargetFeatures(ci);
   tm.reset(theTarget->createTargetMachine(
       theTriple, /*CPU=*/targetOpts.cpu,
       /*Features=*/featuresStr, llvm::TargetOptions(),

@@ -23,6 +23,9 @@
 ! RUN: %flang --target=riscv64-linux-gnu -c %s -### 2>&1 \
 ! RUN: | FileCheck %s -check-prefix=CHECK-RV64
 
+! RUN: %flang --target=amdgcn-amd-amdhsa -mcpu=gfx908 -c %s -### 2>&1 \
+! RUN: | FileCheck %s -check-prefix=CHECK-AMDGPU
+
 
 ! CHECK-A57: "-fc1" "-triple" "aarch64-unknown-linux-gnu"
 ! CHECK-A57-SAME: "-target-cpu" "cortex-a57" "-target-feature" "+v8a" "-target-feature" "+aes" "-target-feature" "+crc" "-target-feature" "+fp-armv8" "-target-feature" "+sha2" "-target-feature" "+neon"
@@ -46,3 +49,6 @@
 
 ! CHECK-RV64: "-fc1" "-triple" "riscv64-unknown-linux-gnu"
 ! CHECK-RV64-SAME: "-target-cpu" "generic-rv64" "-target-feature" "+m" "-target-feature" "+a" "-target-feature" "+f" "-target-feature" "+d" "-target-feature" "+c"
+
+! CHECK-AMDGPU: "-fc1" "-triple" "amdgcn-amd-amdhsa"
+! CHECK-AMDGPU-SAME: "-target-cpu" "gfx908"
