@@ -173,6 +173,13 @@ public:
                                       const Function &NewFunc,
                                       AssumptionCache *AC);
 
+    /// Inherit all of the target dependent attributes and white-listed target
+    /// independent attributes. (e.g. If the extracted region contains a call to
+    /// an x86.sse instruction we need to make sure that the extracted region
+    /// has the "target-features" attribute allowing it to be lowered.
+
+    static void inheritTargetDependentAttributes(const Function *oldFunction,
+                                                 Function *newFunction);
     /// Test whether this code extractor is eligible.
     ///
     /// Based on the blocks used when constructing the code extractor,

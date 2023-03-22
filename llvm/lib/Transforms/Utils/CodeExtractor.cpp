@@ -807,91 +807,8 @@ void CodeExtractor::splitReturnBlocks() {
     }
 }
 
-/// constructFunction - make a function based on inputs and outputs, as follows:
-/// f(in0, ..., inN, out0, ..., outN)
-Function *CodeExtractor::constructFunction(const ValueSet &inputs,
-                                           const ValueSet &outputs,
-                                           BasicBlock *header,
-                                           BasicBlock *newRootNode,
-                                           BasicBlock *newHeader,
-                                           Function *oldFunction,
-                                           Module *M) {
-  LLVM_DEBUG(dbgs() << "inputs: " << inputs.size() << "\n");
-  LLVM_DEBUG(dbgs() << "outputs: " << outputs.size() << "\n");
-
-  // This function returns unsigned, outputs will go back by reference.
-  switch (NumExitBlocks) {
-  case 0:
-  case 1: RetTy = Type::getVoidTy(header->getContext()); break;
-  case 2: RetTy = Type::getInt1Ty(header->getContext()); break;
-  default: RetTy = Type::getInt16Ty(header->getContext()); break;
-  }
-
-  std::vector<Type *> ParamTy;
-  std::vector<Type *> AggParamTy;
-  ValueSet StructValues;
-  const DataLayout &DL = M->getDataLayout();
-
-  // Add the types of the input values to the function's argument list
-  for (Value *value : inputs) {
-    LLVM_DEBUG(dbgs() << "value used in func: " << *value << "\n");
-    if (AggregateArgs && !ExcludeArgsFromAggregate.contains(value)) {
-      AggParamTy.push_back(value->getType());
-      StructValues.insert(value);
-    } else
-      ParamTy.push_back(value->getType());
-  }
-
-  // Add the types of the output values to the function's argument list.
-  for (Value *output : outputs) {
-    LLVM_DEBUG(dbgs() << "instr used in func: " << *output << "\n");
-    if (AggregateArgs && !ExcludeArgsFromAggregate.contains(output)) {
-      AggParamTy.push_back(output->getType());
-      StructValues.insert(output);
-    } else
-      ParamTy.push_back(
-          PointerType::get(output->getType(), DL.getAllocaAddrSpace()));
-  }
-
-  assert(
-      (ParamTy.size() + AggParamTy.size()) ==
-          (inputs.size() + outputs.size()) &&
-      "Number of scalar and aggregate params does not match inputs, outputs");
-  assert((StructValues.empty() || AggregateArgs) &&
-         "Expeced StructValues only with AggregateArgs set");
-
-  // Concatenate scalar and aggregate params in ParamTy.
-  size_t NumScalarParams = ParamTy.size();
-  StructType *StructTy = nullptr;
-  if (AggregateArgs && !AggParamTy.empty()) {
-    StructTy = StructType::get(M->getContext(), AggParamTy);
-    ParamTy.push_back(PointerType::get(StructTy, DL.getAllocaAddrSpace()));
-  }
-
-  LLVM_DEBUG({
-    dbgs() << "Function type: " << *RetTy << " f(";
-    for (Type *i : ParamTy)
-      dbgs() << *i << ", ";
-    dbgs() << ")\n";
-  });
-
-  FunctionType *funcType = FunctionType::get(
-      RetTy, ParamTy, AllowVarArgs && oldFunction->isVarArg());
-
-  std::string SuffixToUse =
-      Suffix.empty()
-          ? (header->getName().empty() ? "extracted" : header->getName().str())
-          : Suffix;
-  // Create the new function
-  Function *newFunction = Function::Create(
-      funcType, GlobalValue::InternalLinkage, oldFunction->getAddressSpace(),
-      oldFunction->getName() + "." + SuffixToUse, M);
-
-  // Inherit all of the target dependent attributes and white-listed
-  // target independent attributes.
-  //  (e.g. If the extracted region contains a call to an x86.sse
-  //  instruction we need to make sure that the extracted region has the
-  //  "target-features" attribute allowing it to be lowered.
+void CodeExtractor::inheritTargetDependentAttributes(
+    const Function *oldFunction, Function *newFunction) {
   // FIXME: This should be changed to check to see if a specific
   //           attribute can not be inherited.
   for (const auto &Attr : oldFunction->getAttributes().getFnAttrs()) {
@@ -997,9 +914,94 @@ Function *CodeExtractor::constructFunction(const ValueSet &inputs,
       case Attribute::TombstoneKey:
         llvm_unreachable("Not a function attribute");
       }
-
     newFunction->addFnAttr(Attr);
   }
+}
+/// constructFunction - make a function based on inputs and outputs, as follows:
+/// f(in0, ..., inN, out0, ..., outN)
+Function *CodeExtractor::constructFunction(const ValueSet &inputs,
+                                           const ValueSet &outputs,
+                                           BasicBlock *header,
+                                           BasicBlock *newRootNode,
+                                           BasicBlock *newHeader,
+                                           Function *oldFunction, Module *M) {
+  LLVM_DEBUG(dbgs() << "inputs: " << inputs.size() << "\n");
+  LLVM_DEBUG(dbgs() << "outputs: " << outputs.size() << "\n");
+  // This function returns unsigned, outputs will go back by reference.
+  switch (NumExitBlocks) {
+  case 0:
+  case 1:
+    RetTy = Type::getVoidTy(header->getContext());
+    break;
+  case 2:
+    RetTy = Type::getInt1Ty(header->getContext());
+    break;
+  default:
+    RetTy = Type::getInt16Ty(header->getContext());
+    break;
+  }
+
+  std::vector<Type *> ParamTy;
+  std::vector<Type *> AggParamTy;
+  ValueSet StructValues;
+  const DataLayout &DL = M->getDataLayout();
+
+  // Add the types of the input values to the function's argument list
+  for (Value *value : inputs) {
+    LLVM_DEBUG(dbgs() << "value used in func: " << *value << "\n");
+    if (AggregateArgs && !ExcludeArgsFromAggregate.contains(value)) {
+      AggParamTy.push_back(value->getType());
+      StructValues.insert(value);
+    } else
+      ParamTy.push_back(value->getType());
+  }
+
+  // Add the types of the output values to the function's argument list.
+  for (Value *output : outputs) {
+    LLVM_DEBUG(dbgs() << "instr used in func: " << *output << "\n");
+    if (AggregateArgs && !ExcludeArgsFromAggregate.contains(output)) {
+      AggParamTy.push_back(output->getType());
+      StructValues.insert(output);
+    } else
+      ParamTy.push_back(
+          PointerType::get(output->getType(), DL.getAllocaAddrSpace()));
+  }
+
+  assert(
+      (ParamTy.size() + AggParamTy.size()) ==
+          (inputs.size() + outputs.size()) &&
+      "Number of scalar and aggregate params does not match inputs, outputs");
+  assert((StructValues.empty() || AggregateArgs) &&
+         "Expeced StructValues only with AggregateArgs set");
+
+  // Concatenate scalar and aggregate params in ParamTy.
+  size_t NumScalarParams = ParamTy.size();
+  StructType *StructTy = nullptr;
+  if (AggregateArgs && !AggParamTy.empty()) {
+    StructTy = StructType::get(M->getContext(), AggParamTy);
+    ParamTy.push_back(PointerType::get(StructTy, DL.getAllocaAddrSpace()));
+  }
+
+  LLVM_DEBUG({
+    dbgs() << "Function type: " << *RetTy << " f(";
+    for (Type *i : ParamTy)
+      dbgs() << *i << ", ";
+    dbgs() << ")\n";
+  });
+
+  FunctionType *funcType = FunctionType::get(
+      RetTy, ParamTy, AllowVarArgs && oldFunction->isVarArg());
+
+  std::string SuffixToUse =
+      Suffix.empty()
+          ? (header->getName().empty() ? "extracted" : header->getName().str())
+          : Suffix;
+  // Create the new function
+  Function *newFunction = Function::Create(
+      funcType, GlobalValue::InternalLinkage, oldFunction->getAddressSpace(),
+      oldFunction->getName() + "." + SuffixToUse, M);
+
+  inheritTargetDependentAttributes(oldFunction, newFunction);
   newFunction->insert(newFunction->end(), newRootNode);
 
   // Create scalar and aggregate iterators to name all of the arguments we

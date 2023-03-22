@@ -2454,3 +2454,38 @@ llvm.func @omp_opaque_pointers(%arg0 : !llvm.ptr, %arg1: !llvm.ptr, %expr: i32) 
   }
   llvm.return
 }
+
+// -----
+
+// CHECK: @omp_target_features_test() #0 {
+module attributes {llvm.target_triple = "amdgcn-amd-amdhsa", omp.target_cpu = "gfx908", omp.target_cpu_features = "+dot3-insts,+dot4-insts,+s-memtime-inst,+16-bit-insts,+s-memrealtime,+dot6-insts,+dl-insts,+wavefrontsize64,+gfx9-insts,+gfx8-insts,+ci-insts,+dot10-insts,+dot7-insts,+dot1-insts,+dot5-insts,+mai-insts,+dpp,+dot2-insts"} {
+  llvm.func @omp_target_features_test() {
+    llvm.return
+  }
+}
+
+// CHECK: attributes #0 = { "target-cpu"="gfx908"
+// CHECK-SAME: "target-features"="+dot3-insts,+dot4-insts,+s-memtime-inst,
+// CHECK-SAME: +16-bit-insts,+s-memrealtime,+dot6-insts,+dl-insts,
+// CHECK-SAME: +wavefrontsize64,+gfx9-insts,+gfx8-insts,+ci-insts,+dot10-insts,
+// CHECK-SAME: +dot7-insts,+dot1-insts,+dot5-insts,+mai-insts,+dpp,+dot2-insts"
+
+// -----
+
+module attributes {llvm.target_triple = "amdgcn-amd-amdhsa", omp.target_cpu = "gfx908", omp.target_cpu_features = "+dot3-insts,+dot4-insts,+s-memtime-inst,+16-bit-insts,+s-memrealtime,+dot6-insts,+dl-insts,+wavefrontsize64,+gfx9-insts,+gfx8-insts,+ci-insts,+dot10-insts,+dot7-insts,+dot1-insts,+dot5-insts,+mai-insts,+dpp,+dot2-insts"} {
+// CHECK: @test_omp_attr() #0 {
+// CHECK: @test_omp_attr..omp_par() #0 {
+// CHECK: @test_omp_attr..omp_par.wrapper(i32 %{{.*}}) #0 {
+
+  llvm.func @test_omp_attr() {
+    omp.task {
+      omp.terminator
+    }
+  llvm.return
+  }
+}
+// CHECK: attributes #0 = { "target-cpu"="gfx908"
+// CHECK-SAME: "target-features"="+dot3-insts,+dot4-insts,+s-memtime-inst,
+// CHECK-SAME: +16-bit-insts,+s-memrealtime,+dot6-insts,+dl-insts,
+// CHECK-SAME: +wavefrontsize64,+gfx9-insts,+gfx8-insts,+ci-insts,+dot10-insts,
+// CHECK-SAME: +dot7-insts,+dot1-insts,+dot5-insts,+mai-insts,+dpp,+dot2-insts"

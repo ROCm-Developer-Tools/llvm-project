@@ -1454,6 +1454,40 @@ StringRef OpenMPDialect::getDeclareTargetDeviceType(Operation *func) {
   return {};
 }
 
+// Set the omp.target_cpu attribute on the module with the specified string
+void OpenMPDialect::setTargetCpu(Operation *module, llvm::StringRef cpu) {
+  module->setAttr(mlir::StringAttr::get(module->getContext(),
+                                        llvm::Twine{"omp.target_cpu"}),
+                  mlir::StringAttr::get(module->getContext(), cpu));
+}
+
+// Return the value of the omp.target_cpu attribute stored in the module if it
+// exists, otherwise return empty by default
+std::string OpenMPDialect::getTargetCpu(Operation *module) {
+  if (Attribute targetCpu = module->getAttr("omp.target_cpu"))
+    if (targetCpu.isa<mlir::StringAttr>())
+      return targetCpu.dyn_cast<StringAttr>().getValue().str();
+  return llvm::Twine{""}.str();
+}
+
+// Set the omp.target_cpu_features attribute on the module with
+// the specified string
+void OpenMPDialect::setTargetCpuFeatures(Operation *module,
+                                         llvm::StringRef cpuFeatures) {
+  module->setAttr(mlir::StringAttr::get(module->getContext(),
+                                        llvm::Twine{"omp.target_cpu_features"}),
+                  mlir::StringAttr::get(module->getContext(), cpuFeatures));
+}
+
+// Return the value of the omp.target_cpu_features attribute stored in the
+// module if it exists, otherwise return empty by default
+std::string OpenMPDialect::getTargetCpuFeatures(Operation *module) {
+  if (Attribute targetCpu = module->getAttr("omp.target_cpu_features"))
+    if (targetCpu.isa<mlir::StringAttr>())
+      return targetCpu.dyn_cast<StringAttr>().getValue().str();
+  return llvm::Twine{""}.str();
+}
+
 #define GET_ATTRDEF_CLASSES
 #include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.cpp.inc"
 

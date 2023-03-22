@@ -1556,9 +1556,54 @@ public:
   LogicalResult
   convertOperation(Operation *op, llvm::IRBuilderBase &builder,
                    LLVM::ModuleTranslation &moduleTranslation) const final;
+  LogicalResult
+  amendOperation(Operation *op, NamedAttribute attribute,
+                 LLVM::ModuleTranslation &moduleTranslation) const final;
 };
 
 } // namespace
+
+/// Convert OpenMP MLIR target attributes to LLVM function attributes
+static void
+trySetLLVMFunctionTargetAttr(Operation *Op, NamedAttribute namedAttr,
+                             StringAttr valueAttr,
+                             LLVM::ModuleTranslation &moduleTranslation) {
+  std::string LLVMFuncAttrName;
+  if (namedAttr.getName() == "omp.target_cpu")
+    LLVMFuncAttrName = "target-cpu";
+  else if (namedAttr.getName() == "omp.target_cpu_features")
+    LLVMFuncAttrName = "target-features";
+  else
+    return;
+
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  ompBuilder->addAttributeToModuleFunctions(LLVMFuncAttrName,
+                                            valueAttr.getValue().str());
+}
+
+/// Given an OpenMP MLIR attribute, create the corresponding LLVM-IR, runtime
+/// calls, or operation amendments
+LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
+    Operation *op, NamedAttribute attribute,
+    LLVM::ModuleTranslation &moduleTranslation) const {
+
+  return llvm::TypeSwitch<Attribute, LogicalResult>(attribute.getValue())
+      .Case([&](mlir::StringAttr attr) {
+        // check if given string attributes relate to omp.target_cpu or
+        // omp.target_cpu_features. If yes, try to add LLVM function
+        // attributes
+        trySetLLVMFunctionTargetAttr(op, attribute, attr, moduleTranslation);
+        return success();
+      })
+      .Default([&](Attribute attr) {
+        // fall through for omp attributes that do not require lowering and/or
+        // have no concrete definition and thus no type to define a case on
+        // e.g. omp.is_device
+        return success();
+      });
+
+  return failure();
+}
 
 /// Given an OpenMP MLIR operation, create the corresponding LLVM IR
 /// (including OpenMP runtime calls).

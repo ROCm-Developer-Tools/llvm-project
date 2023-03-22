@@ -41,6 +41,21 @@ def OpenMP_Dialect : Dialect {
     static void setDeclareTarget(Operation *func, StringRef deviceType);
     static bool isDeclareTarget(Operation *func);
     static StringRef getDeclareTargetDeviceType(Operation *func);
+
+    // Set the omp.target_cpu attribute on the module with the specified string
+    static void setTargetCpu(Operation* module, StringRef cpu);
+
+    // Return the value of the omp.target_cpu attribute stored in the module if it
+    // exists, otherwise return empty by default
+    static std::string getTargetCpu(Operation* module);
+
+    // Set the omp.target_cpu_features attribute on the module with
+    // the specified string
+    static void setTargetCpuFeatures(Operation* module, StringRef cpuFeatures);
+
+    // Return the value of the omp.target_cpu_features attribute stored in
+    // the module if it exists, otherwise return empty by default
+    static std::string getTargetCpuFeatures(Operation* module);
   }];
 }
 

@@ -2175,6 +2175,13 @@ public:
   /// \param Name Name of the variable.
   GlobalVariable *getOrCreateInternalVariable(Type *Ty, const StringRef &Name,
                                               unsigned AddressSpace = 0);
+
+  /// Add function attribute to all functions which are defined inside module
+  /// but they don't have given attribute
+  /// \param AttributeName Name of the attribute
+  /// \param AttributeValue Value of the attribute
+  void addAttributeToModuleFunctions(StringRef AttributeName,
+                                     StringRef AttributeValue);
 };
 
 /// Class to represented the control flow structure of an OpenMP canonical loop.

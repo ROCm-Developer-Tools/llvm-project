@@ -1405,6 +1405,7 @@ OpenMPIRBuilder::createTask(const LocationDescription &Loc,
         (Twine(OutlinedFn.getName()) + ".wrapper").str(),
         FunctionType::get(Builder.getInt32Ty(), WrapperArgTys, false));
     Function *WrapperFunc = dyn_cast<Function>(WrapperFuncVal.getCallee());
+    CodeExtractor::inheritTargetDependentAttributes(&OutlinedFn, WrapperFunc);
     PointerType *WrapperFuncBitcastType =
         FunctionType::get(Builder.getInt32Ty(),
                           {Builder.getInt32Ty(), Builder.getInt8PtrTy()}, false)
@@ -5035,6 +5036,19 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
     } else {
       llvm_unreachable("Unsupported entry kind.");
     }
+  }
+}
+
+void OpenMPIRBuilder::addAttributeToModuleFunctions(StringRef AttributeName,
+                                                    StringRef AttributeValue) {
+  if (AttributeName.empty() || AttributeValue.empty())
+    return;
+  for (Function &f : M.functions()) {
+    if (f.isDeclaration())
+      continue;
+    if (f.hasFnAttribute(AttributeName))
+      continue;
+    f.addFnAttr(AttributeName, AttributeValue);
   }
 }
 
