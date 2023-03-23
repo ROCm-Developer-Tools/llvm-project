@@ -8,6 +8,7 @@
 
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/JITLink/EHFrameSupport.h"
+#include "llvm/ExecutionEngine/JITLink/aarch32.h"
 #include "llvm/ExecutionEngine/Orc/DebugObjectManagerPlugin.h"
 #include "llvm/ExecutionEngine/Orc/ObjectFileInterface.h"
 #include "llvm/ExecutionEngine/Orc/Shared/ObjectFormats.h"
@@ -37,6 +38,13 @@ bool hasInitializerSection(jitlink::LinkGraph &G) {
   }
 
   return false;
+}
+
+JITTargetAddress getJITSymbolPtrForSymbol(Symbol &Sym) {
+  uint64_t CallableAddr = Sym.getAddress().getValue();
+  if (Sym.isCallable() && Sym.hasTargetFlags(aarch32::ThumbSymbol))
+    CallableAddr |= 0x01; // thumb bit
+  return CallableAddr;
 }
 
 JITSymbolFlags getJITSymbolFlagsForSymbol(Symbol &Sym) {
@@ -215,10 +223,9 @@ public:
     for (auto *Sym : G.defined_symbols())
       if (Sym->hasName() && Sym->getScope() != Scope::Local) {
         auto InternedName = ES.intern(Sym->getName());
+        auto Ptr = getJITSymbolPtrForSymbol(*Sym);
         auto Flags = getJITSymbolFlagsForSymbol(*Sym);
-
-        InternedResult[InternedName] =
-            JITEvaluatedSymbol(Sym->getAddress().getValue(), Flags);
+        InternedResult[InternedName] = JITEvaluatedSymbol(Ptr, Flags);
         if (AutoClaim && !MR->getSymbols().count(InternedName)) {
           assert(!ExtraSymbolsToClaim.count(InternedName) &&
                  "Duplicate symbol to claim?");
@@ -229,9 +236,9 @@ public:
     for (auto *Sym : G.absolute_symbols())
       if (Sym->hasName() && Sym->getScope() != Scope::Local) {
         auto InternedName = ES.intern(Sym->getName());
+        auto Ptr = getJITSymbolPtrForSymbol(*Sym);
         auto Flags = getJITSymbolFlagsForSymbol(*Sym);
-        InternedResult[InternedName] =
-            JITEvaluatedSymbol(Sym->getAddress().getValue(), Flags);
+        InternedResult[InternedName] = JITEvaluatedSymbol(Ptr, Flags);
         if (AutoClaim && !MR->getSymbols().count(InternedName)) {
           assert(!ExtraSymbolsToClaim.count(InternedName) &&
                  "Duplicate symbol to claim?");

@@ -181,6 +181,8 @@ Improvements to Clang's diagnostics
 - Clang now avoids duplicate warnings on unreachable ``[[fallthrough]];`` statements
   previously issued from ``-Wunreachable-code`` and ``-Wunreachable-code-fallthrough``
   by prioritizing ``-Wunreachable-code-fallthrough``.
+- Clang now correctly diagnoses statement attributes ``[[clang::always_inine]]`` and
+  ``[[clang::noinline]]`` when used on a statement with dependent call expressions.
 
 Bug Fixes in This Version
 -------------------------
@@ -217,6 +219,12 @@ Bug Fixes in This Version
 - Fix crash when using ``[[clang::always_inline]]`` or ``[[clang::noinline]]``
   statement attributes on a call to a template function in the body of a
   template function.
+- Fix coroutines issue where ``get_return_object()`` result was always eargerly
+  converted to the return type. Eager initialization (allowing RVO) is now only
+  perfomed when these types match, otherwise deferred initialization is used,
+  enabling short-circuiting coroutines use cases. This fixes
+  (`#56532 <https://github.com/llvm/llvm-project/issues/56532>`_) in
+  antecipation of `CWG2563 <https://cplusplus.github.io/CWG/issues/2563.html>_`.
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -239,8 +247,8 @@ Bug Fixes to C++ Support
 - Fix incorrect deletion of the default constructor of unions in some
   cases. (`#48416 <https://github.com/llvm/llvm-project/issues/48416>`_)
 - No longer issue a pre-C++2b compatibility warning in ``-pedantic`` mode
-  regading overloaded `operator[]` with more than one parmeter. (`#61582
-  <https://github.com/llvm/llvm-project/issues/61582>`_)
+  regading overloaded `operator[]` with more than one parmeter or for static
+  lambdas. (`#61582 <https://github.com/llvm/llvm-project/issues/61582>`_)
 
 Bug Fixes to AST Handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^
