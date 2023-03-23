@@ -102,6 +102,18 @@ class OpenMP_Attr<string name, string attrMnemonic,
 }
 
 //===----------------------------------------------------------------------===//
+//  OpenMP Attributes
+//===----------------------------------------------------------------------===//
+
+def IsDeviceAttr : OpenMP_Attr<"IsDevice", "isdevice"> {
+  let parameters = (ins 
+    "bool":$is_device
+  );
+  
+  let assemblyFormat = "`<` struct(params) `>`";
+}
+
+//===----------------------------------------------------------------------===//
 //  2.12.7 Declare Target Directive
 //===----------------------------------------------------------------------===//
 
