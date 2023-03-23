@@ -37,10 +37,15 @@ class CaptureImplicitlyDeclareTargetPass
           if (currentDt != parentDt &&
               currentDt != mlir::omp::DeclareTargetDeviceType::any) {
             mlir::omp::OpenMPDialect::setDeclareTarget(
-                currFOp, mlir::omp::DeclareTargetDeviceType::any);
+                currFOp, mlir::omp::DeclareTargetDeviceType::any,
+                mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(
+                    functionOp));
           }
         } else {
-          mlir::omp::OpenMPDialect::setDeclareTarget(currFOp, parentDt);
+          mlir::omp::OpenMPDialect::setDeclareTarget(
+              currFOp, parentDt,
+              mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(
+                  functionOp));
         }
 
         markNestedFuncs(currFOp, moduleOp);

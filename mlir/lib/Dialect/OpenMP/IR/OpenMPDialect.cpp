@@ -1450,15 +1450,24 @@ void OpenMPDialect::setDeclareTarget(Operation *func, StringRef deviceType) {
                 mlir::StringAttr::get(func->getContext(), deviceType));
 }
 
-bool OpenMPDialect::isDeclareTarget(Operation *func) {
-  return func->hasAttr("omp.declare_target");
+bool OpenMPDialect::isDeclareTarget(Operation *funcOrGlobal) {
+  return funcOrGlobal->hasAttr("omp.declare_target");
 }
 
 mlir::omp::DeclareTargetDeviceType
-OpenMPDialect::getDeclareTargetDeviceType(Operation *func) {
-  if (mlir::Attribute declTar = func->getAttr("omp.declare_target")) {
-    if (declTar.isa<mlir::omp::DeclareTargetDeviceTypeAttr>())
-      return declTar.cast<mlir::omp::DeclareTargetDeviceTypeAttr>().getValue();
+OpenMPDialect::getDeclareTargetDeviceType(Operation *funcOrGlobal) {
+  if (mlir::Attribute declTar = funcOrGlobal->getAttr("omp.declare_target")) {
+    if (auto declAttr = declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
+      return declAttr.getDeviceType().getValue();
+  }
+  return {};
+}
+
+mlir::omp::DeclareTargetCaptureClause
+OpenMPDialect::getDeclareTargetCaptureClause(Operation *funcOrGlobal) {
+  if (mlir::Attribute declTar = funcOrGlobal->getAttr("omp.declare_target")) {
+    if (auto declAttr = declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
+      return declAttr.getCaptureClause().getValue();
   }
   return {};
 }

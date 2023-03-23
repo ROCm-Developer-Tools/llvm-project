@@ -94,6 +94,13 @@ def IntLikeType : AnyTypeOf<[AnyInteger, Index]>;
 def OpenMP_PointerLikeType : TypeAlias<OpenMP_PointerLikeTypeInterface,
 	"OpenMP-compatible variable type">;
 
+class OpenMP_Attr<string name, string attrMnemonic,
+                list<Trait> traits = [],
+                string baseCppClass = "::mlir::Attribute">
+    : AttrDef<OpenMP_Dialect, name, traits, baseCppClass> {
+  let mnemonic = attrMnemonic;
+}
+
 //===----------------------------------------------------------------------===//
 //  2.12.7 Declare Target Directive
 //===----------------------------------------------------------------------===//
@@ -113,6 +120,31 @@ def DeclareTargetDeviceType : I32EnumAttr<
 def DeclareTargetDeviceTypeAttr : EnumAttr<OpenMP_Dialect, DeclareTargetDeviceType, 
                                     "device_type"> {
   let assemblyFormat = "`(` $value `)`";
+}
+
+def CaptureClauseLink : I32EnumAttrCase<"to", 0>;
+def CaptureClauseTo   : I32EnumAttrCase<"link", 1>;
+
+def DeclareTargetCaptureClause : I32EnumAttr<
+    "DeclareTargetCaptureClause",
+    "capture clause",
+    [CaptureClauseLink, CaptureClauseTo]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::omp";
+}
+
+def DeclareTargetCaptureClauseAttr : EnumAttr<OpenMP_Dialect, DeclareTargetCaptureClause, 
+                                    "capture_clause"> {
+  let assemblyFormat = "`(` $value `)`";
+}
+
+def DeclareTargetAttr : OpenMP_Attr<"DeclareTarget", "declaretarget"> {
+  let parameters = (ins 
+    OptionalParameter<"DeclareTargetDeviceTypeAttr">:$device_type,
+    OptionalParameter<"DeclareTargetCaptureClauseAttr">:$capture_clause
+  );
+  
+  let assemblyFormat = "`<` struct(params) `>`";
 }
 
 //===----------------------------------------------------------------------===//

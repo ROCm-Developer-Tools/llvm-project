@@ -1633,6 +1633,9 @@ getTargetEntryUniqueInfo(ASTContext &C, SourceLocation Loc,
 Address CGOpenMPRuntime::getAddrOfDeclareTargetVar(const VarDecl *VD) {
   if (CGM.getLangOpts().OpenMPSimd)
     return Address::invalid();
+
+  llvm::errs() << "getAddrOfDeclareTargetVar called \n";
+  
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
       OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
   if (Res && (*Res == OMPDeclareTargetDeclAttr::MT_Link ||
@@ -1648,7 +1651,7 @@ Address CGOpenMPRuntime::getAddrOfDeclareTargetVar(const VarDecl *VD) {
             CGM.getContext(), VD->getCanonicalDecl()->getBeginLoc());
         OS << llvm::format("_%x", EntryInfo.FileID);
       }
-      OS << "_decl_tgt_ref_ptr";
+       OS << "_decl_tgt_ref_ptr";
     }
     llvm::Value *Ptr = CGM.getModule().getNamedValue(PtrName);
     QualType PtrTy = CGM.getContext().getPointerType(VD->getType());
@@ -1847,6 +1850,9 @@ bool CGOpenMPRuntime::emitDeclareTargetVarDefinition(const VarDecl *VD,
   if (CGM.getLangOpts().OMPTargetTriples.empty() &&
       !CGM.getLangOpts().OpenMPIsDevice)
     return false;
+
+  llvm::errs() << "emitDeclareTargetVarDefinition called \n";
+  
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
       OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
   if (!Res || *Res == OMPDeclareTargetDeclAttr::MT_Link ||
@@ -10330,6 +10336,8 @@ bool CGOpenMPRuntime::emitTargetGlobalVariable(GlobalDecl GD) {
   if (!CGM.getLangOpts().OpenMPIsDevice)
     return false;
 
+  llvm::errs() << "emitTargetGlobalVariable called \n";
+  
   // Check if there are Ctors/Dtors in this declaration and look for target
   // regions in it. We use the complete variant to produce the kernel name
   // mangling.
@@ -10366,6 +10374,8 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
   if (CGM.getLangOpts().OMPTargetTriples.empty() &&
       !CGM.getLangOpts().OpenMPIsDevice)
     return;
+  
+  llvm::errs() << "registerTargetGlobalVariable executed \n";
 
   // If we have host/nohost variables, they do not need to be registered.
   std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
@@ -10393,6 +10403,7 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
   if ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
        *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&
       !HasRequiresUnifiedSharedMemory) {
+    llvm::errs() << "Enter registerTargetGlobalVariable 1 \n";
     Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
     VarName = CGM.getMangledName(VD);
     if (VD->hasDefinition(CGM.getContext()) != VarDecl::DeclarationOnly) {
@@ -10423,6 +10434,7 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
       }
     }
   } else {
+    llvm::errs() << "Enter registerTargetGlobalVariable 2 \n";
     assert(((*Res == OMPDeclareTargetDeclAttr::MT_Link) ||
             ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
               *Res == OMPDeclareTargetDeclAttr::MT_Enter) &&

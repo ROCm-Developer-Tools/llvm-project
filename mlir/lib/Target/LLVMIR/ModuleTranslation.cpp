@@ -679,7 +679,22 @@ static void addRuntimePreemptionSpecifier(bool dsoLocalRequested,
 /// Create named global variables that correspond to llvm.mlir.global
 /// definitions. Convert llvm.global_ctors and global_dtors ops.
 LogicalResult ModuleTranslation::convertGlobals() {
+  // Two problems:
+  // 1) The attributes are not respected at this point
+  // 2) LLVMGlobalOp's appear to be skipped by the usual convertop, because
+  //    it's handled here, but... this doesn't call amendOperation
+  // 3) Would an external interface be better? Or even work?
+  // 4) Would we be able to link ammendop and preserve attrs on rewrite of
+  // fir.globals?
+
   for (auto op : getModuleBody(mlirModule).getOps<LLVM::GlobalOp>()) {
+
+    // llvm::errs() << "isDeclareTarget? "
+    //              << mlir::omp::OpenMPDialect::isDeclareTarget(op) << "\n";
+
+    // mlir::omp::OpenMPDialect::setDeclareTarget(op,
+    // mlir::omp::DeclareTargetDeviceType::any); op->dump();
+
     llvm::Type *type = convertType(op.getType());
     llvm::Constant *cst = nullptr;
     if (op.getValueOrNull()) {
@@ -1387,6 +1402,17 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
         !o.hasTrait<OpTrait::IsTerminator>() &&
         failed(translator.convertOperation(o, llvmBuilder))) {
       return nullptr;
+    } else {
+      // Two problems:
+      // 1) The attributes are not respected at this point
+      // 2) LLVMGlobalOp's appear to be skipped above, but they are handled in a
+      // convertGlobal earlier... which may be where the attributes are dropped?
+      // but regardless it still doesn't seem to use ammendoperation...
+
+      // llvm::errs() << "skipping something \n";
+      // o.dump();
+      // llvm::errs() << "isDeclareTarget? " <<
+      // mlir::omp::OpenMPDialect::isDeclareTarget(&o) << "\n";
     }
   }
 

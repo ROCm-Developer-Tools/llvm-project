@@ -23,6 +23,7 @@
 
 namespace mlir::omp {
     enum class DeclareTargetDeviceType : uint32_t;
+    enum class DeclareTargetCaptureClause : uint32_t;
 } // namespace mlir::omp
 
 #include "mlir/Dialect/OpenMP/OpenMPOpsDialect.h.inc"

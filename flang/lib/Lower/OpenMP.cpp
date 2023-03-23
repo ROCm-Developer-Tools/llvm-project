@@ -2266,19 +2266,23 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
                          Fortran::lower::pft::Evaluation &eval,
                          const Fortran::parser::OpenMPDeclareTargetConstruct
                              &declareTargetConstruct) {
-  std::vector<Fortran::semantics::Symbol> symbols;
-  auto findFuncAndVarSyms = [&](const Fortran::parser::OmpObjectList &objList) {
+  std::vector<std::pair<mlir::omp::DeclareTargetCaptureClause,
+                        Fortran::semantics::Symbol>>
+      symbolAndClause;
+  auto findFuncAndVarSyms = [&](const Fortran::parser::OmpObjectList &objList,
+                                mlir::omp::DeclareTargetCaptureClause clause) {
     for (const auto &ompObject : objList.v) {
       Fortran::common::visit(
           Fortran::common::visitors{
               [&](const Fortran::parser::Designator &designator) {
                 if (const Fortran::parser::Name *name =
                         getDesignatorNameIfDataRef(designator)) {
-                  symbols.push_back(*name->symbol);
+                  symbolAndClause.push_back(
+                      std::make_pair(clause, *name->symbol));
                 }
               },
               [&](const Fortran::parser::Name &name) {
-                symbols.push_back(*name.symbol);
+                symbolAndClause.push_back(std::make_pair(clause, *name.symbol));
               }},
           ompObject.u);
     }
@@ -2298,25 +2302,29 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
   if (const auto *objectList{
           Fortran::parser::Unwrap<Fortran::parser::OmpObjectList>(spec.u)}) {
     // Case: declare target(func, var1, var2)
-    findFuncAndVarSyms(*objectList);
+    findFuncAndVarSyms(*objectList, mlir::omp::DeclareTargetCaptureClause::to);
   } else if (const auto *clauseList{
                  Fortran::parser::Unwrap<Fortran::parser::OmpClauseList>(
                      spec.u)}) {
     if (clauseList->v.empty()) {
       // Case: declare target, implicit capture of function
-      symbols.push_back(eval.getOwningProcedure()->getSubprogramSymbol());
+      symbolAndClause.push_back(
+          std::make_pair(mlir::omp::DeclareTargetCaptureClause::to,
+                         eval.getOwningProcedure()->getSubprogramSymbol()));
     }
 
     for (const auto &clause : clauseList->v) {
       if (const auto *toClause{
               std::get_if<Fortran::parser::OmpClause::To>(&clause.u)}) {
         // Case: declare target to(func, var1, var2)...
-        findFuncAndVarSyms(toClause->v);
+        findFuncAndVarSyms(toClause->v,
+                           mlir::omp::DeclareTargetCaptureClause::to);
       } else if (const auto *linkClause{
                      std::get_if<Fortran::parser::OmpClause::Link>(
                          &clause.u)}) {
         // Case: declare target link(var1, var2)...
-        findFuncAndVarSyms(linkClause->v);
+        findFuncAndVarSyms(linkClause->v,
+                           mlir::omp::DeclareTargetCaptureClause::link);
       } else if (const auto *deviceClause{
                      std::get_if<Fortran::parser::OmpClause::DeviceType>(
                          &clause.u)}) {
@@ -2326,19 +2334,18 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
     }
   }
 
-  for (auto sym : symbols) {
-    auto *op = mod.lookupSymbol(converter.mangleName(sym));
-    // Method 1: Remove function here if not desired and add adhoc
-    // attribute to the MLIR Funcs for special handling later
+  for (auto sym : symbolAndClause) {
+    auto *op = mod.lookupSymbol(converter.mangleName(std::get<1>(sym)));
+
     if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost) {
       mlir::omp::OpenMPDialect::setDeclareTarget(
-          op, mlir::omp::DeclareTargetDeviceType::nohost);
+          op, mlir::omp::DeclareTargetDeviceType::nohost, std::get<0>(sym));
     } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Host) {
       mlir::omp::OpenMPDialect::setDeclareTarget(
-          op, mlir::omp::DeclareTargetDeviceType::host);
+          op, mlir::omp::DeclareTargetDeviceType::host, std::get<0>(sym));
     } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Any) {
       mlir::omp::OpenMPDialect::setDeclareTarget(
-          op, mlir::omp::DeclareTargetDeviceType::any);
+          op, mlir::omp::DeclareTargetDeviceType::any, std::get<0>(sym));
     }
   }
 }
