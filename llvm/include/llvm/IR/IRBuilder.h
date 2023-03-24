@@ -2537,6 +2537,11 @@ public:
   CallInst *CreateAlignmentAssumption(const DataLayout &DL, Value *PtrValue,
                                       Value *Alignment,
                                       Value *OffsetValue = nullptr);
+
+  /// Tries to mark the given function nounwind based on the
+  /// non-existence of any throwing calls within it.  We believe this is
+  /// lightweight enough to do at -O0.
+  static void TryMarkNoThrow(llvm::Function *F);
 };
 
 /// This provides a uniform API for creating instructions and inserting

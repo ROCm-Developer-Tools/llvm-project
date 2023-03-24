@@ -1587,6 +1587,9 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
     Operation *op, NamedAttribute attribute,
     LLVM::ModuleTranslation &moduleTranslation) const {
 
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  ompBuilder->tryMarkNoThrowModuleFunctions();
+
   return llvm::TypeSwitch<Attribute, LogicalResult>(attribute.getValue())
       .Case([&](mlir::StringAttr attr) {
         // check if given string attributes relate to omp.target_cpu or

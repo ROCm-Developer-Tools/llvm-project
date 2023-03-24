@@ -1410,6 +1410,20 @@ CallInst *IRBuilderBase::CreateAlignmentAssumption(const DataLayout &DL,
   return CreateAlignmentAssumptionHelper(DL, PtrValue, Alignment, OffsetValue);
 }
 
+void IRBuilderBase::TryMarkNoThrow(llvm::Function *F) {
+  // LLVM treats 'nounwind' on a function as part of the type, so we
+  // can't do this on functions that can be overwritten.
+  if (F->isInterposable())
+    return;
+
+  for (llvm::BasicBlock &BB : *F)
+    for (llvm::Instruction &I : BB)
+      if (I.mayThrow())
+        return;
+
+  F->setDoesNotThrow();
+}
+
 IRBuilderDefaultInserter::~IRBuilderDefaultInserter() = default;
 IRBuilderCallbackInserter::~IRBuilderCallbackInserter() = default;
 IRBuilderFolder::~IRBuilderFolder() = default;

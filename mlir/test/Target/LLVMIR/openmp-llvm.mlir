@@ -2464,7 +2464,7 @@ module attributes {llvm.target_triple = "amdgcn-amd-amdhsa", omp.target_cpu = "g
   }
 }
 
-// CHECK: attributes #0 = { "target-cpu"="gfx908"
+// CHECK: attributes #0 = { nounwind "target-cpu"="gfx908"
 // CHECK-SAME: "target-features"="+dot3-insts,+dot4-insts,+s-memtime-inst,
 // CHECK-SAME: +16-bit-insts,+s-memrealtime,+dot6-insts,+dl-insts,
 // CHECK-SAME: +wavefrontsize64,+gfx9-insts,+gfx8-insts,+ci-insts,+dot10-insts,
@@ -2484,7 +2484,7 @@ module attributes {llvm.target_triple = "amdgcn-amd-amdhsa", omp.target_cpu = "g
   llvm.return
   }
 }
-// CHECK: attributes #0 = { "target-cpu"="gfx908"
+// CHECK: attributes #0 = {  nounwind "target-cpu"="gfx908"
 // CHECK-SAME: "target-features"="+dot3-insts,+dot4-insts,+s-memtime-inst,
 // CHECK-SAME: +16-bit-insts,+s-memrealtime,+dot6-insts,+dl-insts,
 // CHECK-SAME: +wavefrontsize64,+gfx9-insts,+gfx8-insts,+ci-insts,+dot10-insts,

@@ -39,6 +39,7 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/FPEnv.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
@@ -1278,22 +1279,6 @@ void CodeGenFunction::EmitBlockWithFallThrough(llvm::BasicBlock *BB,
     EmitBlock(SkipCountBB);
 }
 
-/// Tries to mark the given function nounwind based on the
-/// non-existence of any throwing calls within it.  We believe this is
-/// lightweight enough to do at -O0.
-static void TryMarkNoThrow(llvm::Function *F) {
-  // LLVM treats 'nounwind' on a function as part of the type, so we
-  // can't do this on functions that can be overwritten.
-  if (F->isInterposable()) return;
-
-  for (llvm::BasicBlock &BB : *F)
-    for (llvm::Instruction &I : BB)
-      if (I.mayThrow())
-        return;
-
-  F->setDoesNotThrow();
-}
-
 QualType CodeGenFunction::BuildFunctionArgList(GlobalDecl GD,
                                                FunctionArgList &Args) {
   const FunctionDecl *FD = cast<FunctionDecl>(GD.getDecl());
@@ -1491,7 +1476,7 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
   // If we haven't marked the function nothrow through other means, do
   // a quick pass now to see if we can.
   if (!CurFn->doesNotThrow())
-    TryMarkNoThrow(CurFn);
+    llvm::IRBuilderBase::TryMarkNoThrow(CurFn);
 }
 
 /// ContainsLabel - Return true if the statement contains a label in it.  If

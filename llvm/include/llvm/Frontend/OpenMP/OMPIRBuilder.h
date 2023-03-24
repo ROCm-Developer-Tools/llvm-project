@@ -2182,6 +2182,9 @@ public:
   /// \param AttributeValue Value of the attribute
   void addAttributeToModuleFunctions(StringRef AttributeName,
                                      StringRef AttributeValue);
+
+  /// Try to add nounwind attribute to the generated functions
+  void tryMarkNoThrowModuleFunctions();
 };
 
 /// Class to represented the control flow structure of an OpenMP canonical loop.

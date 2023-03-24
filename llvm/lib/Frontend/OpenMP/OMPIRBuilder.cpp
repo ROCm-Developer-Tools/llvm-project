@@ -5052,6 +5052,16 @@ void OpenMPIRBuilder::addAttributeToModuleFunctions(StringRef AttributeName,
   }
 }
 
+void OpenMPIRBuilder::tryMarkNoThrowModuleFunctions() {
+  for (Function &f : M.functions()) {
+    if (f.isDeclaration())
+      continue;
+    if (f.hasFnAttribute(Attribute::NoUnwind))
+      continue;
+    IRBuilderBase::TryMarkNoThrow(&f);
+  }
+}
+
 void TargetRegionEntryInfo::getTargetRegionEntryFnName(
     SmallVectorImpl<char> &Name, StringRef ParentName, unsigned DeviceID,
     unsigned FileID, unsigned Line, unsigned Count) {
