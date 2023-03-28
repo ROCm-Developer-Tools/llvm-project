@@ -78,7 +78,6 @@ clangd::Range getDiagnosticRange(llvm::StringRef Code, unsigned HashOffset) {
   return Result;
 }
 
-
 bool isFilteredByConfig(const Config &Cfg, llvm::StringRef HeaderPath) {
   // Convert the path to Unix slashes and try to match against the filter.
   llvm::SmallString<64> NormalizedPath(HeaderPath);
@@ -134,45 +133,6 @@ static bool mayConsiderUnused(const Inclusion &Inc, ParsedAST &AST,
     return false;
   }
   return true;
-}
-
-include_cleaner::Includes
-convertIncludes(const SourceManager &SM,
-                const llvm::ArrayRef<Inclusion> MainFileIncludes) {
-  include_cleaner::Includes Includes;
-  for (const Inclusion &Inc : MainFileIncludes) {
-    include_cleaner::Include TransformedInc;
-    llvm::StringRef WrittenRef = llvm::StringRef(Inc.Written);
-    TransformedInc.Spelled = WrittenRef.trim("\"<>");
-    TransformedInc.HashLocation =
-        SM.getComposedLoc(SM.getMainFileID(), Inc.HashOffset);
-    TransformedInc.Line = Inc.HashLine + 1;
-    TransformedInc.Angled = WrittenRef.starts_with("<");
-    auto FE = SM.getFileManager().getFile(Inc.Resolved);
-    if (!FE) {
-      elog("IncludeCleaner: Failed to get an entry for resolved path {0}: {1}",
-           Inc.Resolved, FE.getError().message());
-      continue;
-    }
-    TransformedInc.Resolved = *FE;
-    Includes.add(std::move(TransformedInc));
-  }
-  return Includes;
-}
-
-std::string spellHeader(ParsedAST &AST, const FileEntry *MainFile,
-                        include_cleaner::Header Provider) {
-  if (Provider.kind() == include_cleaner::Header::Physical) {
-    if (auto CanonicalPath =
-            getCanonicalPath(Provider.physical(), AST.getSourceManager())) {
-      std::string SpelledHeader =
-          llvm::cantFail(URI::includeSpelling(URI::create(*CanonicalPath)));
-      if (!SpelledHeader.empty())
-        return SpelledHeader;
-    }
-  }
-  return include_cleaner::spellHeader(
-      Provider, AST.getPreprocessor().getHeaderSearchInfo(), MainFile);
 }
 
 std::vector<include_cleaner::SymbolReference>
@@ -327,6 +287,44 @@ std::vector<Diag> generateUnusedIncludeDiagnostics(
 }
 } // namespace
 
+include_cleaner::Includes
+convertIncludes(const SourceManager &SM,
+                const llvm::ArrayRef<Inclusion> Includes) {
+  include_cleaner::Includes ConvertedIncludes;
+  for (const Inclusion &Inc : Includes) {
+    include_cleaner::Include TransformedInc;
+    llvm::StringRef WrittenRef = llvm::StringRef(Inc.Written);
+    TransformedInc.Spelled = WrittenRef.trim("\"<>");
+    TransformedInc.HashLocation =
+        SM.getComposedLoc(SM.getMainFileID(), Inc.HashOffset);
+    TransformedInc.Line = Inc.HashLine + 1;
+    TransformedInc.Angled = WrittenRef.starts_with("<");
+    auto FE = SM.getFileManager().getFile(Inc.Resolved);
+    if (!FE) {
+      elog("IncludeCleaner: Failed to get an entry for resolved path {0}: {1}",
+           Inc.Resolved, FE.getError().message());
+      continue;
+    }
+    TransformedInc.Resolved = *FE;
+    ConvertedIncludes.add(std::move(TransformedInc));
+  }
+  return ConvertedIncludes;
+}
+
+std::string spellHeader(ParsedAST &AST, const FileEntry *MainFile,
+                        include_cleaner::Header Provider) {
+  if (Provider.kind() == include_cleaner::Header::Physical) {
+    if (auto CanonicalPath =
+            getCanonicalPath(Provider.physical(), AST.getSourceManager())) {
+      std::string SpelledHeader =
+          llvm::cantFail(URI::includeSpelling(URI::create(*CanonicalPath)));
+      if (!SpelledHeader.empty())
+        return SpelledHeader;
+    }
+  }
+  return include_cleaner::spellHeader(
+      Provider, AST.getPreprocessor().getHeaderSearchInfo(), MainFile);
+}
 
 std::vector<const Inclusion *>
 getUnused(ParsedAST &AST,
@@ -391,15 +389,17 @@ IncludeCleanerFindings computeIncludeCleanerFindings(ParsedAST &AST) {
             Ref.RT != include_cleaner::RefType::Explicit)
           return;
 
-        auto &Tokens = AST.getTokens();
-        auto SpelledForExpanded =
-            Tokens.spelledForExpanded(Tokens.expandedTokens(Ref.RefLocation));
-        if (!SpelledForExpanded)
-          return;
-
-        auto Range = syntax::Token::range(SM, SpelledForExpanded->front(),
-                                          SpelledForExpanded->back());
-        MissingIncludeDiagInfo DiagInfo{Ref.Target, Range, Providers};
+        // We actually always want to map usages to their spellings, but
+        // spelling locations can point into preamble section. Using these
+        // offsets could lead into crashes in presence of stale preambles. Hence
+        // we use "getFileLoc" instead to make sure it always points into main
+        // file.
+        // FIXME: Use presumed locations to map such usages back to patched
+        // locations safely.
+        auto Loc = SM.getFileLoc(Ref.RefLocation);
+        const auto *Token = AST.getTokens().spelledTokenAt(Loc);
+        MissingIncludeDiagInfo DiagInfo{Ref.Target, Token->range(SM),
+                                        Providers};
         MissingIncludes.push_back(std::move(DiagInfo));
       });
   std::vector<const Inclusion *> UnusedIncludes =

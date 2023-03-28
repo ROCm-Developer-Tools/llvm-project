@@ -85,6 +85,13 @@ C++20 Feature Support
   (`#61278 <https://github.com/llvm/llvm-project/issues/61278>`_)
 - Announced C++20 Coroutines is fully supported on all targets except Windows, which
   still has some stability and ABI issues.
+- Downgraded use of a reserved identifier in a module export declaration from
+  an error to a warning under the ``-Wreserved-module-identifier`` warning
+  group. This warning is enabled by default. This addresses `#61446
+  <https://github.com/llvm/llvm-project/issues/61446>`_ and allows easier
+  building of precompiled modules. This diagnostic may be strengthened into an
+  error again in the future once there is a less fragile way to mark a module
+  as being part of the implementation rather than a user module.
 
 C++2b Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
@@ -124,6 +131,9 @@ Non-comprehensive list of changes in this release
 - Clang now supports ``__builtin_FILE_NAME()`` which returns the same
   information as the ``__FILE_NAME__`` macro (the presumed file name
   from the invocation point, with no path components included).
+- Clang now supports ``__builtin_assume_separate_storage`` that indicates that
+  its arguments point to objects in separate storage allocations.
+- Clang now supports expressions in ``#pragma clang __debug dump``.
 
 New Compiler Flags
 ------------------
@@ -174,8 +184,8 @@ Improvements to Clang's diagnostics
 - Diagnostic notes and fix-its are now generated for ``ifunc``/``alias`` attributes
   which point to functions whose names are mangled.
 - Diagnostics relating to macros on the command line of a preprocessed assembly
-  file or precompiled header are now reported as coming from the file
-  ``<command line>`` instead of ``<built-in>``.
+  file are now reported as coming from the file ``<command line>`` instead of
+  ``<built-in>``.
 - Clang constexpr evaluator now provides a more concise diagnostic when calling
   function pointer that is known to be null.
 - Clang now avoids duplicate warnings on unreachable ``[[fallthrough]];`` statements
@@ -183,6 +193,9 @@ Improvements to Clang's diagnostics
   by prioritizing ``-Wunreachable-code-fallthrough``.
 - Clang now correctly diagnoses statement attributes ``[[clang::always_inine]]`` and
   ``[[clang::noinline]]`` when used on a statement with dependent call expressions.
+- Clang now checks for completeness of the second and third arguments in the
+  conditional operator.
+  (`#59718 <https://github.com/llvm/llvm-project/issues/59718>`_)
 
 Bug Fixes in This Version
 -------------------------
@@ -225,6 +238,16 @@ Bug Fixes in This Version
   enabling short-circuiting coroutines use cases. This fixes
   (`#56532 <https://github.com/llvm/llvm-project/issues/56532>`_) in
   antecipation of `CWG2563 <https://cplusplus.github.io/CWG/issues/2563.html>_`.
+- Fix highlighting issue with ``_Complex`` and initialization list with more than
+  2 items. (`#61518 <https://github.com/llvm/llvm-project/issues/61518>`_)
+- Fix  ``getSourceRange`` on  ``VarTemplateSpecializationDecl`` and
+  ``VarTemplatePartialSpecializationDecl``, which represents variable with
+  the initializer, so it behaves consistently with other ``VarDecls`` and ends
+  on the last token of initializer, instead of right angle bracket of
+  the template argument list.
+- Fix false-positive diagnostic issued for consteval initializers of temporary
+  objects.
+  (`#60286 <https://github.com/llvm/llvm-project/issues/60286>`_)
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -269,6 +292,8 @@ AMDGPU Support
   undefined symbols in the created module to be a linker error. To prevent this,
   pass ``-Wl,--undefined`` if compiling directly, or ``-Xoffload-linker
   --undefined`` if using an offloading language.
+- The deprecated ``-mcode-object-v3`` and ``-mno-code-object-v3`` command-line 
+  options have been removed.
 
 X86 Support
 ^^^^^^^^^^^
@@ -301,6 +326,9 @@ RISC-V Support
   length. Valid values are powers of 2 between 64 and 65536. A value of 32
   should eventually be supported. We also accept "zvl" to use the Zvl*b
   extension from ``-march`` or ``-mcpu`` to the be the upper and lower bound.
+- Fixed incorrect ABI lowering of ``_Float16`` in the case of structs
+  containing ``_Float16`` that are eligible for passing via GPR+FPR or
+  FPR+FPR.
 
 CUDA/HIP Language Changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -348,6 +376,8 @@ clang-format
   Compared to ``NextLine`` style, ``NextLineOnly`` style will not try to
   put the initializers on the current line first, instead, it will try to
   put the initializers on the next line only.
+- Add additional Qualifier Ordering support for special cases such
+  as templates, requires clauses, long qualified names.
 
 libclang
 --------

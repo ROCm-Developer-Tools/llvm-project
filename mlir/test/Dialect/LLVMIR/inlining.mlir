@@ -160,12 +160,29 @@ llvm.func @caller() {
 
 // -----
 
-llvm.func @callee_noinline() attributes { passthrough = ["noinline"] }
-llvm.func @callee_optnone() attributes { passthrough = ["optnone"] }
-llvm.func @callee_noduplicate() attributes { passthrough = ["noduplicate"] }
-llvm.func @callee_presplitcoroutine() attributes { passthrough = ["presplitcoroutine"] }
-llvm.func @callee_returns_twice() attributes { passthrough = ["returns_twice"] }
-llvm.func @callee_strictfp() attributes { passthrough = ["strictfp"] }
+llvm.func @callee_noinline() attributes { passthrough = ["noinline"] } {
+  llvm.return
+}
+
+llvm.func @callee_optnone() attributes { passthrough = ["optnone"] } {
+  llvm.return
+}
+
+llvm.func @callee_noduplicate() attributes { passthrough = ["noduplicate"] } {
+  llvm.return
+}
+
+llvm.func @callee_presplitcoroutine() attributes { passthrough = ["presplitcoroutine"] } {
+  llvm.return
+}
+
+llvm.func @callee_returns_twice() attributes { passthrough = ["returns_twice"] } {
+  llvm.return
+}
+
+llvm.func @callee_strictfp() attributes { passthrough = ["strictfp"] } {
+  llvm.return
+}
 
 // CHECK-LABEL: llvm.func @caller
 // CHECK-NEXT: llvm.call @callee_noinline
@@ -377,5 +394,45 @@ llvm.func @with_byval_arg(%ptr : !llvm.ptr { llvm.byval = f64 }) attributes {mem
 // CHECK: "llvm.intr.memcpy"(%[[ALLOCA]], %[[PTR]]
 llvm.func @test_byval_write_only(%ptr : !llvm.ptr) {
   llvm.call @with_byval_arg(%ptr) : (!llvm.ptr) -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @ignored_attrs(%ptr : !llvm.ptr { llvm.inreg, llvm.nocapture, llvm.nofree, llvm.preallocated = i32, llvm.returned, llvm.alignstack = 32 : i64, llvm.writeonly, llvm.noundef, llvm.nonnull }, %x : i32 { llvm.zeroext }) -> (!llvm.ptr { llvm.noundef, llvm.inreg, llvm.nonnull }) {
+  llvm.return %ptr : !llvm.ptr
+}
+
+// CHECK-LABEL: @test_ignored_attrs
+// CHECK-NOT: llvm.call
+// CHECK-NEXT: llvm.return
+llvm.func @test_ignored_attrs(%ptr : !llvm.ptr, %x : i32) {
+  llvm.call @ignored_attrs(%ptr, %x) : (!llvm.ptr, i32) -> (!llvm.ptr)
+  llvm.return
+}
+
+// -----
+
+llvm.func @disallowed_arg_attr(%ptr : !llvm.ptr { llvm.align = 16 : i32 }) {
+  llvm.return
+}
+
+// CHECK-LABEL: @test_disallow_arg_attr
+// CHECK-NEXT: llvm.call
+llvm.func @test_disallow_arg_attr(%ptr : !llvm.ptr) {
+  llvm.call @disallowed_arg_attr(%ptr) : (!llvm.ptr) -> ()
+  llvm.return
+}
+
+// -----
+
+llvm.func @disallowed_res_attr(%ptr : !llvm.ptr) -> (!llvm.ptr { llvm.noalias }) {
+  llvm.return %ptr : !llvm.ptr
+}
+
+// CHECK-LABEL: @test_disallow_res_attr
+// CHECK-NEXT: llvm.call
+llvm.func @test_disallow_res_attr(%ptr : !llvm.ptr) {
+  llvm.call @disallowed_res_attr(%ptr) : (!llvm.ptr) -> (!llvm.ptr)
   llvm.return
 }
