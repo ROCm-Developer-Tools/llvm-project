@@ -995,7 +995,12 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
 LogicalResult ModuleTranslation::convertFunctions() {
   // Convert functions.
 
-  bool isDevice = mlir::omp::OpenMPDialect::getIsDevice(mlirModule);
+  bool isDevice = false;
+  if (auto offloadMod =
+          dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule)) {
+    isDevice = offloadMod.getIsDevice();
+  }
+
   for (auto function : getModuleBody(mlirModule).getOps<LLVMFuncOp>()) {
     // Ignore external functions.
     if (function.isExternal())

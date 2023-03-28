@@ -1660,8 +1660,12 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
         return convertOmpTargetData(op, builder, moduleTranslation);
       })
       .Case([&](omp::TargetOp) {
-        bool isDevice = mlir::omp::OpenMPDialect::getIsDevice(
-            op->getParentOfType<mlir::ModuleOp>());
+        bool isDevice = false;
+        if (auto offloadMod = dyn_cast<mlir::omp::OffloadModuleInterface>(
+                op->getParentOfType<mlir::ModuleOp>().getOperation())) {
+          isDevice = offloadMod.getIsDevice();
+        }
+
         printf("======== TargetOp detected with isDevice=%d\n", isDevice);
         op->dump();
         // Placeholder for Jan's convertOmpTarget(*op, builder,

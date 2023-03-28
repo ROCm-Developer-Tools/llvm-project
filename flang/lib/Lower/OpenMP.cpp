@@ -2216,7 +2216,11 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
   const auto &spec{std::get<Fortran::parser::OmpDeclareTargetSpecifier>(
       declareTargetConstruct.t)};
   auto mod = converter.getFirOpBuilder().getModule();
-  bool isOpenMPDevice = mlir::omp::OpenMPDialect::getIsDevice(mod);
+  bool isOpenMPDevice = false;
+  if (auto offloadMod =
+          dyn_cast<mlir::omp::OffloadModuleInterface>(mod.getOperation())) {
+    isOpenMPDevice = offloadMod.getIsDevice();
+  }
 
   // The default capture type
   auto deviceType = Fortran::parser::OmpDeviceTypeClause::Type::Any;
