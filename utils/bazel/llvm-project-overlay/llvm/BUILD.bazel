@@ -283,6 +283,10 @@ cc_library(
         # be an empty library unless zlib is enabled, in which case it will
         # both provide the necessary dependencies and configuration defines.
         "@llvm_zlib//:zlib",
+        # We unconditionally depend on the custom LLVM zstd wrapper. This will
+        # be an empty library unless zstd is enabled, in which case it will
+        # both provide the necessary dependencies and configuration defines.
+        "@llvm_zstd//:zstd",
     ],
 )
 
@@ -595,6 +599,12 @@ cc_library(
 
 cc_binary(
     name = "llvm-tblgen",
+    deps = [":UtilsTableGen"],
+    stamp = 0,
+)
+
+cc_library(
+    name = "UtilsTableGen",
     srcs = glob([
         "utils/TableGen/*.cpp",
         "utils/TableGen/*.inc",
@@ -605,8 +615,9 @@ cc_binary(
         # regular dependency.
         "include/llvm/MC/*.h",
     ]),
+    alwayslink = True,
     copts = llvm_copts,
-    stamp = 0,
+    textual_hdrs = glob(["utils/TableGen/*.def"]),
     deps = [
         ":LLVMTableGenGlobalISel",
         ":Support",
@@ -1321,6 +1332,20 @@ cc_library(
         ":Target",
         ":TransformUtils",
         ":config",
+    ],
+)
+
+cc_library(
+    name = "FrontendDebug",
+    srcs = glob([
+        "lib/Frontend/Debug/*.cpp",
+    ]),
+    hdrs = glob([
+        "include/llvm/Frontend/Debug/*.h",
+    ]),
+    copts = llvm_copts,
+    deps = [
+        ":Support",
     ],
 )
 
@@ -2555,6 +2580,7 @@ cc_library(
     ],
     copts = llvm_copts,
     linkopts = select({
+        "@platforms//os:android": [],
         "@bazel_tools//src/conditions:windows": [],
         "@bazel_tools//src/conditions:freebsd": [],
         "@bazel_tools//src/conditions:darwin": [],
@@ -2620,6 +2646,7 @@ cc_library(
     ]),
     copts = llvm_copts,
     linkopts = select({
+        "@platforms//os:android": [],
         "@bazel_tools//src/conditions:windows": [],
         "@bazel_tools//src/conditions:freebsd": [],
         "@bazel_tools//src/conditions:darwin": [],

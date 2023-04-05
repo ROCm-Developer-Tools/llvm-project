@@ -177,6 +177,11 @@ public:
   static std::unique_ptr<M68kOperand> createImm(const MCExpr *Expr, SMLoc Start,
                                                 SMLoc End);
 
+  // Imm for TRAP instruction
+  bool isTrapImm() const;
+  // Imm for BKPT instruction
+  bool isBkptImm() const;
+
   // MoveMask
   bool isMoveMask() const;
   void addMoveMaskOperands(MCInst &Inst, unsigned N) const;
@@ -223,6 +228,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeM68kAsmParser() {
   RegisterMCAsmParser<M68kAsmParser> X(getTheM68kTarget());
 }
 
+#define GET_REGISTER_MATCHER
 #define GET_MATCHER_IMPLEMENTATION
 #include "M68kGenAsmMatcher.inc"
 
@@ -348,6 +354,22 @@ std::unique_ptr<M68kOperand> M68kOperand::createImm(const MCExpr *Expr,
   auto Op = std::make_unique<M68kOperand>(KindTy::Imm, Start, End);
   Op->Expr = Expr;
   return Op;
+}
+
+bool M68kOperand::isTrapImm() const {
+  int64_t Value;
+  if (!isImm() || !Expr->evaluateAsAbsolute(Value))
+    return false;
+
+  return isUInt<4>(Value);
+}
+
+bool M68kOperand::isBkptImm() const {
+  int64_t Value;
+  if (!isImm() || !Expr->evaluateAsAbsolute(Value))
+    return false;
+
+  return isUInt<3>(Value);
 }
 
 // MoveMask

@@ -14,6 +14,8 @@
 #ifndef MLIR_DIALECT_MEMREF_TRANSFORMS_TRANSFORMS_H
 #define MLIR_DIALECT_MEMREF_TRANSFORMS_TRANSFORMS_H
 
+#include "mlir/Support/LogicalResult.h"
+
 namespace mlir {
 class RewritePatternSet;
 class RewriterBase;
@@ -50,6 +52,10 @@ void populateResolveShapedTypeResultDimsPatterns(RewritePatternSet &patterns);
 /// Appends patterns for expanding memref operations that modify the metadata
 /// (sizes, offset, strides) of a memref into easier to analyze constructs.
 void populateExpandStridedMetadataPatterns(RewritePatternSet &patterns);
+
+/// Appends patterns for resolving `memref.extract_strided_metadata` into
+/// `memref.extract_strided_metadata` of its source.
+void populateResolveExtractStridedMetadataPatterns(RewritePatternSet &patterns);
 
 /// Appends patterns for emulating wide integer memref operations with ops over
 /// narrower integer types.
