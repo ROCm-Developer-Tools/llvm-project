@@ -30,10 +30,12 @@ def OpenMP_Dialect : Dialect {
   let useDefaultAttributePrinterParser = 1;
 
   let extraClassDeclaration = [{
-    // @@@AG: Make this into a well defined attribute if we maintain its use
-    static void setDeclareTarget(Operation *func, StringRef deviceType);
-    static bool isDeclareTarget(Operation *func);
-    static mlir::omp::DeclareTargetDeviceType getDeclareTargetDeviceType(Operation *func);
+    // Helper functions for assigning a DeclareTargetDeviceType Attribute to functions
+    static void setDeclareTarget(Operation *funcOrGlobal, mlir::omp::DeclareTargetDeviceType deviceType, 
+                                 mlir::omp::DeclareTargetCaptureClause captureClause);
+    static bool isDeclareTarget(Operation *funcOrGlobal);
+    static mlir::omp::DeclareTargetDeviceType getDeclareTargetDeviceType(Operation *funcOrGlobal);
+    static mlir::omp::DeclareTargetCaptureClause getDeclareTargetCaptureClause(Operation *funcOrGlobal);
   }];
 }
 
@@ -93,7 +95,7 @@ def IntLikeType : AnyTypeOf<[AnyInteger, Index]>;
 
 def OpenMP_PointerLikeType : TypeAlias<OpenMP_PointerLikeTypeInterface,
 	"OpenMP-compatible variable type">;
-
+  
 class OpenMP_Attr<string name, string attrMnemonic,
                 list<Trait> traits = [],
                 string baseCppClass = "::mlir::Attribute">
@@ -109,7 +111,7 @@ def IsDeviceAttr : OpenMP_Attr<"IsDevice", "isdevice"> {
   let parameters = (ins 
     "bool":$is_device
   );
-  
+
   let assemblyFormat = "`<` struct(params) `>`";
 }
 
@@ -155,7 +157,7 @@ def DeclareTargetAttr : OpenMP_Attr<"DeclareTarget", "declaretarget"> {
     OptionalParameter<"DeclareTargetDeviceTypeAttr">:$device_type,
     OptionalParameter<"DeclareTargetCaptureClauseAttr">:$capture_clause
   );
-  
+
   let assemblyFormat = "`<` struct(params) `>`";
 }
 

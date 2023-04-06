@@ -1445,9 +1445,16 @@ LogicalResult CancellationPointOp::verify() {
 // OpenMPDialect helper functions
 //===----------------------------------------------------------------------===//
 
-void OpenMPDialect::setDeclareTarget(Operation *func, StringRef deviceType) {
-  func->setAttr("omp.declare_target_type",
-                mlir::StringAttr::get(func->getContext(), deviceType));
+void OpenMPDialect::setDeclareTarget(
+    Operation *funcOrGlobal, mlir::omp::DeclareTargetDeviceType deviceType,
+    mlir::omp::DeclareTargetCaptureClause captureClause) {
+  funcOrGlobal->setAttr("omp.declare_target",
+                        mlir::omp::DeclareTargetAttr::get(
+                            funcOrGlobal->getContext(),
+                            mlir::omp::DeclareTargetDeviceTypeAttr::get(
+                                funcOrGlobal->getContext(), deviceType),
+                            mlir::omp::DeclareTargetCaptureClauseAttr::get(
+                                funcOrGlobal->getContext(), captureClause)));
 }
 
 bool OpenMPDialect::isDeclareTarget(Operation *funcOrGlobal) {
@@ -1457,7 +1464,8 @@ bool OpenMPDialect::isDeclareTarget(Operation *funcOrGlobal) {
 mlir::omp::DeclareTargetDeviceType
 OpenMPDialect::getDeclareTargetDeviceType(Operation *funcOrGlobal) {
   if (mlir::Attribute declTar = funcOrGlobal->getAttr("omp.declare_target")) {
-    if (auto declAttr = declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
+    if (auto declAttr =
+            declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
       return declAttr.getDeviceType().getValue();
   }
   return {};
@@ -1466,7 +1474,8 @@ OpenMPDialect::getDeclareTargetDeviceType(Operation *funcOrGlobal) {
 mlir::omp::DeclareTargetCaptureClause
 OpenMPDialect::getDeclareTargetCaptureClause(Operation *funcOrGlobal) {
   if (mlir::Attribute declTar = funcOrGlobal->getAttr("omp.declare_target")) {
-    if (auto declAttr = declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
+    if (auto declAttr =
+            declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
       return declAttr.getCaptureClause().getValue();
   }
   return {};
