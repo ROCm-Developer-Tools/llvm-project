@@ -5,7 +5,8 @@
 ! zero clause declare target
 
 ! CHECK-LABEL: func.func @_QPfunc_t_device()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 FUNCTION FUNC_T_DEVICE() RESULT(I)
 !$omp declare target to(FUNC_T_DEVICE) device_type(nohost)
     INTEGER :: I
@@ -13,7 +14,7 @@ FUNCTION FUNC_T_DEVICE() RESULT(I)
 END FUNCTION FUNC_T_DEVICE
 
 ! CHECK-LABEL: func.func @_QPfunc_t_host()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(host)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (host), capture_clause = (to)>{{.*}}
 FUNCTION FUNC_T_HOST() RESULT(I)
 !$omp declare target to(FUNC_T_HOST) device_type(host)
     INTEGER :: I
@@ -21,7 +22,7 @@ FUNCTION FUNC_T_HOST() RESULT(I)
 END FUNCTION FUNC_T_HOST
 
 ! CHECK-LABEL: func.func @_QPfunc_t_any()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION FUNC_T_ANY() RESULT(I)
 !$omp declare target to(FUNC_T_ANY) device_type(any)
     INTEGER :: I
@@ -29,7 +30,7 @@ FUNCTION FUNC_T_ANY() RESULT(I)
 END FUNCTION FUNC_T_ANY
     
 ! CHECK-LABEL: func.func @_QPfunc_default_t_any()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION FUNC_DEFAULT_T_ANY() RESULT(I)
 !$omp declare target to(FUNC_DEFAULT_T_ANY)
     INTEGER :: I
@@ -37,7 +38,7 @@ FUNCTION FUNC_DEFAULT_T_ANY() RESULT(I)
 END FUNCTION FUNC_DEFAULT_T_ANY
 
 ! CHECK-LABEL: func.func @_QPfunc_default_any()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION FUNC_DEFAULT_ANY() RESULT(I)
 !$omp declare target
     INTEGER :: I
@@ -45,7 +46,7 @@ FUNCTION FUNC_DEFAULT_ANY() RESULT(I)
 END FUNCTION FUNC_DEFAULT_ANY
 
 ! CHECK-LABEL: func.func @_QPfunc_default_extendedlist()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION FUNC_DEFAULT_EXTENDEDLIST() RESULT(I)
 !$omp declare target(FUNC_DEFAULT_EXTENDEDLIST)
     INTEGER :: I
@@ -53,7 +54,7 @@ FUNCTION FUNC_DEFAULT_EXTENDEDLIST() RESULT(I)
 END FUNCTION FUNC_DEFAULT_EXTENDEDLIST
 
 ! CHECK-LABEL: func.func @_QPexist_on_both()
-! CHECK-NOT: {{.*}}attributes {omp.declare_target = #omp<device_type({{.*}})>{{.*}}
+! CHECK-NOT: {{.*}}attributes {omp.declare_target = #omp.declaretarget<({{.*}})>{{.*}}
 FUNCTION EXIST_ON_BOTH() RESULT(I)
     INTEGER :: I
     I = 1
@@ -66,43 +67,43 @@ END FUNCTION EXIST_ON_BOTH
 ! zero clause declare target
 
 ! CHECK-LABEL: func.func @_QPsubr_t_device()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 SUBROUTINE SUBR_T_DEVICE()
 !$omp declare target to(SUBR_T_DEVICE) device_type(nohost)
 END
 
 ! CHECK-LABEL: func.func @_QPsubr_t_host()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(host)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (host), capture_clause = (to)>{{.*}}
 SUBROUTINE SUBR_T_HOST()
 !$omp declare target to(SUBR_T_HOST) device_type(host)
 END
 
 ! CHECK-LABEL: func.func @_QPsubr_t_any()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 SUBROUTINE SUBR_T_ANY()
 !$omp declare target to(SUBR_T_ANY) device_type(any)
 END
 
 ! CHECK-LABEL: func.func @_QPsubr_default_t_any()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 SUBROUTINE SUBR_DEFAULT_T_ANY()
 !$omp declare target to(SUBR_DEFAULT_T_ANY)
 END
 
 ! CHECK-LABEL: func.func @_QPsubr_default_any()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 SUBROUTINE SUBR_DEFAULT_ANY()
 !$omp declare target
 END
 
 ! CHECK-LABEL: func.func @_QPsubr_default_extendedlist()
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 SUBROUTINE SUBR_DEFAULT_EXTENDEDLIST()
 !$omp declare target(SUBR_DEFAULT_EXTENDEDLIST)
 END
 
 ! CHECK-LABEL: func.func @_QPsubr_exist_on_both()
-! CHECK-NOT: {{.*}}attributes {omp.declare_target = #omp<device_type({{.*}})>{{.*}}
+! CHECK-NOT: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type({{.*}})>{{.*}}
 SUBROUTINE SUBR_EXIST_ON_BOTH()
 END
 
@@ -116,7 +117,7 @@ END
 ! device_type clause
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED(TOGGLE) RESULT(K)
     INTEGER :: I, J, K
     LOGICAL :: TOGGLE
@@ -131,7 +132,7 @@ END FUNCTION IMPLICITLY_CAPTURED
 
 
 ! CHECK-LABEL: func.func @_QPtarget_function
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION TARGET_FUNCTION(TOGGLE) RESULT(I)
 !$omp declare target
     INTEGER :: I
@@ -151,7 +152,7 @@ END FUNCTION TARGET_FUNCTION
 ! then they should be marked as any
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured_twice
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED_TWICE() RESULT(K)
     INTEGER :: I
     I = 10
@@ -159,7 +160,7 @@ FUNCTION IMPLICITLY_CAPTURED_TWICE() RESULT(K)
 END FUNCTION IMPLICITLY_CAPTURED_TWICE
 
 ! CHECK-LABEL: func.func @_QPtarget_function_twice_host
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(host)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (host), capture_clause = (to)>{{.*}}
 FUNCTION TARGET_FUNCTION_TWICE_HOST() RESULT(I)
 !$omp declare target to(TARGET_FUNCTION_TWICE_HOST) device_type(host)
     INTEGER :: I
@@ -167,7 +168,7 @@ FUNCTION TARGET_FUNCTION_TWICE_HOST() RESULT(I)
 END FUNCTION TARGET_FUNCTION_TWICE_HOST
 
 ! CHECK-LABEL: func.func @_QPtarget_function_twice_device
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 FUNCTION TARGET_FUNCTION_TWICE_DEVICE() RESULT(I)
 !$omp declare target to(TARGET_FUNCTION_TWICE_DEVICE) device_type(nohost)
     INTEGER :: I
@@ -183,7 +184,7 @@ END FUNCTION TARGET_FUNCTION_TWICE_DEVICE
 ! appropriately. 
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured_nest
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED_NEST() RESULT(K)
     INTEGER :: I
     I = 10
@@ -191,13 +192,13 @@ FUNCTION IMPLICITLY_CAPTURED_NEST() RESULT(K)
 END FUNCTION IMPLICITLY_CAPTURED_NEST
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured_one
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED_ONE() RESULT(K)
     K = IMPLICITLY_CAPTURED_NEST()
 END FUNCTION IMPLICITLY_CAPTURED_ONE
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured_two
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED_TWO() RESULT(K)
     INTEGER :: I
     I = 10
@@ -205,7 +206,7 @@ FUNCTION IMPLICITLY_CAPTURED_TWO() RESULT(K)
 END FUNCTION IMPLICITLY_CAPTURED_TWO
 
 ! CHECK-LABEL: func.func @_QPtarget_function_test
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 FUNCTION TARGET_FUNCTION_TEST() RESULT(J)
 !$omp declare target to(TARGET_FUNCTION_TEST) device_type(nohost)
     INTEGER :: I, J
@@ -222,7 +223,7 @@ END FUNCTION TARGET_FUNCTION_TEST
 ! appropriately. 
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured_nest_twice
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED_NEST_TWICE() RESULT(K)
     INTEGER :: I
     I = 10
@@ -230,13 +231,13 @@ FUNCTION IMPLICITLY_CAPTURED_NEST_TWICE() RESULT(K)
 END FUNCTION IMPLICITLY_CAPTURED_NEST_TWICE
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured_one_twice
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED_ONE_TWICE() RESULT(K)
     K = IMPLICITLY_CAPTURED_NEST_TWICE()
 END FUNCTION IMPLICITLY_CAPTURED_ONE_TWICE
 
 ! CHECK-LABEL: func.func @_QPimplicitly_captured_two_twice
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(any)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (any), capture_clause = (to)>{{.*}}
 FUNCTION IMPLICITLY_CAPTURED_TWO_TWICE() RESULT(K)
     INTEGER :: I
     I = 10
@@ -244,7 +245,7 @@ FUNCTION IMPLICITLY_CAPTURED_TWO_TWICE() RESULT(K)
 END FUNCTION IMPLICITLY_CAPTURED_TWO_TWICE
 
 ! CHECK-LABEL: func.func @_QPtarget_function_test_device
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(nohost)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (nohost), capture_clause = (to)>{{.*}}
 FUNCTION TARGET_FUNCTION_TEST_DEVICE() RESULT(J)
     !$omp declare target to(TARGET_FUNCTION_TEST_DEVICE) device_type(nohost)
         INTEGER :: I, J
@@ -253,7 +254,7 @@ FUNCTION TARGET_FUNCTION_TEST_DEVICE() RESULT(J)
 END FUNCTION TARGET_FUNCTION_TEST_DEVICE
 
 ! CHECK-LABEL: func.func @_QPtarget_function_test_host
-! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp<device_type(host)>{{.*}}
+! CHECK-SAME: {{.*}}attributes {omp.declare_target = #omp.declaretarget<device_type = (host), capture_clause = (to)>{{.*}}
 FUNCTION TARGET_FUNCTION_TEST_HOST() RESULT(J)
     !$omp declare target to(TARGET_FUNCTION_TEST_HOST) device_type(host)
         INTEGER :: I, J
