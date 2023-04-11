@@ -719,6 +719,7 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
     res.getFrontendOpts().features.Enable(
         Fortran::common::LanguageFeature::OpenACC);
   }
+  
   if (args.hasArg(clang::driver::options::OPT_fopenmp)) {
     res.getFrontendOpts().features.Enable(
         Fortran::common::LanguageFeature::OpenMP);
@@ -767,6 +768,15 @@ static bool parseDialectArgs(CompilerInvocation &res, llvm::opt::ArgList &args,
         if (!res.getLangOpts().OpenMPTargetDebug &&
             args.hasArg(clang::driver::options::OPT_fopenmp_target_debug))
           res.getLangOpts().OpenMPTargetDebug = 1;
+      }
+
+      // Get OpenMP host file path if any and report if a non existent file is
+      // found
+      if (auto *arg = args.getLastArg(clang::driver::options::OPT_fopenmp_host_ir_file_path)) {
+        res.getLangOpts().OMPHostIRFile = arg->getValue();
+        if (!llvm::sys::fs::exists(res.getLangOpts().OMPHostIRFile))
+          diags.Report(clang::diag::err_drv_omp_host_ir_file_not_found)
+              << res.getLangOpts().OMPHostIRFile;
       }
     }
   }

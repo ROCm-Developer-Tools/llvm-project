@@ -80,6 +80,19 @@ def OffloadModuleInterface : OpInterface<"OffloadModuleInterface"> {
           if (isDevice.isa<mlir::omp::IsDeviceAttr>())
             return isDevice.dyn_cast<IsDeviceAttr>().getIsDevice();
         return false;
+      }]>, 
+      InterfaceMethod<
+      /*description=*/[{
+        Set a StringAttr on the current module containing the host IR file path. This 
+        file path is used in two-phase compilation during the device phase to generate
+        device side LLVM IR when lowering MLIR. 
+      }],
+      /*retTy=*/"void",
+      /*methodName=*/"setHostIRFilePath", 
+      (ins "std::string":$hostIRFilePath), [{}], [{
+        $_op->setAttr(
+          mlir::StringAttr::get($_op->getContext(), llvm::Twine{"omp.host_ir_filepath"}),
+            mlir::StringAttr::get($_op->getContext(), hostIRFilePath));
       }]>,
       InterfaceMethod<
       /*description=*/[{

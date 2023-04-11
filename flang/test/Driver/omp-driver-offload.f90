@@ -3,9 +3,9 @@
 ! for flang-new -fc1 as expected.
 
 ! Test regular -fopenmp with no offload
-! RUN: %flang -### -fopenmp %s 2>&1 | FileCheck --check-prefixes=CHECK-OPENMP %s
-! CHECK-OPENMP: "{{[^"]*}}flang-new" "-fc1" {{.*}} "-fopenmp" {{.*}}.f90"
-! CHECK-OPENMP-NOT: "{{[^"]*}}flang-new" "-fc1" {{.*}} "-fopenmp" {{.*}} "-fopenmp-is-device" {{.*}}.f90"
+! RUN: %flang -### -fopenmp %s 2>&1 | FileCheck --check-prefix=OPENMP %s
+! OPENMP: "{{[^"]*}}flang-new" "-fc1" {{.*}} "-fopenmp" {{.*}}.f90"
+! OPENMP-NOT: "{{[^"]*}}flang-new" "-fc1" {{.*}} "-fopenmp" {{.*}} "-fopenmp-is-device" {{.*}}.f90"
 
 ! Test regular -fopenmp with offload, and invocation filtering options
 ! RUN: %flang -S -### %s -o %t 2>&1 \
@@ -44,8 +44,8 @@
 ! OFFLOAD-DEVICE-NOT: "{{[^"]*}}flang-new" "-fc1" "-triple" "aarch64-unknown-linux-gnu"
 
 ! Test regular -fopenmp with offload for basic fopenmp-is-device flag addition and correct fopenmp 
-! RUN: %flang -### -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa %s 2>&1 | FileCheck --check-prefixes=CHECK-OPENMP-IS-DEVICE %s
-! CHECK-OPENMP-IS-DEVICE: "{{[^"]*}}flang-new" "-fc1" {{.*}} "-fopenmp" {{.*}} "-fopenmp-is-device" {{.*}}.f90"
+! RUN: %flang -### -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa %s 2>&1 | FileCheck --check-prefix=OPENMP-IS-DEVICE %s
+! OPENMP-IS-DEVICE: "{{[^"]*}}flang-new" "-fc1" {{.*}} "-fopenmp" {{.*}} "-fopenmp-is-device" {{.*}}.f90"
 
 ! Testing appropriate flags are gnerated and appropriately assigned by the driver when offloading
 ! RUN: %flang -S -### %s -o %t 2>&1 \

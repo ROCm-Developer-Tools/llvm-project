@@ -16,7 +16,6 @@
 #define LLVM_FLANG_FRONTEND_LANGOPTIONS_H
 
 #include <string>
-
 namespace Fortran::frontend {
 
 /// Bitfields of LangOptions, split out from LangOptions to ensure
@@ -57,7 +56,6 @@ public:
   /// Name of the IR file that contains the result of the OpenMP target
   /// host code generation.
   std::string OMPHostIRFile;
-
   LangOptions();
 };
 
