@@ -1,32 +1,9 @@
 !RUN: %flang_fc1 -emit-llvm-bc -fopenmp -o %t.bc %s | llvm-dis %t.bc -o - | FileCheck %s --check-prefix=CHECK-HOST
 !RUN: %flang_fc1 -emit-llvm -fopenmp -fopenmp-is-device -fopenmp-host-ir-file-path %t.bc -o - %s 2>&1 | FileCheck %s --check-prefix=CHECK-DEVICE
 
-! Temporary test for automating checking the lowering and 
-! showing what's available at the moment. It needs to be 
-! broken into multiple as Flang-new has no location to 
-! test from end to end that I can find e.g. fortran all the 
-! way down to LLVM-IR
-
-! NOTE: When Clang is used with just -fopenmp-is-device, the metadata 
-! for the device is not generated, but with --offload-device-only, it
-! goes through extra steps to generate it.
-
-! NOTE: * Missing attributes on globals such as align and dso_local, and protected and 
-!         address space (1) on device when using the "To" clause
-!       * Pointers look very different in the IR, unsure if this is just a fortran thing
-!       * There is some embedded object metadata injected depending on the flags used, but
-!         this seems like another unrelated component/task
-
-! NOTE: Anything in triple exclamation marks doesn't exist at the moment and
-! needs to be worked on
-
 !! LLVM generated once for the module at entry, dependent on host or device
 !CHECK-HOST-DAG: %struct.__tgt_offload_entry = type { ptr, ptr, i64, i32, i32 }
 !CHECK-HOST-DAG: !omp_offload.info = !{!{{.*}}}
-
-!!!CHECK-HOST-DAG @llvm.global_ctors = appending global [1 x { i32, ptr, ptr }] [{ i32, ptr, ptr } { i32 0, ptr @.omp_offloading.requires_reg, ptr null }]
-!!!CHECK-HOST-LABEL define internal void @.omp_offloading.requires_reg()
-!!!CHECK-HOST-LABEL declare void @__tgt_register_requires(i64)
 
 !CHECK-DEVICE-DAG: !omp_offload.info = !{!{{.*}}}
 
