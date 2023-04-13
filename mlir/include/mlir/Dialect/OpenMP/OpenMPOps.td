@@ -86,7 +86,6 @@ def TargetAttr : OpenMP_Attr<"Target", "target"> {
   let assemblyFormat = "`<` struct(params) `>`";
 }
 
-
 class OpenMP_Op<string mnemonic, list<Trait> traits = []> :
       Op<OpenMP_Dialect, mnemonic, traits>;
 
@@ -95,25 +94,6 @@ def IntLikeType : AnyTypeOf<[AnyInteger, Index]>;
 
 def OpenMP_PointerLikeType : TypeAlias<OpenMP_PointerLikeTypeInterface,
 	"OpenMP-compatible variable type">;
-  
-class OpenMP_Attr<string name, string attrMnemonic,
-                list<Trait> traits = [],
-                string baseCppClass = "::mlir::Attribute">
-    : AttrDef<OpenMP_Dialect, name, traits, baseCppClass> {
-  let mnemonic = attrMnemonic;
-}
-
-//===----------------------------------------------------------------------===//
-//  OpenMP Attributes
-//===----------------------------------------------------------------------===//
-
-def IsDeviceAttr : OpenMP_Attr<"IsDevice", "isdevice"> {
-  let parameters = (ins 
-    "bool":$is_device
-  );
-
-  let assemblyFormat = "`<` struct(params) `>`";
-}
 
 //===----------------------------------------------------------------------===//
 //  2.12.7 Declare Target Directive
