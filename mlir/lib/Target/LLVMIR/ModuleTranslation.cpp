@@ -33,6 +33,7 @@
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Frontend/OpenMP/OMPIRBuilder.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -45,6 +46,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
@@ -1248,6 +1250,63 @@ LogicalResult ModuleTranslation::createTBAAMetadata() {
   return success();
 }
 
+/// Perform module specific initialization that occurs prior to lowering of the
+/// op
+LogicalResult ModuleTranslation::initModule() {
+  auto offloadMod = dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule);
+  bool isDevice = (offloadMod) ? offloadMod.getIsDevice() : false;
+
+  llvm::OpenMPIRBuilderConfig config(isDevice, /* IsTargetCodegen */ isDevice,
+                                     /* HasRequiresUnifiedSharedMemory */ false,
+                                     /* OpenMPOffloadMandatory */ false);
+  getOpenMPBuilder()->setConfig(config);
+
+  // being empty is valid input, e.g. a device pass ran on it's own with no
+  // host input.
+  if (isDevice && offloadMod && !offloadMod.getHostIRFilePath().empty()) {
+    auto buf = llvm::MemoryBuffer::getFile(offloadMod.getHostIRFilePath());
+    if (auto ec = buf.getError()) {
+      mlirModule->emitError("cannot open file" +
+                            offloadMod.getHostIRFilePath() + ec.message());
+      return failure();
+    }
+
+    llvm::LLVMContext c;
+    auto me = llvm::expectedToErrorOrAndEmitErrors(
+        c, llvm::parseBitcodeFile(buf.get()->getMemBufferRef(), c));
+    if (auto ec = me.getError()) {
+      mlirModule->emitError("unable to parse host-ir file" +
+                            offloadMod.getHostIRFilePath() + ec.message());
+      return failure();
+    }
+
+    // OpenMP offloading requires this to be invoked for the device to generate
+    // correct metadata, that has a 1:1 mapping with the host IR.
+    getOpenMPBuilder()->loadOffloadInfoMetadata(*me.get());
+  }
+
+  return success();
+}
+
+/// Perform module specific finalization that occurs after the lowering of the
+/// op and its attributes.
+LogicalResult ModuleTranslation::finalizeModule() {
+  if (auto offloadMod =
+          dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule)) {
+    llvm::OpenMPIRBuilder::EmitMetadataErrorReportFunctionTy &&errorReportFn =
+        [](llvm::OpenMPIRBuilder::EmitMetadataErrorKind kind,
+           const llvm::TargetRegionEntryInfo &entryInfo) -> void {
+      llvm::errs() << "Error of kind: " << kind
+                   << " when emitting offload entries and metadata at the end "
+                      "of the module \n";
+    };
+
+    getOpenMPBuilder()->createOffloadEntriesAndInfoMetadata(errorReportFn);
+  }
+
+  return success();
+}
+
 void ModuleTranslation::setLoopMetadata(Operation *op,
                                         llvm::Instruction *inst) {
   LoopAnnotationAttr attr =
@@ -1366,6 +1425,9 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
   LLVM::ensureDistinctSuccessors(module);
 
   ModuleTranslation translator(module, std::move(llvmModule));
+
+  if (failed(translator.initModule()))
+    return nullptr;
   if (failed(translator.convertFunctionSignatures()))
     return nullptr;
   if (failed(translator.convertGlobals()))
@@ -1392,6 +1454,10 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
 
   // Convert module itself.
   if (failed(translator.convertOperation(*module, llvmBuilder)))
+    return nullptr;
+
+  // Perform end of module actions not directly related to operations
+  if (failed(translator.finalizeModule()))
     return nullptr;
 
   if (llvm::verifyModule(*translator.llvmModule, &llvm::errs()))

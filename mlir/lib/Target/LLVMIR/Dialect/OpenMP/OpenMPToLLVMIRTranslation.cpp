@@ -1709,12 +1709,12 @@ public:
 void registerTargetGlobalVariable(LLVM::GlobalOp op, llvm::Constant *addr,
                                   llvm::OpenMPIRBuilder &ompBuilder,
                                   LLVM::ModuleTranslation &moduleTranslation,
-                                  bool isDevice);
+                                  DataLayout &dLayout, bool isDevice);
 
 llvm::Constant *
 getAddrOfDeclareTargetVar(LLVM::GlobalOp op, llvm::OpenMPIRBuilder &ompBuilder,
                           LLVM::ModuleTranslation &moduleTranslation,
-                          bool isDevice) {
+                          DataLayout &dLayout, bool isDevice) {
   auto captureClause =
       mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(op);
   if (captureClause == mlir::omp::DeclareTargetCaptureClause::link ||
@@ -1761,7 +1761,7 @@ getAddrOfDeclareTargetVar(LLVM::GlobalOp op, llvm::OpenMPIRBuilder &ompBuilder,
         gv->setInitializer(globalValue);
 
       registerTargetGlobalVariable(op, cast<llvm::Constant>(ptr), ompBuilder,
-                                   moduleTranslation, isDevice);
+                                   moduleTranslation, dLayout, isDevice);
     }
     return cast<llvm::Constant>(ptr);
   }
@@ -1771,7 +1771,7 @@ getAddrOfDeclareTargetVar(LLVM::GlobalOp op, llvm::OpenMPIRBuilder &ompBuilder,
 void registerTargetGlobalVariable(LLVM::GlobalOp op, llvm::Constant *addr,
                                   llvm::OpenMPIRBuilder &ompBuilder,
                                   LLVM::ModuleTranslation &moduleTranslation,
-                                  bool isDevice) {
+                                  DataLayout &dLayout, bool isDevice) {
   auto captureClause =
       mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(op);
   auto *llvmModule = moduleTranslation.getLLVMModule();
@@ -1788,7 +1788,8 @@ void registerTargetGlobalVariable(LLVM::GlobalOp op, llvm::Constant *addr,
 
     llvm::GlobalValue *llvmVal = llvmModule->getNamedValue(varName);
 
-    // if declaration only
+    // @@@AG: TODO: Can this be converted to remove the need for LLVM Module and
+    // lean on datalayout? if declaration only
     if (!op.isDeclaration())
       varSize = llvm::divideCeil(llvmModule->getDataLayout().getTypeSizeInBits(
                                      llvmVal->getValueType()),
@@ -1801,6 +1802,7 @@ void registerTargetGlobalVariable(LLVM::GlobalOp op, llvm::Constant *addr,
     // CGOpenMPRuntime which prevents optimisation of internal variables.
     if (isDevice && llvmVal->getVisibility() ==
                         llvm::GlobalValue::VisibilityTypes::HiddenVisibility) {
+      llvm::errs() << "fall into 2 \n";
       // Do not create a "ref-variable" if the original is not also available
       // on the host.
       if (ompBuilder.OffloadInfoManager.hasDeviceGlobalVarEntryInfo(varName))
@@ -1838,7 +1840,8 @@ void registerTargetGlobalVariable(LLVM::GlobalOp op, llvm::Constant *addr,
       // of Flang. Clang will call it elsewhere in its offloading pipeline
       // which generates the desired device side ref. Flang also has already
       // generated a global by this stage, which needs to be removed.
-      getAddrOfDeclareTargetVar(op, ompBuilder, moduleTranslation, isDevice);
+      getAddrOfDeclareTargetVar(op, ompBuilder, moduleTranslation, dLayout,
+                                isDevice);
       // This cleanup of the global may be best left to an optimisation pass or
       // later in the pipeline
       if (llvm::GlobalValue *llvmVal =
@@ -1848,11 +1851,10 @@ void registerTargetGlobalVariable(LLVM::GlobalOp op, llvm::Constant *addr,
       }
     } else {
       addr = getAddrOfDeclareTargetVar(op, ompBuilder, moduleTranslation,
-                                       isDevice);
+                                       dLayout, isDevice);
       varName = (addr) ? addr->getName() : "";
     }
-    varSize =
-        moduleTranslation.getLLVMModule()->getDataLayout().getPointerSize();
+    varSize = dLayout.getTypeSize(LLVM::LLVMPointerType::get(op->getContext()));
     linkage = llvm::GlobalValue::WeakAnyLinkage;
   }
 
@@ -1865,13 +1867,14 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
                          LLVM::ModuleTranslation &moduleTranslation) {
   auto deviceType = mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(op);
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  DataLayout dLayout = DataLayout(op->getParentOfType<ModuleOp>());
 
   auto modOp = op->getParentOfType<mlir::ModuleOp>();
-  bool isDevice = mlir::omp::OpenMPDialect::getIsDevice(modOp);
-
-  ompBuilder->Config.setIsEmbedded(isDevice);
-  ompBuilder->Config.setIsTargetCodegen(isDevice);
-  ompBuilder->Config.setHasRequiresUnifiedSharedMemory(false);
+  bool isDevice = false;
+  if (auto offloadMod =
+          dyn_cast<mlir::omp::OffloadModuleInterface>(modOp.getOperation())) {
+    isDevice = offloadMod.getIsDevice();
+  }
 
   // do a return for functions at the moment, may need specialised lowering
   // later to optimise but for the moment they execute on device. Or could
@@ -1879,9 +1882,32 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
   if (LLVM::LLVMFuncOp gOp = dyn_cast<LLVM::LLVMFuncOp>(op))
     return success();
 
-  // 5) Other @@@AG left-over comments
-  // 6) double check im missing no module metadata relating to the globals
+  // TODO LIST:
+  // 3) Add missing llvm.global_ctors variable for host
+  // 4) Add tgt_register / requires_reg functions that materialize for host
+  // when
+  //    declare target is used
+  // 5a) rebase and update the PR upstream in amd, before doing the next step as
+  // all IR is lowering correctly 5b) Cleanup and try to hoist what I can into
+  // ompirbuilder for shared usage,
+  //    Jan's previous patch may give hints or I can ask Jan for help/ideas
+  //    or other team members
+  // 6) go over any missing @@@AG / TODOs that are critical
+  // 7) Work out if fir.global can be modified to show attributes when
+  // printing
+  //    to IR. Rather than hiding them, otherwise testing this is all but
+  //    impossible from a FIR -> anything level.
+  // 8) Consider how to split into phabricator patches and make smaller
+  // tests
 
+  // AG TODO: To clean this up maybe it's possible to create a data
+  // structure (containing link/varsize and other clang/flang specific info)
+  // or lambda of some kind to feed to the register functions to abstract
+  // them and if we use an intermediate data structure, we could create two
+  // seperate calls (one with the VarDecl and one without) that call a
+  // shared function with the data structure, that way we avoid over
+  // complicating the entry locations on either side and leave the
+  // packaging/unpackaging and forwarding to the OMP IR Builder
   if (LLVM::GlobalOp gOp = dyn_cast<LLVM::GlobalOp>(op)) {
     // Do nothing with nohost/host for host, they're
     // generally left untouched as far as Clang is concerned
@@ -1895,44 +1921,15 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
       return success();
     }
 
-    registerTargetGlobalVariable(gOp, nullptr, *ompBuilder, moduleTranslation,
-                                 isDevice);
+    // NOTE: Clang invokes this twice if neccessary, once for the original value
+    // and another time if casting is required (either address space or type
+    // casting). I am unsure/it's yet to be seen if this casting consideration
+    // will also be required here or handled at an earlier MLIR level
+    if (auto *gVal =
+            moduleTranslation.getLLVMModule()->getNamedValue(gOp.getSymName()))
+      registerTargetGlobalVariable(gOp, gVal, *ompBuilder, moduleTranslation,
+                                   dLayout, isDevice);
   }
-
-  return success();
-}
-
-LogicalResult convertIsDeviceAttr(Operation *op,
-                                  mlir::omp::IsDeviceAttr attribute,
-                                  LLVM::ModuleTranslation &moduleTranslation) {
-
-  // TODO/FIXME: There may be a more MLIR way to do this using the verifier,
-  // but this should be the final omp attribute on a module to prevent
-  // possible issues with lowering offload information too early
-  bool isAfterDeviceAttr = false;
-  for (auto attr : op->getDialectAttrs()) {
-    if (isAfterDeviceAttr && attr.getNameDialect()->getNamespace() == "omp")
-      assert(false &&
-             "omp.is_device needs to be the last omp dialect attribtue on a "
-             "module");
-
-    if (attr.getName() == "omp.is_device")
-      isAfterDeviceAttr = true;
-  }
-
-  llvm::OpenMPIRBuilder::EmitMetadataErrorReportFunctionTy &&errorReportFn =
-      [](llvm::OpenMPIRBuilder::EmitMetadataErrorKind kind,
-         const llvm::TargetRegionEntryInfo &entryInfo) -> void {
-    llvm::errs() << "Error emitting offload entries and metadata at the end of "
-                    "the module \n";
-  };
-
-  if (!attribute.getIsDevice()) {
-    // TODO: Generate/lower Target Register functions
-  }
-
-  moduleTranslation.getOpenMPBuilder()->createOffloadEntriesAndInfoMetadata(
-      errorReportFn);
 
   return success();
 }
@@ -1948,9 +1945,6 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
         return convertFlagsAttr(op, rtlAttr, moduleTranslation);
       }).Case([&](mlir::omp::DeclareTargetAttr dtAttr) {
         return convertDeclareTargetAttr(op, dtAttr, moduleTranslation);
-      })
-      .Case([&](mlir::omp::IsDeviceAttr devAttr) {
-        return convertIsDeviceAttr(op, devAttr, moduleTranslation);
       })
       .Default([&](Attribute attr) {
         // fall through for omp attributes that do not require lowering and/or

@@ -278,6 +278,14 @@ private:
   LogicalResult convertGlobals();
   LogicalResult convertOneFunction(LLVMFuncOp func);
 
+  /// Perform module specific initialization that occurs prior to lowering of
+  /// the op
+  LogicalResult initModule();
+
+  /// Perform module specific finalization that occurs after the lowering of the
+  /// op and its attributes.
+  LogicalResult finalizeModule();
+
   /// Process access_group LLVM Metadata operations and create LLVM
   /// metadata nodes.
   LogicalResult createAccessGroupMetadata();

@@ -287,12 +287,10 @@ bool CodeGenAction::beginSourceFileAction() {
     setOffloadModuleInterfaceTargetAttribute(*mlirModule, tm->getTargetCPU(),
                                              tm->getTargetFeatureString());
     if (!ci.getInvocation().getLangOpts().OMPHostIRFile.empty()) {
-      llvm::errs() << "i am not empty assign me! \n";
       if (auto offloadMod = llvm::dyn_cast<mlir::omp::OffloadModuleInterface>(
           mlirModule->getOperation())) {
         offloadMod.setHostIRFilePath(ci.getInvocation().getLangOpts().OMPHostIRFile);
       }
-      llvm::errs() << "remember to move me to OffloadModuleInterface on rebase! \n";
     }
   }
 
