@@ -1350,7 +1350,9 @@ void fir::GlobalOp::print(mlir::OpAsmPrinter &p) {
     p << " constant";
   if (getOperation()->getAttr(getTargetAttrName()))
     p << " target";
+
   p << " : ";
+
   p.printType(getType());
   if (hasInitializationBody()) {
     p << ' ';
