@@ -419,7 +419,7 @@ public:
   /// Initialize the internal state, this will put structures types and
   /// potentially other helpers into the underlying module. Must be called
   /// before any other method and only once!
-  void initialize();
+  void initialize(StringRef HostFilePath = {});
 
   void setConfig(OpenMPIRBuilderConfig C) { Config = C; }
 

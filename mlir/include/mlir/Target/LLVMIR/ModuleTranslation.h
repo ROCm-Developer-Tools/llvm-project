@@ -15,6 +15,7 @@
 #define MLIR_TARGET_LLVMIR_MODULETRANSLATION_H
 
 #include "mlir/Dialect/LLVMIR/LLVMInterfaces.h"
+#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Value.h"
@@ -277,14 +278,6 @@ private:
   LogicalResult convertFunctions();
   LogicalResult convertGlobals();
   LogicalResult convertOneFunction(LLVMFuncOp func);
-
-  /// Perform module specific initialization that occurs prior to lowering of
-  /// the op
-  LogicalResult initModule();
-
-  /// Perform module specific finalization that occurs after the lowering of the
-  /// op and its attributes.
-  LogicalResult finalizeModule();
 
   /// Process access_group LLVM Metadata operations and create LLVM
   /// metadata nodes.

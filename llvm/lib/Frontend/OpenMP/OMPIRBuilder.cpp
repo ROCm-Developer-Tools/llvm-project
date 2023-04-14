@@ -21,6 +21,7 @@
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -445,7 +446,28 @@ Function *OpenMPIRBuilder::getOrCreateRuntimeFunctionPtr(RuntimeFunction FnID) {
   return Fn;
 }
 
-void OpenMPIRBuilder::initialize() { initializeTypes(M); }
+void OpenMPIRBuilder::initialize(StringRef HostFilePath) {
+  initializeTypes(M);
+
+  if (!HostFilePath.empty()) {
+    auto Buf = llvm::MemoryBuffer::getFile(HostFilePath);
+    if (auto Err = Buf.getError())
+      assert(false && ("error opening host file from host file path inside of "
+                       "OpenMPIRBuilder" +
+                       Err.message())
+                          .c_str());
+
+    llvm::LLVMContext Ctx;
+    auto M = llvm::expectedToErrorOrAndEmitErrors(
+        Ctx, llvm::parseBitcodeFile(Buf.get()->getMemBufferRef(), Ctx));
+    if (auto Err = M.getError())
+      assert(false && ("error parsing host file inside of OpenMPIRBuilder " +
+                       Err.message())
+                          .c_str());
+
+    loadOffloadInfoMetadata(*M.get());
+  }
+}
 
 void OpenMPIRBuilder::finalize(Function *Fn) {
   SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
@@ -534,6 +556,17 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
 
   // Remove work items that have been completed.
   OutlineInfos = std::move(DeferredOutlines);
+
+  llvm::OpenMPIRBuilder::EmitMetadataErrorReportFunctionTy &&errorReportFn =
+      [](llvm::OpenMPIRBuilder::EmitMetadataErrorKind kind,
+         const llvm::TargetRegionEntryInfo &entryInfo) -> void {
+    llvm::errs() << "Error of kind: " << kind
+                 << " when emitting offload entries and metadata during "
+                    "OMPIRBuilder finalization \n";
+  };
+
+  if (!OffloadInfoManager.empty())
+    createOffloadEntriesAndInfoMetadata(errorReportFn);
 }
 
 OpenMPIRBuilder::~OpenMPIRBuilder() {
