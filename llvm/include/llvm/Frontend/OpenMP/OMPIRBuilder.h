@@ -405,6 +405,35 @@ private:
   OffloadEntriesDeviceGlobalVarTy OffloadEntriesDeviceGlobalVar;
 };
 
+/// An interface which must have a concrete implementation
+/// defined for types (currently variables) to be used in
+/// conjunction with registerTargetGlobalVariable and
+/// getAddrOfDeclareTargetVar.
+class RegisterDeclareTargetInterface {
+public:
+  enum DeclareTargetCaptureClauseKind {
+    To = 0x0,
+    Enter = 0x01,
+    Link = 0x02,
+    NoCapture = 0x03
+  };
+  enum DeclareTargetDeviceClauseKind {
+    Any = 0x0,
+    NoHost = 0x01,
+    Host = 0x02,
+    NoDevice = 0x03
+  };
+
+  virtual bool isDeclaration() = 0;
+  virtual bool isExternallyVisible() = 0;
+  virtual llvm::StringRef getFilename() = 0;
+  virtual uint64_t getLine() = 0;
+  virtual llvm::StringRef getMangledName() = 0;
+  virtual DeclareTargetCaptureClauseKind getCaptureClauseKind() = 0;
+  virtual DeclareTargetDeviceClauseKind getDeviceClauseKind() = 0;
+  virtual llvm::Module *getLLVMModule() = 0;
+};
+
 /// An interface to create LLVM-IR for OpenMP directives.
 ///
 /// Each OpenMP directive has a corresponding public generator method.
@@ -755,6 +784,30 @@ public:
   static unsigned getOpenMPDefaultSimdAlign(const Triple &TargetTriple,
                                             const StringMap<bool> &Features);
 
+  /// Retrieve (or create if non-existent) the address of a declare
+  /// target variable, used in conjunction with registerTargetGlobalVariable
+  /// to create declare target global variables.
+  ///
+  /// \param RegOp - A concrete implementation of the
+  ///                RegisterDeclareTargetInterface
+  ///                which wrap's the variable type being registered (e.g.
+  ///                VarDecl for Clang, LLVMGlobalOp for MLIR) and provides
+  ///                the neccessary functionality specified by the interface
+  ///                for the function to correctly execute.
+  llvm::Constant *
+  getAddrOfDeclareTargetVar(RegisterDeclareTargetInterface &RegVar);
+
+  /// Registers a target variable for device or host.
+  ///
+  /// \param RegOp - A concrete implementation of the
+  ///                RegisterDeclareTargetInterface
+  ///                which wrap's the variable type being registered (e.g.
+  ///                VarDecl for Clang, LLVMGlobalOp for MLIR) and provides
+  ///                the neccessary functionality specified by the interface
+  ///                for the function to correctly execute.
+  void registerTargetGlobalVariable(RegisterDeclareTargetInterface &RegVar,
+                                    llvm::Constant *Addr);
+
 private:
   /// Modifies the canonical loop to be a statically-scheduled workshare loop.
   ///
@@ -1039,6 +1092,17 @@ public:
   InsertPointTy createTaskgroup(const LocationDescription &Loc,
                                 InsertPointTy AllocaIP,
                                 BodyGenCallbackTy BodyGenCB);
+
+  /// Creates a unique info for a target entry when provided a filename and
+  /// line number from.
+  ///
+  /// \param FileName The name of the file the target entry resides in
+  /// \param Line The line number where the target entry resides
+  /// \param ParentName The name of the parent the target entry resides in, if
+  /// any.
+  static llvm::TargetRegionEntryInfo
+  getTargetEntryUniqueInfo(StringRef FileName, uint64_t Line,
+                           llvm::StringRef ParentName = "");
 
   /// Functions used to generate reductions. Such functions take two Values
   /// representing LHS and RHS of the reduction, respectively, and a reference

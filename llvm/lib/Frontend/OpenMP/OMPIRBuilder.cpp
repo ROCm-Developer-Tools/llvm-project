@@ -33,6 +33,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
@@ -622,6 +623,18 @@ Constant *OpenMPIRBuilder::getOrCreateIdent(Constant *SrcLocStr,
   }
 
   return ConstantExpr::getPointerBitCastOrAddrSpaceCast(Ident, IdentPtr);
+}
+
+llvm::TargetRegionEntryInfo
+OpenMPIRBuilder::getTargetEntryUniqueInfo(StringRef FileName, uint64_t Line,
+                                          llvm::StringRef ParentName) {
+  llvm::sys::fs::UniqueID ID;
+  if (auto EC = llvm::sys::fs::getUniqueID(FileName, ID)) {
+    assert(EC &&
+           "Unable to get unique ID for file, during getTargetEntryUniqueInfo");
+  }
+  return llvm::TargetRegionEntryInfo(ParentName, ID.getDevice(), ID.getFile(),
+                                     Line);
 }
 
 Constant *OpenMPIRBuilder::getOrCreateSrcLocStr(StringRef LocStr,
@@ -5153,6 +5166,141 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
       llvm_unreachable("Unsupported entry kind.");
     }
   }
+}
+
+llvm::Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
+    RegisterDeclareTargetInterface &RegOp) {
+  // TODO: Return nullptr, if OpenMNPSIMD, when
+  // OpenMPSimd is added to OMPIRBuilder Config.
+
+  if (RegOp.getCaptureClauseKind() ==
+          RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::
+              Link ||
+      ((RegOp.getCaptureClauseKind() ==
+            RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::
+                To ||
+        RegOp.getCaptureClauseKind() ==
+            RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::
+                Enter) &&
+       Config.hasRequiresUnifiedSharedMemory())) {
+    SmallString<64> PtrName;
+    {
+      llvm::raw_svector_ostream OS(PtrName);
+      OS << RegOp.getMangledName();
+      if (!RegOp.isExternallyVisible()) {
+        auto EntryInfo =
+            getTargetEntryUniqueInfo(RegOp.getFilename(), RegOp.getLine());
+        OS << llvm::format("_%x", EntryInfo.FileID);
+      }
+      OS << "_decl_tgt_ref_ptr";
+    }
+
+    llvm::Value *Ptr = RegOp.getLLVMModule()->getNamedValue(PtrName);
+    llvm::GlobalValue *GlobalValue =
+        RegOp.getLLVMModule()->getNamedValue(RegOp.getMangledName());
+    llvm::Type *LlvmPtrTy = GlobalValue->getType();
+
+    if (!Ptr) {
+      Ptr = getOrCreateInternalVariable(LlvmPtrTy, PtrName);
+
+      auto *GV = cast<llvm::GlobalVariable>(Ptr);
+      GV->setLinkage(llvm::GlobalValue::WeakAnyLinkage);
+
+      // TODO: This needs another method to be invoked on globalValue,
+      // CGOpenMPRuntime.cpp uses Clangs CGM.GetAddrOfGlobal to set
+      // this, which does some optional bitcasting and registering via
+      // registerTargetGlobalVariable for OpenMP and it's also interlinked
+      // with Clang's EmitDefferredDecl's, it seems hard to un-entangle it
+      if (!Config.isTargetCodegen())
+        GV->setInitializer(GlobalValue);
+
+      registerTargetGlobalVariable(RegOp, cast<llvm::Constant>(Ptr));
+    }
+    return cast<llvm::Constant>(Ptr);
+  }
+
+  return nullptr;
+}
+
+void OpenMPIRBuilder::registerTargetGlobalVariable(
+    RegisterDeclareTargetInterface &RegOp, llvm::Constant *Addr) {
+  if (RegOp.getDeviceClauseKind() !=
+          RegisterDeclareTargetInterface::DeclareTargetDeviceClauseKind::
+              NoDevice &&
+      (RegOp.getDeviceClauseKind() == RegisterDeclareTargetInterface::
+                                          DeclareTargetDeviceClauseKind::Host ||
+       RegOp.getDeviceClauseKind() ==
+           RegisterDeclareTargetInterface::DeclareTargetDeviceClauseKind::
+               NoHost))
+    return;
+
+  auto *LlvmModule = RegOp.getLLVMModule();
+  llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind Flags;
+  int64_t VarSize;
+  llvm::GlobalValue::LinkageTypes Linkage;
+  StringRef VarName;
+
+  if (RegOp.getCaptureClauseKind() ==
+          RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::To &&
+      !Config.hasRequiresUnifiedSharedMemory()) {
+    Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
+    VarName = RegOp.getMangledName();
+    llvm::GlobalValue *LlvmVal = LlvmModule->getNamedValue(VarName);
+
+    if (!RegOp.isDeclaration())
+      VarSize = llvm::divideCeil(LlvmModule->getDataLayout().getTypeSizeInBits(
+                                     LlvmVal->getValueType()),
+                                 8);
+    else
+      VarSize = 0;
+    Linkage = LlvmVal->getLinkage();
+
+    // This is a workaround carried over from Clang which prevents undesired
+    // optimisation of internal variables.
+    if (Config.IsTargetCodegen &&
+        (!RegOp.isExternallyVisible() ||
+         Linkage == llvm::GlobalValue::LinkOnceODRLinkage)) {
+      // Do not create a "ref-variable" if the original is not also available
+      // on the host.
+      if (OffloadInfoManager.hasDeviceGlobalVarEntryInfo(VarName))
+        return;
+
+      std::string RefName = createPlatformSpecificName({VarName, "ref"});
+      if (!LlvmModule->getNamedValue(RefName)) {
+        llvm::Constant *AddrRef =
+            getOrCreateInternalVariable(Addr->getType(), RefName);
+        auto *GvAddrRef = cast<llvm::GlobalVariable>(AddrRef);
+        GvAddrRef->setConstant(true);
+        GvAddrRef->setLinkage(llvm::GlobalValue::InternalLinkage);
+        GvAddrRef->setInitializer(Addr);
+        // TODO: Clang CodeGen has a mechanism which prevents these
+        // from being optimised out invoked via addCompilerUsedGlobal
+        // adding the global to a list of globals to be protected in the end
+        // object file. This mechanism currently does not exist in Flang/MLIR
+        // perhaps moving this into the OpenMPIRBuilder so it's shared for
+        // anything that may use it is ideal.
+      }
+    }
+  } else {
+    if (RegOp.getCaptureClauseKind() ==
+        RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::Link)
+      Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink;
+    else
+      Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
+
+    if (Config.isTargetCodegen()) {
+      VarName = (Addr) ? Addr->getName() : "";
+      Addr = nullptr;
+    } else {
+      Addr = getAddrOfDeclareTargetVar(RegOp);
+      VarName = (Addr) ? Addr->getName() : "";
+    }
+    VarSize = LlvmModule->getDataLayout().getPointerSize();
+    Linkage = llvm::GlobalValue::WeakAnyLinkage;
+  }
+
+  OffloadInfoManager.registerDeviceGlobalVarEntryInfo(VarName, Addr, VarSize,
+                                                      Flags, Linkage);
 }
 
 void TargetRegionEntryInfo::getTargetRegionEntryFnName(

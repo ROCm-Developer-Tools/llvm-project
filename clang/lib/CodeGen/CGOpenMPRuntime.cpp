@@ -10335,14 +10335,8 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
       !CGM.getLangOpts().OpenMPIsDevice)
     return;
 
-  // If we have host/nohost variables, they do not need to be registered.
-  std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
-      OMPDeclareTargetDeclAttr::getDeviceType(VD);
-  if (DevTy && *DevTy != OMPDeclareTargetDeclAttr::DT_Any)
-    return;
-
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
-      OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
+    OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
   if (!Res) {
     if (CGM.getLangOpts().OpenMPIsDevice) {
       // Register non-target variables being emitted in device code (debug info
@@ -10352,6 +10346,21 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
     }
     return;
   }
+
+  if (CGM.getLangOpts().OpenMPIRBuilder) {
+    // WIP implementation shared with the OpenMP Dialect
+    // in MLIR through the OpenMPIRBuilder.
+    auto RegOp = RegisterDeclareTargetInterfaceClang(VD, CGM);
+    OMPBuilder.registerTargetGlobalVariable(RegOp, Addr);
+    return;
+  }
+   
+  // If we have host/nohost variables, they do not need to be registered.
+  std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
+      OMPDeclareTargetDeclAttr::getDeviceType(VD);
+  if (DevTy && *DevTy != OMPDeclareTargetDeclAttr::DT_Any)
+    return;
+
   // Register declare target variables.
   llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind Flags;
   StringRef VarName;
@@ -10506,6 +10515,34 @@ bool CGOpenMPRuntime::hasAllocateAttributeForGlobalVar(const VarDecl *VD,
 
 bool CGOpenMPRuntime::hasRequiresUnifiedSharedMemory() const {
   return HasRequiresUnifiedSharedMemory;
+}
+
+llvm::Module *
+CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::getLLVMModule() {
+  return &CGM.getModule();
+}
+
+llvm::StringRef
+CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::getMangledName() {
+  return CGM.getMangledName(Decl);
+}
+
+bool CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::isDeclaration() {
+  return Decl->hasDefinition(CGM.getContext()) != VarDecl::DeclarationOnly;
+}
+
+bool CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::
+    isExternallyVisible() {
+  return Decl->isExternallyVisible();
+}
+
+llvm::StringRef CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::
+    getFilename() {
+  return CGM.getContext().getSourceManager().getPresumedLoc(Decl->getCanonicalDecl()->getBeginLoc()).getFilename();
+}
+
+uint64_t CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::getLine() {
+  return CGM.getContext().getSourceManager().getPresumedLoc(Decl->getCanonicalDecl()->getBeginLoc()).getLine();
 }
 
 CGOpenMPRuntime::DisableAutoDeclareTargetRAII::DisableAutoDeclareTargetRAII(
