@@ -5172,7 +5172,8 @@ llvm::Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
     OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
     OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
     bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
-    uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule) {
+    uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule,
+    std::vector<llvm::GlobalVariable *> &GeneratedRefs) {
   // TODO: Return nullptr, if OpenMNPSIMD, when
   // OpenMPSimd is added to OMPIRBuilder Config.
 
@@ -5212,9 +5213,10 @@ llvm::Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
       if (!Config.isTargetCodegen())
         GV->setInitializer(GlobalValue);
 
-      registerTargetGlobalVariable(
-          CaptureClause, DeviceClause, IsDeclaration, IsExternallyVisible,
-          Filename, Line, MangledName, LlvmModule, cast<llvm::Constant>(Ptr));
+      registerTargetGlobalVariable(CaptureClause, DeviceClause, IsDeclaration,
+                                   IsExternallyVisible, Filename, Line,
+                                   MangledName, LlvmModule, GeneratedRefs,
+                                   cast<llvm::Constant>(Ptr));
     }
     return cast<llvm::Constant>(Ptr);
   }
@@ -5227,7 +5229,7 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
     OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
     bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
     uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule,
-    llvm::Constant *Addr) {
+    std::vector<llvm::GlobalVariable *> &GeneratedRefs, llvm::Constant *Addr) {
   if (DeviceClause !=
           OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::NoDevice &&
       (DeviceClause ==
@@ -5274,12 +5276,7 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
         GvAddrRef->setConstant(true);
         GvAddrRef->setLinkage(llvm::GlobalValue::InternalLinkage);
         GvAddrRef->setInitializer(Addr);
-        // TODO: Clang CodeGen has a mechanism which prevents these
-        // from being optimised out invoked via addCompilerUsedGlobal
-        // adding the global to a list of globals to be protected in the end
-        // object file. This mechanism currently does not exist in Flang/MLIR
-        // perhaps moving this into the OpenMPIRBuilder so it's shared for
-        // anything that may use it is ideal.
+        GeneratedRefs.push_back(GvAddrRef);
       }
     }
   } else {
@@ -5293,9 +5290,9 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
       VarName = (Addr) ? Addr->getName() : "";
       Addr = nullptr;
     } else {
-      Addr = getAddrOfDeclareTargetVar(CaptureClause, DeviceClause,
-                                       IsDeclaration, IsExternallyVisible,
-                                       Filename, Line, MangledName, LlvmModule);
+      Addr = getAddrOfDeclareTargetVar(
+          CaptureClause, DeviceClause, IsDeclaration, IsExternallyVisible,
+          Filename, Line, MangledName, LlvmModule, GeneratedRefs);
       VarName = (Addr) ? Addr->getName() : "";
     }
     VarSize = LlvmModule->getDataLayout().getPointerSize();

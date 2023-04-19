@@ -10347,7 +10347,7 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
     return;
   }
 
-  if (CGM.getLangOpts().OpenMPIRBuilder) {
+  // if (CGM.getLangOpts().OpenMPIRBuilder) {
     // WIP implementation shared with the OpenMP Dialect
     // in MLIR through the OpenMPIRBuilder.
     auto convertDeviceClause = [](const VarDecl *VD) {
@@ -10404,13 +10404,20 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
       }
     };
 
-    auto loc = CGM.getContext().getSourceManager().getPresumedLoc(VD->getCanonicalDecl()->getBeginLoc());
-    OMPBuilder.registerTargetGlobalVariable(convertCaptureClause(VD), convertDeviceClause(VD),
-                                            VD->hasDefinition(CGM.getContext()) != VarDecl::DeclarationOnly, VD->isExternallyVisible(),
-                                            loc.getFilename(), loc.getLine(), CGM.getMangledName(VD), &CGM.getModule(),
-                                            Addr);
+    std::vector<llvm::GlobalVariable *> GeneratedRefs;
+    auto loc = CGM.getContext().getSourceManager().getPresumedLoc(
+        VD->getCanonicalDecl()->getBeginLoc());
+    OMPBuilder.registerTargetGlobalVariable(
+        convertCaptureClause(VD), convertDeviceClause(VD),
+        VD->hasDefinition(CGM.getContext()) == VarDecl::DeclarationOnly,
+        VD->isExternallyVisible(), loc.getFilename(), loc.getLine(),
+        CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs, Addr);
+
+    for (auto* ref : GeneratedRefs)
+      CGM.addCompilerUsedGlobal(ref);
+
     return;
-  }
+  // }
    
   // If we have host/nohost variables, they do not need to be registered.
   std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =

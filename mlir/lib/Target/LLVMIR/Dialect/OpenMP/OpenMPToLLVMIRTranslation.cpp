@@ -1781,17 +1781,20 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
           captureClause = convertToCaptureClauseKind(attribute);
       llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
           deviceClause = convertToDeviceClauseKind(attribute);
+      // unused for MLIR at the moment, required in Clang for book
+      // keeping
+      std::vector<llvm::GlobalVariable *> generatedRefs;
 
       ompBuilder->registerTargetGlobalVariable(
           captureClause, deviceClause, isDeclaration, isExternallyVisible,
-          filename, line, mangledName, llvmModule, gVal);
+          filename, line, mangledName, llvmModule, generatedRefs, gVal);
 
       if (isDevice && (attribute.getCaptureClause().getValue() !=
                            mlir::omp::DeclareTargetCaptureClause::to ||
                        ompBuilder->Config.hasRequiresUnifiedSharedMemory())) {
         ompBuilder->getAddrOfDeclareTargetVar(
             captureClause, deviceClause, isDeclaration, isExternallyVisible,
-            filename, line, mangledName, llvmModule);
+            filename, line, mangledName, llvmModule, generatedRefs);
         // Flang has already generated a global by this stage, unlike Clang, so
         // this needs to be specially removed here for device when we' re
         // anything but a To clause specified variable with no unified shared
