@@ -5169,35 +5169,33 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
 }
 
 llvm::Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
-    RegisterDeclareTargetInterface &RegOp) {
+    OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
+    OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+    bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
+    uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule) {
   // TODO: Return nullptr, if OpenMNPSIMD, when
   // OpenMPSimd is added to OMPIRBuilder Config.
 
-  if (RegOp.getCaptureClauseKind() ==
-          RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::
-              Link ||
-      ((RegOp.getCaptureClauseKind() ==
-            RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::
-                To ||
-        RegOp.getCaptureClauseKind() ==
-            RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::
-                Enter) &&
+  if (CaptureClause ==
+          OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::Link ||
+      ((CaptureClause ==
+            OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::To ||
+        CaptureClause ==
+            OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::Enter) &&
        Config.hasRequiresUnifiedSharedMemory())) {
     SmallString<64> PtrName;
     {
       llvm::raw_svector_ostream OS(PtrName);
-      OS << RegOp.getMangledName();
-      if (!RegOp.isExternallyVisible()) {
-        auto EntryInfo =
-            getTargetEntryUniqueInfo(RegOp.getFilename(), RegOp.getLine());
+      OS << MangledName;
+      if (!IsExternallyVisible) {
+        auto EntryInfo = getTargetEntryUniqueInfo(Filename, Line);
         OS << llvm::format("_%x", EntryInfo.FileID);
       }
       OS << "_decl_tgt_ref_ptr";
     }
 
-    llvm::Value *Ptr = RegOp.getLLVMModule()->getNamedValue(PtrName);
-    llvm::GlobalValue *GlobalValue =
-        RegOp.getLLVMModule()->getNamedValue(RegOp.getMangledName());
+    llvm::Value *Ptr = LlvmModule->getNamedValue(PtrName);
+    llvm::GlobalValue *GlobalValue = LlvmModule->getNamedValue(MangledName);
     llvm::Type *LlvmPtrTy = GlobalValue->getType();
 
     if (!Ptr) {
@@ -5214,7 +5212,9 @@ llvm::Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
       if (!Config.isTargetCodegen())
         GV->setInitializer(GlobalValue);
 
-      registerTargetGlobalVariable(RegOp, cast<llvm::Constant>(Ptr));
+      registerTargetGlobalVariable(
+          CaptureClause, DeviceClause, IsDeclaration, IsExternallyVisible,
+          Filename, Line, MangledName, LlvmModule, cast<llvm::Constant>(Ptr));
     }
     return cast<llvm::Constant>(Ptr);
   }
@@ -5223,31 +5223,32 @@ llvm::Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
 }
 
 void OpenMPIRBuilder::registerTargetGlobalVariable(
-    RegisterDeclareTargetInterface &RegOp, llvm::Constant *Addr) {
-  if (RegOp.getDeviceClauseKind() !=
-          RegisterDeclareTargetInterface::DeclareTargetDeviceClauseKind::
-              NoDevice &&
-      (RegOp.getDeviceClauseKind() == RegisterDeclareTargetInterface::
-                                          DeclareTargetDeviceClauseKind::Host ||
-       RegOp.getDeviceClauseKind() ==
-           RegisterDeclareTargetInterface::DeclareTargetDeviceClauseKind::
-               NoHost))
+    OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
+    OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+    bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
+    uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule,
+    llvm::Constant *Addr) {
+  if (DeviceClause !=
+          OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::NoDevice &&
+      (DeviceClause ==
+           OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::Host ||
+       DeviceClause ==
+           OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::NoHost))
     return;
 
-  auto *LlvmModule = RegOp.getLLVMModule();
   llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind Flags;
   int64_t VarSize;
   llvm::GlobalValue::LinkageTypes Linkage;
   StringRef VarName;
 
-  if (RegOp.getCaptureClauseKind() ==
-          RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::To &&
+  if (CaptureClause ==
+          OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::To &&
       !Config.hasRequiresUnifiedSharedMemory()) {
     Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
-    VarName = RegOp.getMangledName();
+    VarName = MangledName;
     llvm::GlobalValue *LlvmVal = LlvmModule->getNamedValue(VarName);
 
-    if (!RegOp.isDeclaration())
+    if (!IsDeclaration)
       VarSize = llvm::divideCeil(LlvmModule->getDataLayout().getTypeSizeInBits(
                                      LlvmVal->getValueType()),
                                  8);
@@ -5258,7 +5259,7 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
     // This is a workaround carried over from Clang which prevents undesired
     // optimisation of internal variables.
     if (Config.IsTargetCodegen &&
-        (!RegOp.isExternallyVisible() ||
+        (!IsExternallyVisible ||
          Linkage == llvm::GlobalValue::LinkOnceODRLinkage)) {
       // Do not create a "ref-variable" if the original is not also available
       // on the host.
@@ -5282,8 +5283,8 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
       }
     }
   } else {
-    if (RegOp.getCaptureClauseKind() ==
-        RegisterDeclareTargetInterface::DeclareTargetCaptureClauseKind::Link)
+    if (CaptureClause ==
+        OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::Link)
       Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink;
     else
       Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
@@ -5292,7 +5293,9 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
       VarName = (Addr) ? Addr->getName() : "";
       Addr = nullptr;
     } else {
-      Addr = getAddrOfDeclareTargetVar(RegOp);
+      Addr = getAddrOfDeclareTargetVar(CaptureClause, DeviceClause,
+                                       IsDeclaration, IsExternallyVisible,
+                                       Filename, Line, MangledName, LlvmModule);
       VarName = (Addr) ? Addr->getName() : "";
     }
     VarSize = LlvmModule->getDataLayout().getPointerSize();

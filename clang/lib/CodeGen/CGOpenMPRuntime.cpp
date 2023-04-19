@@ -10350,8 +10350,65 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
   if (CGM.getLangOpts().OpenMPIRBuilder) {
     // WIP implementation shared with the OpenMP Dialect
     // in MLIR through the OpenMPIRBuilder.
-    auto RegOp = RegisterDeclareTargetInterfaceClang(VD, CGM);
-    OMPBuilder.registerTargetGlobalVariable(RegOp, Addr);
+    auto convertDeviceClause = [](const VarDecl *VD) {
+      std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
+          OMPDeclareTargetDeclAttr::getDeviceType(VD);
+      if (!DevTy)
+        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+            NoDevice;
+
+      switch (*DevTy) {
+      case OMPDeclareTargetDeclAttr::DT_Host:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+            Host;
+        break;
+      case OMPDeclareTargetDeclAttr::DT_NoHost:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+            NoHost;
+        break;
+      case OMPDeclareTargetDeclAttr::DT_Any:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+            Any;
+        break;
+      default:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+            NoDevice;
+        break;
+      }
+    };
+
+    auto convertCaptureClause = [](const VarDecl *VD) {
+      std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> MapType =
+          OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
+      if (!MapType)
+        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+            NoCapture;
+
+      switch (*MapType) {
+      case OMPDeclareTargetDeclAttr::MapTypeTy::MT_To:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+            To;
+        break;
+      case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Enter:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+            Enter;
+        break;
+      case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Link:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+            Link;
+        break;
+      default:
+        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+            NoCapture;
+        break;
+      }
+    };
+
+    auto loc = CGM.getContext().getSourceManager().getPresumedLoc(VD->getCanonicalDecl()->getBeginLoc());
+    OMPBuilder.registerTargetGlobalVariable(convertCaptureClause(VD), convertDeviceClause(VD),
+                                            VD->hasDefinition(CGM.getContext()) != VarDecl::DeclarationOnly, VD->isExternallyVisible(),
+                                            loc.getFilename(), loc.getLine(), CGM.getMangledName(VD), &CGM.getModule(),
+                                            Addr);
     return;
   }
    
@@ -10515,34 +10572,6 @@ bool CGOpenMPRuntime::hasAllocateAttributeForGlobalVar(const VarDecl *VD,
 
 bool CGOpenMPRuntime::hasRequiresUnifiedSharedMemory() const {
   return HasRequiresUnifiedSharedMemory;
-}
-
-llvm::Module *
-CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::getLLVMModule() {
-  return &CGM.getModule();
-}
-
-llvm::StringRef
-CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::getMangledName() {
-  return CGM.getMangledName(Decl);
-}
-
-bool CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::isDeclaration() {
-  return Decl->hasDefinition(CGM.getContext()) != VarDecl::DeclarationOnly;
-}
-
-bool CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::
-    isExternallyVisible() {
-  return Decl->isExternallyVisible();
-}
-
-llvm::StringRef CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::
-    getFilename() {
-  return CGM.getContext().getSourceManager().getPresumedLoc(Decl->getCanonicalDecl()->getBeginLoc()).getFilename();
-}
-
-uint64_t CGOpenMPRuntime::RegisterDeclareTargetInterfaceClang::getLine() {
-  return CGM.getContext().getSourceManager().getPresumedLoc(Decl->getCanonicalDecl()->getBeginLoc()).getLine();
 }
 
 CGOpenMPRuntime::DisableAutoDeclareTargetRAII::DisableAutoDeclareTargetRAII(

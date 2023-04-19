@@ -1706,104 +1706,6 @@ public:
 
 } // namespace
 
-class RegisterDeclareTargetInterfaceMLIR
-    : public llvm::RegisterDeclareTargetInterface {
-public:
-  RegisterDeclareTargetInterfaceMLIR(
-      mlir::Operation *op, mlir::LLVM::ModuleTranslation &moduleTranslation)
-      : op(op), moduleTranslation(moduleTranslation) {
-    deviceType = mapDeviceClause(
-        mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(op));
-    captureKind = mapCaptureClause(
-        mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(op));
-  }
-
-  llvm::Module *getLLVMModule() override {
-    return moduleTranslation.getLLVMModule();
-  }
-
-  bool isDeclaration() override {
-    if (LLVM::GlobalOp gOp = dyn_cast<LLVM::GlobalOp>(op))
-      return gOp.isDeclaration();
-    return false;
-  }
-  bool isExternallyVisible() override {
-    if (LLVM::GlobalOp gOp = dyn_cast<LLVM::GlobalOp>(op)) {
-      if (moduleTranslation.getLLVMModule()
-              ->getNamedGlobal(gOp.getSymName())
-              ->getVisibility() ==
-          llvm::GlobalValue::VisibilityTypes::HiddenVisibility)
-        return false;
-    }
-    return true;
-  }
-
-  llvm::StringRef getFilename() override {
-    return op->getLoc()
-        ->findInstanceOf<FileLineColLoc>()
-        .getFilename()
-        .getValue();
-  }
-
-  uint64_t getLine() override {
-    return op->getLoc()->findInstanceOf<FileLineColLoc>().getLine();
-  }
-
-  llvm::StringRef getMangledName() override {
-    if (LLVM::GlobalOp gOp = dyn_cast<LLVM::GlobalOp>(op))
-      return gOp.getSymName();
-    return "";
-  }
-
-  DeclareTargetCaptureClauseKind getCaptureClauseKind() override {
-    return captureKind;
-  }
-
-  DeclareTargetDeviceClauseKind getDeviceClauseKind() override {
-    return deviceType;
-  }
-
-private:
-  DeclareTargetDeviceClauseKind
-  mapDeviceClause(mlir::omp::DeclareTargetDeviceType clause) {
-    switch (clause) {
-    case mlir::omp::DeclareTargetDeviceType::host:
-      return DeclareTargetDeviceClauseKind::Host;
-      break;
-    case mlir::omp::DeclareTargetDeviceType::nohost:
-      return DeclareTargetDeviceClauseKind::NoHost;
-      break;
-    case mlir::omp::DeclareTargetDeviceType::any:
-      return DeclareTargetDeviceClauseKind::Any;
-      break;
-    default:
-      return DeclareTargetDeviceClauseKind::NoDevice;
-      break;
-    }
-  }
-
-  DeclareTargetCaptureClauseKind
-  mapCaptureClause(mlir::omp::DeclareTargetCaptureClause clause) {
-    switch (clause) {
-    case mlir::omp::DeclareTargetCaptureClause::to:
-      return DeclareTargetCaptureClauseKind::To;
-      break;
-    case mlir::omp::DeclareTargetCaptureClause::link:
-      return DeclareTargetCaptureClauseKind::Link;
-      break;
-    default:
-      return DeclareTargetCaptureClauseKind::NoCapture;
-      break;
-    }
-  }
-
-  DeclareTargetDeviceClauseKind deviceType;
-  DeclareTargetCaptureClauseKind captureKind;
-
-  mlir::Operation *op;
-  mlir::LLVM::ModuleTranslation &moduleTranslation;
-};
-
 LogicalResult
 convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
                          LLVM::ModuleTranslation &moduleTranslation) {
@@ -1819,6 +1721,44 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
   if (LLVM::LLVMFuncOp gOp = dyn_cast<LLVM::LLVMFuncOp>(op))
     return success();
 
+  auto convertToDeviceClauseKind = [](mlir::omp::DeclareTargetAttr attr) {
+    switch (attr.getDeviceType().getValue()) {
+    case mlir::omp::DeclareTargetDeviceType::host:
+      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+          Host;
+      break;
+    case mlir::omp::DeclareTargetDeviceType::nohost:
+      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+          NoHost;
+      break;
+    case mlir::omp::DeclareTargetDeviceType::any:
+      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+          Any;
+      break;
+    default:
+      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+          NoDevice;
+      break;
+    }
+  };
+
+  auto convertToCaptureClauseKind = [](mlir::omp::DeclareTargetAttr attr) {
+    switch (attr.getCaptureClause().getValue()) {
+    case mlir::omp::DeclareTargetCaptureClause::to:
+      return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+          To;
+      break;
+    case mlir::omp::DeclareTargetCaptureClause::link:
+      return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+          Link;
+      break;
+    default:
+      return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+          NoCapture;
+      break;
+    }
+  };
+
   if (LLVM::GlobalOp gOp = dyn_cast<LLVM::GlobalOp>(op)) {
     // NOTE: Clang invokes registerTargetGlobalVariable twice if neccessary,
     // once for the original value and another time if casting is required
@@ -1827,20 +1767,37 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
     // MLIR level
     if (auto *gVal = moduleTranslation.getLLVMModule()->getNamedValue(
             gOp.getSymName())) {
-      auto regOp = RegisterDeclareTargetInterfaceMLIR(gOp, moduleTranslation);
-      ompBuilder->registerTargetGlobalVariable(regOp, gVal);
 
-      if (isDevice && (mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(
-                           op) != mlir::omp::DeclareTargetCaptureClause::to ||
+      bool isDeclaration = gOp.isDeclaration();
+      bool isExternallyVisible =
+          gVal->getVisibility() !=
+          llvm::GlobalValue::VisibilityTypes::HiddenVisibility;
+      auto loc = op->getLoc()->findInstanceOf<FileLineColLoc>();
+      llvm::StringRef filename = loc.getFilename().getValue();
+      uint64_t line = loc.getLine();
+      llvm::StringRef mangledName = gOp.getSymName();
+      llvm::Module *llvmModule = moduleTranslation.getLLVMModule();
+      llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
+          captureClause = convertToCaptureClauseKind(attribute);
+      llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
+          deviceClause = convertToDeviceClauseKind(attribute);
+
+      ompBuilder->registerTargetGlobalVariable(
+          captureClause, deviceClause, isDeclaration, isExternallyVisible,
+          filename, line, mangledName, llvmModule, gVal);
+
+      if (isDevice && (attribute.getCaptureClause().getValue() !=
+                           mlir::omp::DeclareTargetCaptureClause::to ||
                        ompBuilder->Config.hasRequiresUnifiedSharedMemory())) {
-        ompBuilder->getAddrOfDeclareTargetVar(regOp);
+        ompBuilder->getAddrOfDeclareTargetVar(
+            captureClause, deviceClause, isDeclaration, isExternallyVisible,
+            filename, line, mangledName, llvmModule);
         // Flang has already generated a global by this stage, unlike Clang, so
-        // this needs to be specially removed here for device when we're
+        // this needs to be specially removed here for device when we' re
         // anything but a To clause specified variable with no unified shared
         // memory.
         if (llvm::GlobalValue *llvmVal =
-                moduleTranslation.getLLVMModule()->getNamedValue(
-                    regOp.getMangledName())) {
+                moduleTranslation.getLLVMModule()->getNamedValue(mangledName)) {
           llvmVal->removeFromParent();
           llvmVal->dropAllReferences();
         }

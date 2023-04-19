@@ -325,6 +325,22 @@ public:
     OMPTargetGlobalVarEntryLink = 0x1,
   };
 
+  // TODO: combine with OMPTargetGlobalVarEntryKind
+  enum DeclareTargetCaptureClauseKind : uint32_t {
+    To = 0x0,
+    Enter = 0x01,
+    Link = 0x02,
+    NoCapture = 0x03
+  };
+
+  // TODO: Rename to be more inline with VarEntryKind
+  enum DeclareTargetDeviceClauseKind : uint32_t {
+    Any = 0x0,
+    NoHost = 0x01,
+    Host = 0x02,
+    NoDevice = 0x03
+  };
+
   /// Device global variable entries info.
   class OffloadEntryInfoDeviceGlobalVar final : public OffloadEntryInfo {
     /// Type of the global variable.
@@ -403,35 +419,6 @@ private:
   typedef StringMap<OffloadEntryInfoDeviceGlobalVar>
       OffloadEntriesDeviceGlobalVarTy;
   OffloadEntriesDeviceGlobalVarTy OffloadEntriesDeviceGlobalVar;
-};
-
-/// An interface which must have a concrete implementation
-/// defined for types (currently variables) to be used in
-/// conjunction with registerTargetGlobalVariable and
-/// getAddrOfDeclareTargetVar.
-class RegisterDeclareTargetInterface {
-public:
-  enum DeclareTargetCaptureClauseKind {
-    To = 0x0,
-    Enter = 0x01,
-    Link = 0x02,
-    NoCapture = 0x03
-  };
-  enum DeclareTargetDeviceClauseKind {
-    Any = 0x0,
-    NoHost = 0x01,
-    Host = 0x02,
-    NoDevice = 0x03
-  };
-
-  virtual bool isDeclaration() = 0;
-  virtual bool isExternallyVisible() = 0;
-  virtual llvm::StringRef getFilename() = 0;
-  virtual uint64_t getLine() = 0;
-  virtual llvm::StringRef getMangledName() = 0;
-  virtual DeclareTargetCaptureClauseKind getCaptureClauseKind() = 0;
-  virtual DeclareTargetDeviceClauseKind getDeviceClauseKind() = 0;
-  virtual llvm::Module *getLLVMModule() = 0;
 };
 
 /// An interface to create LLVM-IR for OpenMP directives.
@@ -788,25 +775,60 @@ public:
   /// target variable, used in conjunction with registerTargetGlobalVariable
   /// to create declare target global variables.
   ///
-  /// \param RegOp - A concrete implementation of the
-  ///                RegisterDeclareTargetInterface
-  ///                which wrap's the variable type being registered (e.g.
-  ///                VarDecl for Clang, LLVMGlobalOp for MLIR) and provides
-  ///                the neccessary functionality specified by the interface
-  ///                for the function to correctly execute.
-  llvm::Constant *
-  getAddrOfDeclareTargetVar(RegisterDeclareTargetInterface &RegVar);
+  /// \param CaptureClause - enumerator corresponding to the OpenMP capture
+  /// clause used in conjunction with the variable being registered (link,
+  /// to, enter).
+  /// \param DeviceClause - enumerator corresponding to the OpenMP capture
+  /// clause used in conjunction with the variable being registered (nohost,
+  /// host, any)
+  /// \param IsDeclaration - boolean stating if the variable being registered
+  /// is a declaration-only and not a definition
+  /// \param IsExternallyVisible - boolean stating if the variable is externally
+  /// visible
+  /// \param Filename - the path of the file the variable being registered
+  /// resides in
+  /// \param Line - the line number in the file the variable being registered
+  /// resides in
+  /// \param MangledName - the mangled name of the variable being registered
+  /// \param LlvmModule - the llvm module being built that the variable is a
+  /// part of
+  llvm::Constant *getAddrOfDeclareTargetVar(
+      llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
+          CaptureClause,
+      llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
+          DeviceClause,
+      bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
+      uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule);
 
   /// Registers a target variable for device or host.
   ///
-  /// \param RegOp - A concrete implementation of the
-  ///                RegisterDeclareTargetInterface
-  ///                which wrap's the variable type being registered (e.g.
-  ///                VarDecl for Clang, LLVMGlobalOp for MLIR) and provides
-  ///                the neccessary functionality specified by the interface
-  ///                for the function to correctly execute.
-  void registerTargetGlobalVariable(RegisterDeclareTargetInterface &RegVar,
-                                    llvm::Constant *Addr);
+  /// \param CaptureClause - enumerator corresponding to the OpenMP capture
+  /// clause used in conjunction with the variable being registered (link,
+  /// to, enter).
+  /// \param DeviceClause - enumerator corresponding to the OpenMP capture
+  /// clause used in conjunction with the variable being registered (nohost,
+  /// host, any)
+  /// \param IsDeclaration - boolean stating if the variable being registered
+  /// is a declaration-only and not a definition
+  /// \param IsExternallyVisible - boolean stating if the variable is externally
+  /// visible
+  /// \param Filename - the path of the file the variable being registered
+  /// resides in
+  /// \param Line - the line number in the file the variable being registered
+  /// resides in
+  /// \param MangledName - the mangled name of the variable being registered
+  /// \param LlvmModule - the llvm module being built that the variable is a
+  /// part of
+  /// \param Addr - the original llvm value (addr) of the variable to be
+  /// registered
+  void registerTargetGlobalVariable(
+      llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
+          CaptureClause,
+      llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
+          DeviceClause,
+      bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
+      uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule,
+      llvm::Constant *Addr);
 
 private:
   /// Modifies the canonical loop to be a statically-scheduled workshare loop.
