@@ -575,8 +575,7 @@ define i1 @allzeros_v4i32_sign(<4 x i32> %arg) {
 ;
 ; AVX-LABEL: allzeros_v4i32_sign:
 ; AVX:       # %bb.0:
-; AVX-NEXT:    vmovmskps %xmm0, %eax
-; AVX-NEXT:    testl %eax, %eax
+; AVX-NEXT:    vtestps %xmm0, %xmm0
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    retq
   %tmp = icmp slt <4 x i32> %arg, zeroinitializer
@@ -619,8 +618,7 @@ define i1 @allzeros_v8i32_sign(<8 x i32> %arg) {
 ;
 ; AVX-LABEL: allzeros_v8i32_sign:
 ; AVX:       # %bb.0:
-; AVX-NEXT:    vmovmskps %ymm0, %eax
-; AVX-NEXT:    testl %eax, %eax
+; AVX-NEXT:    vtestps %ymm0, %ymm0
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
@@ -779,8 +777,7 @@ define i1 @allzeros_v4i64_sign(<4 x i64> %arg) {
 ;
 ; AVX-LABEL: allzeros_v4i64_sign:
 ; AVX:       # %bb.0:
-; AVX-NEXT:    vmovmskpd %ymm0, %eax
-; AVX-NEXT:    testl %eax, %eax
+; AVX-NEXT:    vtestpd %ymm0, %ymm0
 ; AVX-NEXT:    sete %al
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
@@ -865,8 +862,7 @@ define i1 @allzeros_v8i64_sign(<8 x i64> %arg) {
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm2
 ; AVX1-NEXT:    vpackssdw %xmm2, %xmm0, %xmm0
 ; AVX1-NEXT:    vpor %xmm1, %xmm0, %xmm0
-; AVX1-NEXT:    vmovmskps %xmm0, %eax
-; AVX1-NEXT:    testl %eax, %eax
+; AVX1-NEXT:    vtestps %xmm0, %xmm0
 ; AVX1-NEXT:    sete %al
 ; AVX1-NEXT:    vzeroupper
 ; AVX1-NEXT:    retq
@@ -874,8 +870,7 @@ define i1 @allzeros_v8i64_sign(<8 x i64> %arg) {
 ; AVX2-LABEL: allzeros_v8i64_sign:
 ; AVX2:       # %bb.0:
 ; AVX2-NEXT:    vpackssdw %ymm1, %ymm0, %ymm0
-; AVX2-NEXT:    vmovmskps %ymm0, %eax
-; AVX2-NEXT:    testl %eax, %eax
+; AVX2-NEXT:    vtestps %ymm0, %ymm0
 ; AVX2-NEXT:    sete %al
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
@@ -3330,6 +3325,53 @@ define i1 @allzeros_v8i64_and4(<8 x i64> %arg) {
   ret i1 %tmp3
 }
 
+; FCMP may use ISD::SETNE when nnan, don't attempt to use LowerVectorAllEqual.
+define i1 @allzeros_v8f32_nnan(<8 x float> %a0) {
+; SSE-LABEL: allzeros_v8f32_nnan:
+; SSE:       # %bb.0:
+; SSE-NEXT:    xorps %xmm2, %xmm2
+; SSE-NEXT:    cmpneqps %xmm2, %xmm1
+; SSE-NEXT:    cmpneqps %xmm2, %xmm0
+; SSE-NEXT:    packssdw %xmm1, %xmm0
+; SSE-NEXT:    pmovmskb %xmm0, %eax
+; SSE-NEXT:    testl %eax, %eax
+; SSE-NEXT:    setne %al
+; SSE-NEXT:    retq
+;
+; AVX1OR2-LABEL: allzeros_v8f32_nnan:
+; AVX1OR2:       # %bb.0:
+; AVX1OR2-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; AVX1OR2-NEXT:    vcmpneqps %ymm1, %ymm0, %ymm0
+; AVX1OR2-NEXT:    vtestps %ymm0, %ymm0
+; AVX1OR2-NEXT:    setne %al
+; AVX1OR2-NEXT:    vzeroupper
+; AVX1OR2-NEXT:    retq
+;
+; KNL-LABEL: allzeros_v8f32_nnan:
+; KNL:       # %bb.0:
+; KNL-NEXT:    # kill: def $ymm0 killed $ymm0 def $zmm0
+; KNL-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; KNL-NEXT:    vcmpneqps %zmm1, %zmm0, %k0
+; KNL-NEXT:    kmovw %k0, %eax
+; KNL-NEXT:    testb %al, %al
+; KNL-NEXT:    setne %al
+; KNL-NEXT:    vzeroupper
+; KNL-NEXT:    retq
+;
+; SKX-LABEL: allzeros_v8f32_nnan:
+; SKX:       # %bb.0:
+; SKX-NEXT:    vxorps %xmm1, %xmm1, %xmm1
+; SKX-NEXT:    vcmpneqps %ymm1, %ymm0, %k0
+; SKX-NEXT:    kortestb %k0, %k0
+; SKX-NEXT:    setne %al
+; SKX-NEXT:    vzeroupper
+; SKX-NEXT:    retq
+  %1 = fcmp nnan une <8 x float> %a0, zeroinitializer
+  %2 = bitcast <8 x i1> %1 to i8
+  %3 = icmp ne i8 %2, 0
+  ret i1 %3
+}
+
 ; The below are IR patterns that should directly represent the behavior of a
 ; MOVMSK instruction.
 
@@ -3828,8 +3870,7 @@ define i1 @movmsk_or_v2f64(<2 x double> %x, <2 x double> %y) {
 ; AVX1OR2-LABEL: movmsk_or_v2f64:
 ; AVX1OR2:       # %bb.0:
 ; AVX1OR2-NEXT:    vcmplepd %xmm0, %xmm1, %xmm0
-; AVX1OR2-NEXT:    vmovmskpd %xmm0, %eax
-; AVX1OR2-NEXT:    testl %eax, %eax
+; AVX1OR2-NEXT:    vtestpd %xmm0, %xmm0
 ; AVX1OR2-NEXT:    setne %al
 ; AVX1OR2-NEXT:    retq
 ;

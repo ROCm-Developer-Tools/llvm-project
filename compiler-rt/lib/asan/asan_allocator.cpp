@@ -1144,7 +1144,7 @@ void ForEachChunk(ForEachChunkCallback callback, void *arg) {
   __asan::get_allocator().ForEachChunk(callback, arg);
 }
 
-IgnoreObjectResult IgnoreObjectLocked(const void *p) {
+IgnoreObjectResult IgnoreObject(const void *p) {
   uptr addr = reinterpret_cast<uptr>(p);
   __asan::AsanChunk *m = __asan::instance.GetAsanChunkByAddr(addr);
   if (!m ||
@@ -1164,7 +1164,7 @@ IgnoreObjectResult IgnoreObjectLocked(const void *p) {
 // ---------------------- Interface ---------------- {{{1
 using namespace __asan;
 
-const void *AllocationBegin(const void *p) {
+static const void *AllocationBegin(const void *p) {
   AsanChunk *m = __asan::instance.GetAsanChunkByAddr((uptr)p);
   if (!m)
     return nullptr;

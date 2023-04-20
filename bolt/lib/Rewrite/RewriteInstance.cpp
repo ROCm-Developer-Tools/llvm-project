@@ -305,6 +305,8 @@ MCPlusBuilder *createMCPlusBuilder(const Triple::ArchType Arch,
 } // namespace bolt
 } // namespace llvm
 
+using ELF64LEPhdrTy = ELF64LEFile::Elf_Phdr;
+
 namespace {
 
 bool refersToReorderedSection(ErrorOr<BinarySection &> Section) {
@@ -4097,7 +4099,6 @@ void RewriteInstance::mapCodeSections(RuntimeDyld &RTDyld) {
       FF.setImageAddress(0);
       FF.setImageSize(0);
       FF.setFileOffset(0);
-      BC->deregisterSection(*ColdSection);
     } else {
       FF.setAddress(NextAvailableAddress);
       FF.setImageAddress(ColdSection->getAllocAddress());
@@ -4111,6 +4112,9 @@ void RewriteInstance::mapCodeSections(RuntimeDyld &RTDyld) {
             "BOLT: mapping cold fragment {0:x+} to {1:x+} with size {2:x+}\n",
             FF.getImageAddress(), FF.getAddress(), FF.getImageSize()));
     RTDyld.reassignSectionAddress(ColdSection->getSectionID(), FF.getAddress());
+
+    if (TooLarge)
+      BC->deregisterSection(*ColdSection);
 
     NextAvailableAddress += FF.getImageSize();
   }
@@ -4763,9 +4767,10 @@ void RewriteInstance::patchELFSectionHeaderTable(ELFObjectFile<ELFT> *File) {
       dbgs() << "  " << I << " -> " << NewSectionIndex[I] << '\n';
   );
 
-  // Align starting address for section header table.
+  // Align starting address for section header table. There's no architecutal
+  // need to align this, it is just for pleasant human readability.
   uint64_t SHTOffset = OS.tell();
-  SHTOffset = appendPadding(OS, SHTOffset, sizeof(ELFShdrTy));
+  SHTOffset = appendPadding(OS, SHTOffset, 16);
 
   // Write all section header entries while patching section references.
   for (ELFShdrTy &Section : OutputSections) {

@@ -145,7 +145,7 @@ void GetAllocatorCacheRange(uptr *begin, uptr *end) {
   *end = *begin + sizeof(AllocatorCache);
 }
 
-const void *GetMallocBegin(const void *p) {
+static const void *GetMallocBegin(const void *p) {
   if (!p)
     return nullptr;
   void *beg = allocator.GetBlockBegin(p);
@@ -324,7 +324,7 @@ void ForEachChunk(ForEachChunkCallback callback, void *arg) {
   allocator.ForEachChunk(callback, arg);
 }
 
-IgnoreObjectResult IgnoreObjectLocked(const void *p) {
+IgnoreObjectResult IgnoreObject(const void *p) {
   void *chunk = allocator.GetBlockBegin(p);
   if (!chunk || p < chunk) return kIgnoreObjectInvalid;
   ChunkMetadata *m = Metadata(chunk);

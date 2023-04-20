@@ -298,16 +298,16 @@ class TypePromotionTransaction;
 
 class CodeGenPrepare : public FunctionPass {
   const TargetMachine *TM = nullptr;
-  const TargetSubtargetInfo *SubtargetInfo;
+  const TargetSubtargetInfo *SubtargetInfo = nullptr;
   const TargetLowering *TLI = nullptr;
-  const TargetRegisterInfo *TRI;
+  const TargetRegisterInfo *TRI = nullptr;
   const TargetTransformInfo *TTI = nullptr;
   const BasicBlockSectionsProfileReader *BBSectionsProfileReader = nullptr;
-  const TargetLibraryInfo *TLInfo;
-  const LoopInfo *LI;
+  const TargetLibraryInfo *TLInfo = nullptr;
+  const LoopInfo *LI = nullptr;
   std::unique_ptr<BlockFrequencyInfo> BFI;
   std::unique_ptr<BranchProbabilityInfo> BPI;
-  ProfileSummaryInfo *PSI;
+  ProfileSummaryInfo *PSI = nullptr;
 
   /// As we scan instructions optimizing them, this is the next instruction
   /// to optimize. Transforms that can invalidate this should update it.
@@ -3247,7 +3247,7 @@ class AddressingModeMatcher {
   bool IgnoreProfitability;
 
   /// True if we are optimizing for size.
-  bool OptSize;
+  bool OptSize = false;
 
   ProfileSummaryInfo *PSI;
   BlockFrequencyInfo *BFI;

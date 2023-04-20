@@ -3427,6 +3427,7 @@ bool Expr::isConstantInitializer(ASTContext &Ctx, bool IsForRef,
         CE->getCastKind() == CK_ConstructorConversion ||
         CE->getCastKind() == CK_NonAtomicToAtomic ||
         CE->getCastKind() == CK_AtomicToNonAtomic ||
+        CE->getCastKind() == CK_NullToPointer ||
         CE->getCastKind() == CK_IntToOCLSampler)
       return CE->getSubExpr()->isConstantInitializer(Ctx, false, Culprit);
 
@@ -4403,11 +4404,11 @@ GenericSelectionExpr::CreateEmpty(const ASTContext &Context,
 //  DesignatedInitExpr
 //===----------------------------------------------------------------------===//
 
-IdentifierInfo *DesignatedInitExpr::Designator::getFieldName() const {
-  assert(Kind == FieldDesignator && "Only valid on a field designator");
-  if (Field.NameOrField & 0x01)
-    return reinterpret_cast<IdentifierInfo *>(Field.NameOrField & ~0x01);
-  return getField()->getIdentifier();
+const IdentifierInfo *DesignatedInitExpr::Designator::getFieldName() const {
+  assert(isFieldDesignator() && "Only valid on a field designator");
+  if (FieldInfo.NameOrField & 0x01)
+    return reinterpret_cast<IdentifierInfo *>(FieldInfo.NameOrField & ~0x01);
+  return getFieldDecl()->getIdentifier();
 }
 
 DesignatedInitExpr::DesignatedInitExpr(const ASTContext &C, QualType Ty,
@@ -4482,14 +4483,11 @@ SourceRange DesignatedInitExpr::getDesignatorsSourceRange() const {
 }
 
 SourceLocation DesignatedInitExpr::getBeginLoc() const {
-  SourceLocation StartLoc;
   auto *DIE = const_cast<DesignatedInitExpr *>(this);
   Designator &First = *DIE->getDesignator(0);
   if (First.isFieldDesignator())
-    StartLoc = GNUSyntax ? First.Field.FieldLoc : First.Field.DotLoc;
-  else
-    StartLoc = First.ArrayOrRange.LBracketLoc;
-  return StartLoc;
+    return GNUSyntax ? First.getFieldLoc() : First.getDotLoc();
+  return First.getLBracketLoc();
 }
 
 SourceLocation DesignatedInitExpr::getEndLoc() const {
@@ -4497,20 +4495,18 @@ SourceLocation DesignatedInitExpr::getEndLoc() const {
 }
 
 Expr *DesignatedInitExpr::getArrayIndex(const Designator& D) const {
-  assert(D.Kind == Designator::ArrayDesignator && "Requires array designator");
-  return getSubExpr(D.ArrayOrRange.Index + 1);
+  assert(D.isArrayDesignator() && "Requires array designator");
+  return getSubExpr(D.getArrayIndex() + 1);
 }
 
 Expr *DesignatedInitExpr::getArrayRangeStart(const Designator &D) const {
-  assert(D.Kind == Designator::ArrayRangeDesignator &&
-         "Requires array range designator");
-  return getSubExpr(D.ArrayOrRange.Index + 1);
+  assert(D.isArrayRangeDesignator() && "Requires array range designator");
+  return getSubExpr(D.getArrayIndex() + 1);
 }
 
 Expr *DesignatedInitExpr::getArrayRangeEnd(const Designator &D) const {
-  assert(D.Kind == Designator::ArrayRangeDesignator &&
-         "Requires array range designator");
-  return getSubExpr(D.ArrayOrRange.Index + 2);
+  assert(D.isArrayRangeDesignator() && "Requires array range designator");
+  return getSubExpr(D.getArrayIndex() + 2);
 }
 
 /// Replaces the designator at index @p Idx with the series

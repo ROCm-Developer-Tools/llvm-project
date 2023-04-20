@@ -259,8 +259,8 @@ def DerivedTypeAttrOp : TEST_Op<"derived_type_attr", []> {
   let results = (outs AnyTensor:$output);
   DerivedTypeAttr element_dtype =
     DerivedTypeAttr<"return getElementTypeOrSelf(getOutput().getType());">;
-  DerivedAttr size = DerivedAttr<"int",
-    "return getOutput().getType().cast<ShapedType>().getSizeInBits();",
+  DerivedAttr num_elements = DerivedAttr<"int",
+    "return getOutput().getType().cast<ShapedType>().getNumElements();",
     "$_builder.getI32IntegerAttr($_self)">;
 }
 
@@ -274,6 +274,13 @@ def TypedAttrOp : TEST_Op<"typed_attr"> {
   let arguments = (ins TypeAttr:$type, AnyAttr:$attr);
   let assemblyFormat = [{
     attr-dict $type `=` custom<AttrElideType>(ref($type), $attr)
+  }];
+}
+
+def TypeAttrOfOp : TEST_Op<"type_attr_of"> {
+  let arguments = (ins TypeAttrOf<I64>:$type);
+  let assemblyFormat = [{
+    attr-dict $type
   }];
 }
 

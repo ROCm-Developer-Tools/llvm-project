@@ -409,7 +409,7 @@ HwasanChunkView FindHeapChunkByAddress(uptr address) {
   return HwasanChunkView(reinterpret_cast<uptr>(block), metadata);
 }
 
-const void *AllocationBegin(const void *p) {
+static const void *AllocationBegin(const void *p) {
   const void *untagged_ptr = UntagPtr(p);
   if (!untagged_ptr)
     return nullptr;
@@ -618,11 +618,10 @@ void ForEachChunk(ForEachChunkCallback callback, void *arg) {
   __hwasan::allocator.ForEachChunk(callback, arg);
 }
 
-IgnoreObjectResult IgnoreObjectLocked(const void *p) {
+IgnoreObjectResult IgnoreObject(const void *p) {
   p = __hwasan::InTaggableRegion(reinterpret_cast<uptr>(p)) ? UntagPtr(p) : p;
   uptr addr = reinterpret_cast<uptr>(p);
-  uptr chunk =
-      reinterpret_cast<uptr>(__hwasan::allocator.GetBlockBeginFastLocked(p));
+  uptr chunk = reinterpret_cast<uptr>(__hwasan::allocator.GetBlockBegin(p));
   if (!chunk)
     return kIgnoreObjectInvalid;
   __hwasan::Metadata *metadata = reinterpret_cast<__hwasan::Metadata *>(

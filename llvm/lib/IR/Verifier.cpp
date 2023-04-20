@@ -1075,8 +1075,8 @@ void Verifier::visitDISubrange(const DISubrange &N) {
               isa<DIVariable>(CBound) || isa<DIExpression>(CBound),
           "Count must be signed constant or DIVariable or DIExpression", &N);
   auto Count = N.getCount();
-  CheckDI(!Count || !Count.is<ConstantInt *>() ||
-              Count.get<ConstantInt *>()->getSExtValue() >= -1,
+  CheckDI(!Count || !isa<ConstantInt *>(Count) ||
+              cast<ConstantInt *>(Count)->getSExtValue() >= -1,
           "invalid subrange count", &N);
   auto *LBound = N.getRawLowerBound();
   CheckDI(!LBound || isa<ConstantAsMetadata>(LBound) ||
@@ -6072,20 +6072,20 @@ void Verifier::visitConstrainedFPIntrinsic(ConstrainedFPIntrinsic &FPI) {
   case Intrinsic::experimental_constrained_fptosi:
   case Intrinsic::experimental_constrained_fptoui: {
     Value *Operand = FPI.getArgOperand(0);
-    uint64_t NumSrcElem = 0;
+    ElementCount SrcEC;
     Check(Operand->getType()->isFPOrFPVectorTy(),
           "Intrinsic first argument must be floating point", &FPI);
     if (auto *OperandT = dyn_cast<VectorType>(Operand->getType())) {
-      NumSrcElem = cast<FixedVectorType>(OperandT)->getNumElements();
+      SrcEC = cast<VectorType>(OperandT)->getElementCount();
     }
 
     Operand = &FPI;
-    Check((NumSrcElem > 0) == Operand->getType()->isVectorTy(),
+    Check(SrcEC.isNonZero() == Operand->getType()->isVectorTy(),
           "Intrinsic first argument and result disagree on vector use", &FPI);
     Check(Operand->getType()->isIntOrIntVectorTy(),
           "Intrinsic result must be an integer", &FPI);
     if (auto *OperandT = dyn_cast<VectorType>(Operand->getType())) {
-      Check(NumSrcElem == cast<FixedVectorType>(OperandT)->getNumElements(),
+      Check(SrcEC == cast<VectorType>(OperandT)->getElementCount(),
             "Intrinsic first argument and result vector lengths must be equal",
             &FPI);
     }
@@ -6095,20 +6095,20 @@ void Verifier::visitConstrainedFPIntrinsic(ConstrainedFPIntrinsic &FPI) {
   case Intrinsic::experimental_constrained_sitofp:
   case Intrinsic::experimental_constrained_uitofp: {
     Value *Operand = FPI.getArgOperand(0);
-    uint64_t NumSrcElem = 0;
+    ElementCount SrcEC;
     Check(Operand->getType()->isIntOrIntVectorTy(),
           "Intrinsic first argument must be integer", &FPI);
     if (auto *OperandT = dyn_cast<VectorType>(Operand->getType())) {
-      NumSrcElem = cast<FixedVectorType>(OperandT)->getNumElements();
+      SrcEC = cast<VectorType>(OperandT)->getElementCount();
     }
 
     Operand = &FPI;
-    Check((NumSrcElem > 0) == Operand->getType()->isVectorTy(),
+    Check(SrcEC.isNonZero() == Operand->getType()->isVectorTy(),
           "Intrinsic first argument and result disagree on vector use", &FPI);
     Check(Operand->getType()->isFPOrFPVectorTy(),
           "Intrinsic result must be a floating point", &FPI);
     if (auto *OperandT = dyn_cast<VectorType>(Operand->getType())) {
-      Check(NumSrcElem == cast<FixedVectorType>(OperandT)->getNumElements(),
+      Check(SrcEC == cast<VectorType>(OperandT)->getElementCount(),
             "Intrinsic first argument and result vector lengths must be equal",
             &FPI);
     }
