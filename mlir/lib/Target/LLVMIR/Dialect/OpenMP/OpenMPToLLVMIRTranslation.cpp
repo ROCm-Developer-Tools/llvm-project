@@ -1792,7 +1792,6 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
       // function should proceed when compiling for host. But it is
       // required for full functionallity that matches Clang
       std::vector<llvm::Triple> targetTriple;
-
       targetTriple.push_back(llvm::Triple{" amdgcn-amd-amdhsa"});
 
       ompBuilder->registerTargetGlobalVariable(
