@@ -1632,7 +1632,87 @@ getTargetEntryUniqueInfo(ASTContext &C, SourceLocation Loc,
                                      PLoc.getLine());
 }
 
+llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
+convertDeviceClause(const VarDecl *VD) {
+  std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
+      OMPDeclareTargetDeclAttr::getDeviceType(VD);
+  if (!DevTy)
+    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+        NoDevice;
+
+  switch (*DevTy) {
+  case OMPDeclareTargetDeclAttr::DT_Host:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::Host;
+    break;
+  case OMPDeclareTargetDeclAttr::DT_NoHost:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+        NoHost;
+    break;
+  case OMPDeclareTargetDeclAttr::DT_Any:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::Any;
+    break;
+  default:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
+        NoDevice;
+    break;
+  }
+}
+
+llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
+convertCaptureClause(const VarDecl *VD) {
+  std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> MapType =
+      OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
+  if (!MapType)
+    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+        NoCapture;
+
+  switch (*MapType) {
+  case OMPDeclareTargetDeclAttr::MapTypeTy::MT_To:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::To;
+    break;
+  case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Enter:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+        Enter;
+    break;
+  case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Link:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+        Link;
+    break;
+  default:
+    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
+        NoCapture;
+    break;
+  }
+}
+
 Address CGOpenMPRuntime::getAddrOfDeclareTargetVar(const VarDecl *VD) {
+  // if (CGM.getLangOpts().OpenMPIRBuilder) {
+  auto AddrOfGlobal = [&VD, this]() { return CGM.GetAddrOfGlobal(VD); };
+
+  auto LinkageForVariable = [&VD, this]() {
+    return CGM.getLLVMLinkageVarDefinition(VD, /*IsConstant=*/false);
+  };
+
+  std::vector<llvm::GlobalVariable *> GeneratedRefs;
+  auto loc = CGM.getContext().getSourceManager().getPresumedLoc(
+      VD->getCanonicalDecl()->getBeginLoc());
+
+  llvm::Type *LlvmPtrTy = CGM.getTypes().ConvertTypeForMem(
+      CGM.getContext().getPointerType(VD->getType()));
+  llvm::Constant *addr = OMPBuilder.getAddrOfDeclareTargetVar(
+      convertCaptureClause(VD), convertDeviceClause(VD),
+      VD->hasDefinition(CGM.getContext()) == VarDecl::DeclarationOnly,
+      VD->isExternallyVisible(), loc.getFilename(), loc.getLine(),
+      CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs,
+      CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OpenMPIsDevice,
+      CGM.getLangOpts().OMPTargetTriples, LlvmPtrTy,
+      AddrOfGlobal, LinkageForVariable);
+
+  if (!addr)
+    return Address::invalid();
+  return Address(addr, LlvmPtrTy, CGM.getContext().getDeclAlign(VD));
+  // }
+
   if (CGM.getLangOpts().OpenMPSimd)
     return Address::invalid();
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
@@ -10334,7 +10414,7 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
   if (CGM.getLangOpts().OMPTargetTriples.empty() &&
       !CGM.getLangOpts().OpenMPIsDevice)
     return;
-
+  
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
     OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
   if (!Res) {
@@ -10348,60 +10428,10 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
   }
 
   // if (CGM.getLangOpts().OpenMPIRBuilder) {
-    // WIP implementation shared with the OpenMP Dialect
-    // in MLIR through the OpenMPIRBuilder.
-    auto convertDeviceClause = [](const VarDecl *VD) {
-      std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
-          OMPDeclareTargetDeclAttr::getDeviceType(VD);
-      if (!DevTy)
-        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-            NoDevice;
+    auto AddrOfGlobal = [&VD, this]() { return CGM.GetAddrOfGlobal(VD); };
 
-      switch (*DevTy) {
-      case OMPDeclareTargetDeclAttr::DT_Host:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-            Host;
-        break;
-      case OMPDeclareTargetDeclAttr::DT_NoHost:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-            NoHost;
-        break;
-      case OMPDeclareTargetDeclAttr::DT_Any:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-            Any;
-        break;
-      default:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-            NoDevice;
-        break;
-      }
-    };
-
-    auto convertCaptureClause = [](const VarDecl *VD) {
-      std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> MapType =
-          OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
-      if (!MapType)
-        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-            NoCapture;
-
-      switch (*MapType) {
-      case OMPDeclareTargetDeclAttr::MapTypeTy::MT_To:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-            To;
-        break;
-      case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Enter:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-            Enter;
-        break;
-      case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Link:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-            Link;
-        break;
-      default:
-        return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-            NoCapture;
-        break;
-      }
+    auto LinkageForVariable = [&VD, this]() {
+      return CGM.getLLVMLinkageVarDefinition(VD, /*IsConstant=*/false);
     };
 
     std::vector<llvm::GlobalVariable *> GeneratedRefs;
@@ -10411,14 +10441,20 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
         convertCaptureClause(VD), convertDeviceClause(VD),
         VD->hasDefinition(CGM.getContext()) == VarDecl::DeclarationOnly,
         VD->isExternallyVisible(), loc.getFilename(), loc.getLine(),
-        CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs, Addr);
+        CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs,
+        CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OpenMPIsDevice,
+        CGM.getLangOpts().OMPTargetTriples,
+        AddrOfGlobal, LinkageForVariable,
+        CGM.getTypes().ConvertTypeForMem(
+            CGM.getContext().getPointerType(VD->getType())),
+        Addr);
 
-    for (auto* ref : GeneratedRefs)
+    for (auto *ref : GeneratedRefs)
       CGM.addCompilerUsedGlobal(ref);
 
     return;
   // }
-   
+
   // If we have host/nohost variables, they do not need to be registered.
   std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
       OMPDeclareTargetDeclAttr::getDeviceType(VD);
@@ -10444,6 +10480,7 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
       VarSize = 0;
     }
     Linkage = CGM.getLLVMLinkageVarDefinition(VD, /*IsConstant=*/false);
+
     // Temp solution to prevent optimizations of the internal variables.
     if (CGM.getLangOpts().OpenMPIsDevice &&
         (!VD->isExternallyVisible() ||
@@ -10452,6 +10489,7 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
       // on the host.
       if (!OMPBuilder.OffloadInfoManager.hasDeviceGlobalVarEntryInfo(VarName))
         return;
+
       std::string RefName = getName({VarName, "ref"});
       if (!CGM.GetGlobalValue(RefName)) {
         llvm::Constant *AddrRef =
@@ -10484,7 +10522,6 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
     VarSize = CGM.getPointerSize().getQuantity();
     Linkage = llvm::GlobalValue::WeakAnyLinkage;
   }
-
   OMPBuilder.OffloadInfoManager.registerDeviceGlobalVarEntryInfo(
       VarName, Addr, VarSize, Flags, Linkage);
 }

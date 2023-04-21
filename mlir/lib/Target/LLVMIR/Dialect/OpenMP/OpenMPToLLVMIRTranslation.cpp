@@ -34,6 +34,8 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/TargetParser/Triple.h"
+#include <utility>
 
 using namespace mlir;
 
@@ -1785,16 +1787,26 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
       // keeping
       std::vector<llvm::GlobalVariable *> generatedRefs;
 
+      // FIXME: Replace with real passed down target triple when possible
+      // however, this is currently only used as an indicator if the
+      // function should proceed when compiling for host. But it is
+      // required for full functionallity that matches Clang
+      std::vector<llvm::Triple> targetTriple;
+
+      targetTriple.push_back(llvm::Triple{" amdgcn-amd-amdhsa"});
+
       ompBuilder->registerTargetGlobalVariable(
           captureClause, deviceClause, isDeclaration, isExternallyVisible,
-          filename, line, mangledName, llvmModule, generatedRefs, gVal);
+          filename, line, mangledName, llvmModule, generatedRefs, false,
+          isDevice, targetTriple, nullptr, nullptr, gVal->getType(), gVal);
 
       if (isDevice && (attribute.getCaptureClause().getValue() !=
                            mlir::omp::DeclareTargetCaptureClause::to ||
                        ompBuilder->Config.hasRequiresUnifiedSharedMemory())) {
         ompBuilder->getAddrOfDeclareTargetVar(
             captureClause, deviceClause, isDeclaration, isExternallyVisible,
-            filename, line, mangledName, llvmModule, generatedRefs);
+            filename, line, mangledName, llvmModule, generatedRefs, false,
+            isDevice, targetTriple, gVal->getType(), nullptr, nullptr);
         // Flang has already generated a global by this stage, unlike Clang, so
         // this needs to be specially removed here for device when we' re
         // anything but a To clause specified variable with no unified shared
