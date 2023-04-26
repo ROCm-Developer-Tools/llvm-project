@@ -1813,7 +1813,7 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
         // anything but a To clause specified variable with no unified shared
         // memory.
         if (llvm::GlobalValue *llvmVal =
-                moduleTranslation.getLLVMModule()->getNamedValue(mangledName)) {
+                llvmModule->getNamedValue(mangledName)) {
           llvmVal->removeFromParent();
           llvmVal->dropAllReferences();
         }
