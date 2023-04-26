@@ -1695,17 +1695,16 @@ Address CGOpenMPRuntime::getAddrOfDeclareTargetVar(const VarDecl *VD) {
   std::vector<llvm::GlobalVariable *> GeneratedRefs;
   auto loc = CGM.getContext().getSourceManager().getPresumedLoc(
       VD->getCanonicalDecl()->getBeginLoc());
-
   llvm::Type *LlvmPtrTy = CGM.getTypes().ConvertTypeForMem(
       CGM.getContext().getPointerType(VD->getType()));
   llvm::Constant *addr = OMPBuilder.getAddrOfDeclareTargetVar(
       convertCaptureClause(VD), convertDeviceClause(VD),
       VD->hasDefinition(CGM.getContext()) == VarDecl::DeclarationOnly,
-      VD->isExternallyVisible(), loc.getFilename(), loc.getLine(),
+      VD->isExternallyVisible(),
+      OMPBuilder.getTargetEntryUniqueInfo(loc.getFilename(), loc.getLine()),
       CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs,
-      CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OpenMPIsDevice,
-      CGM.getLangOpts().OMPTargetTriples, LlvmPtrTy,
-      AddrOfGlobal, LinkageForVariable);
+      CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OMPTargetTriples,
+      LlvmPtrTy, AddrOfGlobal, LinkageForVariable);
 
   if (!addr)
     return Address::invalid();
@@ -10400,10 +10399,11 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
   OMPBuilder.registerTargetGlobalVariable(
       convertCaptureClause(VD), convertDeviceClause(VD),
       VD->hasDefinition(CGM.getContext()) == VarDecl::DeclarationOnly,
-      VD->isExternallyVisible(), loc.getFilename(), loc.getLine(),
+      VD->isExternallyVisible(),
+      OMPBuilder.getTargetEntryUniqueInfo(loc.getFilename(), loc.getLine()),
       CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs,
-      CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OpenMPIsDevice,
-      CGM.getLangOpts().OMPTargetTriples, AddrOfGlobal, LinkageForVariable,
+      CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OMPTargetTriples,
+      AddrOfGlobal, LinkageForVariable,
       CGM.getTypes().ConvertTypeForMem(
           CGM.getContext().getPointerType(VD->getType())),
       Addr);

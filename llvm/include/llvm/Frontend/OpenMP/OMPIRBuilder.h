@@ -785,10 +785,9 @@ public:
   /// is a declaration-only and not a definition
   /// \param IsExternallyVisible - boolean stating if the variable is externally
   /// visible
-  /// \param Filename - the path of the file the variable being registered
-  /// resides in
-  /// \param Line - the line number in the file the variable being registered
-  /// resides in
+  /// \param EntryInfo - Unique entry information for the value generated
+  /// using getTargetEntryUniqueInfo, used to name generated pointer references
+  /// to the declare target variable
   /// \param MangledName - the mangled name of the variable being registered
   /// \param LlvmModule - the llvm module being built that the variable is a
   /// part of
@@ -796,8 +795,6 @@ public:
   /// registerTargetGlobalVariable invoked from getAddrOfDeclareTargetVar,
   /// these are required by Clang for book keeping.
   /// \param OpenMPSIMD - if OpenMP SIMD mode is currently enabled
-  /// \param OpenMPIsDevice - if OpenMP device compilation mode is currently
-  /// enabled
   /// \param TargetTriple - The OpenMP device target triple we are compiling
   /// for
   /// \param LlvmPtrTy - The type of the variable we are generating or
@@ -810,18 +807,15 @@ public:
   /// linkage type, if unspecified and a nullptr is given, it will instead
   /// utilise the linkage stored on the existing global variable in the
   /// LLVMModule.
-  llvm::Constant *getAddrOfDeclareTargetVar(
-      llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
-          CaptureClause,
-      llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
-          DeviceClause,
-      bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
-      uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule,
-      std::vector<llvm::GlobalVariable *> &GeneratedRefs, bool OpenMPSIMD,
-      bool OpenMPIsDevice, std::vector<llvm::Triple> TargetTriple,
-      llvm::Type *LlvmPtrTy,
-      std::function<llvm::Constant *()> GlobalInitializer,
-      std::function<llvm::GlobalValue::LinkageTypes()> VariableLinkage);
+  Constant *getAddrOfDeclareTargetVar(
+      OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
+      OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+      bool IsDeclaration, bool IsExternallyVisible,
+      TargetRegionEntryInfo EntryInfo, StringRef MangledName,
+      Module *LlvmModule, std::vector<GlobalVariable *> &GeneratedRefs,
+      bool OpenMPSIMD, std::vector<Triple> TargetTriple, Type *LlvmPtrTy,
+      std::function<Constant *()> GlobalInitializer,
+      std::function<GlobalValue::LinkageTypes()> VariableLinkage);
 
   /// Registers a target variable for device or host.
   ///
@@ -835,10 +829,9 @@ public:
   /// is a declaration-only and not a definition
   /// \param IsExternallyVisible - boolean stating if the variable is externally
   /// visible
-  /// \param Filename - the path of the file the variable being registered
-  /// resides in
-  /// \param Line - the line number in the file the variable being registered
-  /// resides in
+  /// \param EntryInfo - Unique entry information for the value generated
+  /// using getTargetEntryUniqueInfo, used to name generated pointer references
+  /// to the declare target variable
   /// \param MangledName - the mangled name of the variable being registered
   /// \param LlvmModule - the llvm module being built that the variable is a
   /// part of
@@ -846,8 +839,6 @@ public:
   /// registerTargetGlobalVariable these are required by Clang for book
   /// keeping.
   /// \param OpenMPSIMD - if OpenMP SIMD mode is currently enabled
-  /// \param OpenMPIsDevice - if OpenMP device compilation mode is currently
-  /// enabled
   /// \param TargetTriple - The OpenMP device target triple we are compiling
   /// for
   /// \param GlobalInitializer - a lambda function which creates a constant
@@ -863,17 +854,15 @@ public:
   /// \param Addr - the original llvm value (addr) of the variable to be
   /// registered
   void registerTargetGlobalVariable(
-      llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
-          CaptureClause,
-      llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
-          DeviceClause,
-      bool IsDeclaration, bool IsExternallyVisible, llvm::StringRef Filename,
-      uint64_t Line, llvm::StringRef MangledName, llvm::Module *LlvmModule,
-      std::vector<llvm::GlobalVariable *> &GeneratedRefs, bool OpenMPSIMD,
-      bool OpenMPIsDevice, std::vector<llvm::Triple> TargetTriple,
-      std::function<llvm::Constant *()> GlobalInitializer,
-      std::function<llvm::GlobalValue::LinkageTypes()> VariableLinkage,
-      llvm::Type *LlvmPtrTy, llvm::Constant *Addr);
+      OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
+      OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+      bool IsDeclaration, bool IsExternallyVisible,
+      TargetRegionEntryInfo EntryInfo, StringRef MangledName,
+      Module *LlvmModule, std::vector<GlobalVariable *> &GeneratedRefs,
+      bool OpenMPSIMD, std::vector<Triple> TargetTriple,
+      std::function<Constant *()> GlobalInitializer,
+      std::function<GlobalValue::LinkageTypes()> VariableLinkage,
+      Type *LlvmPtrTy, Constant *Addr);
 
 private:
   /// Modifies the canonical loop to be a statically-scheduled workshare loop.
@@ -1167,9 +1156,9 @@ public:
   /// \param Line The line number where the target entry resides
   /// \param ParentName The name of the parent the target entry resides in, if
   /// any.
-  static llvm::TargetRegionEntryInfo
+  static TargetRegionEntryInfo
   getTargetEntryUniqueInfo(StringRef FileName, uint64_t Line,
-                           llvm::StringRef ParentName = "");
+                           StringRef ParentName = "");
 
   /// Functions used to generate reductions. Such functions take two Values
   /// representing LHS and RHS of the reduction, respectively, and a reference

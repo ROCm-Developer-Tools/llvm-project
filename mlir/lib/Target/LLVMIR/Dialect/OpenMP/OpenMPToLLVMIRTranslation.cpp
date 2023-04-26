@@ -1792,22 +1792,24 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
       // function should proceed when compiling for host. But it is
       // required for full functionallity that matches Clang
       std::vector<llvm::Triple> targetTriple;
-      targetTriple.push_back(llvm::Triple{" amdgcn-amd-amdhsa"});
+      targetTriple.emplace_back("amdgcn-amd-amdhsa");
 
       ompBuilder->registerTargetGlobalVariable(
           captureClause, deviceClause, isDeclaration, isExternallyVisible,
-          filename, line, mangledName, llvmModule, generatedRefs, false,
-          isDevice, targetTriple, nullptr, nullptr, gVal->getType(), gVal);
+          ompBuilder->getTargetEntryUniqueInfo(filename, line), mangledName,
+          llvmModule, generatedRefs, false, targetTriple, nullptr, nullptr,
+          gVal->getType(), gVal);
 
       if (isDevice && (attribute.getCaptureClause().getValue() !=
                            mlir::omp::DeclareTargetCaptureClause::to ||
                        ompBuilder->Config.hasRequiresUnifiedSharedMemory())) {
         ompBuilder->getAddrOfDeclareTargetVar(
             captureClause, deviceClause, isDeclaration, isExternallyVisible,
-            filename, line, mangledName, llvmModule, generatedRefs, false,
-            isDevice, targetTriple, gVal->getType(), nullptr, nullptr);
+            ompBuilder->getTargetEntryUniqueInfo(filename, line), mangledName,
+            llvmModule, generatedRefs, false, targetTriple, gVal->getType(),
+            nullptr, nullptr);
         // Flang has already generated a global by this stage, unlike Clang, so
-        // this needs to be specially removed here for device when we' re
+        // this needs to be specially removed here for device when we're
         // anything but a To clause specified variable with no unified shared
         // memory.
         if (llvm::GlobalValue *llvmVal =
