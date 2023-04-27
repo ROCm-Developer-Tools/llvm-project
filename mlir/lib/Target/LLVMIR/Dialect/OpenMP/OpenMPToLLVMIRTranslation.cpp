@@ -1711,13 +1711,6 @@ public:
 LogicalResult
 convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
                          LLVM::ModuleTranslation &moduleTranslation) {
-  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
-  bool isDevice = false;
-  if (auto offloadMod = dyn_cast<mlir::omp::OffloadModuleInterface>(
-          op->getParentOfType<mlir::ModuleOp>().getOperation())) {
-    isDevice = offloadMod.getIsDevice();
-  }
-
   // do a return for functions at the moment, may need specialised lowering
   // later to optimise but for the moment they execute on device.
   if (LLVM::LLVMFuncOp gOp = dyn_cast<LLVM::LLVMFuncOp>(op))
@@ -1763,6 +1756,7 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
     if (auto *gVal = moduleTranslation.getLLVMModule()->getNamedValue(
             gOp.getSymName())) {
 
+      llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
       bool isDeclaration = gOp.isDeclaration();
       bool isExternallyVisible =
           gVal->getVisibility() !=
@@ -1778,12 +1772,13 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
       // keeping
       std::vector<llvm::GlobalVariable *> generatedRefs;
 
-      // FIXME: Replace with real passed down target triple when possible
-      // however, this is currently only used as an indicator if the
-      // function should proceed when compiling for host. But it is
-      // required for full functionallity that matches Clang
       std::vector<llvm::Triple> targetTriple;
-      targetTriple.emplace_back("amdgcn-amd-amdhsa");
+      auto targetTripleAttr =
+          op->getParentOfType<mlir::ModuleOp>().getOperation()->getAttr(
+              LLVM::LLVMDialect::getTargetTripleAttrName());
+      if (targetTripleAttr)
+        targetTriple.emplace_back(
+            targetTripleAttr.dyn_cast_or_null<mlir::StringAttr>().data());
 
       ompBuilder->registerTargetGlobalVariable(
           captureClause, deviceClause, isDeclaration, isExternallyVisible,
@@ -1791,9 +1786,10 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
           llvmModule, generatedRefs, false, targetTriple, nullptr, nullptr,
           gVal->getType(), gVal);
 
-      if (isDevice && (attribute.getCaptureClause().getValue() !=
-                           mlir::omp::DeclareTargetCaptureClause::to ||
-                       ompBuilder->Config.hasRequiresUnifiedSharedMemory())) {
+      if (ompBuilder->Config.isEmbedded() &&
+          (attribute.getCaptureClause().getValue() !=
+               mlir::omp::DeclareTargetCaptureClause::to ||
+           ompBuilder->Config.hasRequiresUnifiedSharedMemory())) {
         ompBuilder->getAddrOfDeclareTargetVar(
             captureClause, deviceClause, isDeclaration, isExternallyVisible,
             ompBuilder->getTargetEntryUniqueInfo(filename, line), mangledName,
