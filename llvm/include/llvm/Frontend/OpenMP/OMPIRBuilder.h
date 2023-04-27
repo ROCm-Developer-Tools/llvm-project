@@ -323,22 +323,26 @@ public:
     OMPTargetGlobalVarEntryTo = 0x0,
     /// Mark the entry as a to declare target link.
     OMPTargetGlobalVarEntryLink = 0x1,
+    /// Mark the entry as a declare target enter.
+    OMPTargetGlobalVarEntryEnter = 0x2,
+    /// Mark the entry as having no declare target entry kind.
+    OMPTargetGlobalVarEntryNone = 0x3,
   };
 
-  // TODO: combine with OMPTargetGlobalVarEntryKind
-  enum DeclareTargetCaptureClauseKind : uint32_t {
-    To = 0x0,
-    Enter = 0x01,
-    Link = 0x02,
-    NoCapture = 0x03
-  };
-
-  // TODO: Rename to be more inline with VarEntryKind
-  enum DeclareTargetDeviceClauseKind : uint32_t {
-    Any = 0x0,
-    NoHost = 0x01,
-    Host = 0x02,
-    NoDevice = 0x03
+  /// Kind of device clause for declare target variables
+  /// and functions
+  /// NOTE: Currently not used as a part of a variable entry
+  /// used for Flang and Clang to interface with the variable
+  /// related registration functions
+  enum OMPTargetDeviceClauseKind : uint32_t {
+    /// The target is marked for all devices
+    OMPTargetDeviceClauseAny = 0x0,
+    /// The target is marked for non-host devices
+    OMPTargetDeviceClauseNoHost = 0x1,
+    /// The target is marked for host devices
+    OMPTargetDeviceClauseHost = 0x2,
+    /// The target is marked as having no clause
+    OMPTargetDeviceClauseNone = 0x3
   };
 
   /// Device global variable entries info.
@@ -808,8 +812,8 @@ public:
   /// utilise the linkage stored on the existing global variable in the
   /// LLVMModule.
   Constant *getAddrOfDeclareTargetVar(
-      OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
-      OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+      OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind CaptureClause,
+      OffloadEntriesInfoManager::OMPTargetDeviceClauseKind DeviceClause,
       bool IsDeclaration, bool IsExternallyVisible,
       TargetRegionEntryInfo EntryInfo, StringRef MangledName,
       Module *LlvmModule, std::vector<GlobalVariable *> &GeneratedRefs,
@@ -854,8 +858,8 @@ public:
   /// \param Addr - the original llvm value (addr) of the variable to be
   /// registered
   void registerTargetGlobalVariable(
-      OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
-      OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+      OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind CaptureClause,
+      OffloadEntriesInfoManager::OMPTargetDeviceClauseKind DeviceClause,
       bool IsDeclaration, bool IsExternallyVisible,
       TargetRegionEntryInfo EntryInfo, StringRef MangledName,
       Module *LlvmModule, std::vector<GlobalVariable *> &GeneratedRefs,

@@ -1632,55 +1632,47 @@ getTargetEntryUniqueInfo(ASTContext &C, SourceLocation Loc,
                                      PLoc.getLine());
 }
 
-llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
+llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseKind
 convertDeviceClause(const VarDecl *VD) {
   std::optional<OMPDeclareTargetDeclAttr::DevTypeTy> DevTy =
       OMPDeclareTargetDeclAttr::getDeviceType(VD);
   if (!DevTy)
-    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-        NoDevice;
+    return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseNone;
 
   switch (*DevTy) {
   case OMPDeclareTargetDeclAttr::DT_Host:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::Host;
+    return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseHost;
     break;
   case OMPDeclareTargetDeclAttr::DT_NoHost:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-        NoHost;
+    return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseNoHost;
     break;
   case OMPDeclareTargetDeclAttr::DT_Any:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::Any;
+    return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseAny;
     break;
   default:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-        NoDevice;
+    return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseNone;
     break;
   }
 }
 
-llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
+llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind
 convertCaptureClause(const VarDecl *VD) {
   std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> MapType =
       OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD);
   if (!MapType)
-    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-        NoCapture;
-
+    return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryNone;
   switch (*MapType) {
   case OMPDeclareTargetDeclAttr::MapTypeTy::MT_To:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::To;
+    return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
     break;
   case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Enter:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-        Enter;
+    return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryEnter;
     break;
   case OMPDeclareTargetDeclAttr::MapTypeTy::MT_Link:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-        Link;
+    return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink;
     break;
   default:
-    return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-        NoCapture;
+    return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryNone;
     break;
   }
 }
@@ -1693,15 +1685,19 @@ Address CGOpenMPRuntime::getAddrOfDeclareTargetVar(const VarDecl *VD) {
   };
 
   std::vector<llvm::GlobalVariable *> GeneratedRefs;
-  auto loc = CGM.getContext().getSourceManager().getPresumedLoc(
+  auto PLoc = CGM.getContext().getSourceManager().getPresumedLoc(
       VD->getCanonicalDecl()->getBeginLoc());
+  if (PLoc.isInvalid())
+    PLoc = CGM.getContext().getSourceManager().getPresumedLoc(
+        VD->getCanonicalDecl()->getBeginLoc(), /*UseLineDirectives=*/false);
+
   llvm::Type *LlvmPtrTy = CGM.getTypes().ConvertTypeForMem(
       CGM.getContext().getPointerType(VD->getType()));
   llvm::Constant *addr = OMPBuilder.getAddrOfDeclareTargetVar(
       convertCaptureClause(VD), convertDeviceClause(VD),
       VD->hasDefinition(CGM.getContext()) == VarDecl::DeclarationOnly,
       VD->isExternallyVisible(),
-      OMPBuilder.getTargetEntryUniqueInfo(loc.getFilename(), loc.getLine()),
+      OMPBuilder.getTargetEntryUniqueInfo(PLoc.getFilename(), PLoc.getLine()),
       CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs,
       CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OMPTargetTriples,
       LlvmPtrTy, AddrOfGlobal, LinkageForVariable);
@@ -1909,8 +1905,12 @@ bool CGOpenMPRuntime::emitDeclareTargetVarDefinition(const VarDecl *VD,
   // Produce the unique prefix to identify the new target regions. We use
   // the source location of the variable declaration which we know to not
   // conflict with any target region.
-  auto EntryInfo =
-      getTargetEntryUniqueInfo(CGM.getContext(), Loc, VD->getName());
+  auto PLoc = CGM.getContext().getSourceManager().getPresumedLoc(Loc);
+  if (PLoc.isInvalid())
+    PLoc = CGM.getContext().getSourceManager().getPresumedLoc(
+        Loc, /*UseLineDirectives=*/false);
+  auto EntryInfo = OMPBuilder.getTargetEntryUniqueInfo(
+      PLoc.getFilename(), PLoc.getLine(), VD->getName());
   SmallString<128> Buffer, Out;
   OMPBuilder.OffloadInfoManager.getTargetRegionEntryFnName(Buffer, EntryInfo);
 
@@ -6115,8 +6115,13 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
     llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
     bool IsOffloadEntry, const RegionCodeGenTy &CodeGen) {
 
-  auto EntryInfo =
-      getTargetEntryUniqueInfo(CGM.getContext(), D.getBeginLoc(), ParentName);
+  auto PLoc =
+      CGM.getContext().getSourceManager().getPresumedLoc(D.getBeginLoc());
+  if (PLoc.isInvalid())
+    PLoc = CGM.getContext().getSourceManager().getPresumedLoc(
+        D.getBeginLoc(), /*UseLineDirectives=*/false);
+  auto EntryInfo = OMPBuilder.getTargetEntryUniqueInfo(
+      PLoc.getFilename(), PLoc.getLine(), ParentName);
 
   CodeGenFunction CGF(CGM, true);
   llvm::OpenMPIRBuilder::FunctionGenCallback &&GenerateOutlinedFunction =
@@ -10157,8 +10162,13 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
 
   if (RequiresDeviceCodegen) {
     const auto &E = *cast<OMPExecutableDirective>(S);
-    auto EntryInfo =
-        getTargetEntryUniqueInfo(CGM.getContext(), E.getBeginLoc(), ParentName);
+    auto PLoc =
+        CGM.getContext().getSourceManager().getPresumedLoc(E.getBeginLoc());
+    if (PLoc.isInvalid())
+      PLoc = CGM.getContext().getSourceManager().getPresumedLoc(
+          E.getBeginLoc(), /*UseLineDirectives=*/false);
+    auto EntryInfo = OMPBuilder.getTargetEntryUniqueInfo(
+        PLoc.getFilename(), PLoc.getLine(), ParentName);
 
     // Is this a target region that should not be emitted as an entry point? If
     // so just signal we are done with this target region.
@@ -10394,13 +10404,16 @@ void CGOpenMPRuntime::registerTargetGlobalVariable(const VarDecl *VD,
   };
 
   std::vector<llvm::GlobalVariable *> GeneratedRefs;
-  auto loc = CGM.getContext().getSourceManager().getPresumedLoc(
+  auto PLoc = CGM.getContext().getSourceManager().getPresumedLoc(
       VD->getCanonicalDecl()->getBeginLoc());
+  if (PLoc.isInvalid())
+    PLoc = CGM.getContext().getSourceManager().getPresumedLoc(
+        VD->getCanonicalDecl()->getBeginLoc(), /*UseLineDirectives=*/false);
   OMPBuilder.registerTargetGlobalVariable(
       convertCaptureClause(VD), convertDeviceClause(VD),
       VD->hasDefinition(CGM.getContext()) == VarDecl::DeclarationOnly,
       VD->isExternallyVisible(),
-      OMPBuilder.getTargetEntryUniqueInfo(loc.getFilename(), loc.getLine()),
+      OMPBuilder.getTargetEntryUniqueInfo(PLoc.getFilename(), PLoc.getLine()),
       CGM.getMangledName(VD), &CGM.getModule(), GeneratedRefs,
       CGM.getLangOpts().OpenMPSimd, CGM.getLangOpts().OMPTargetTriples,
       AddrOfGlobal, LinkageForVariable,

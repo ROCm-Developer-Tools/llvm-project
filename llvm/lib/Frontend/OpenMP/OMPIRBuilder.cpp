@@ -625,18 +625,6 @@ Constant *OpenMPIRBuilder::getOrCreateIdent(Constant *SrcLocStr,
   return ConstantExpr::getPointerBitCastOrAddrSpaceCast(Ident, IdentPtr);
 }
 
-llvm::TargetRegionEntryInfo
-OpenMPIRBuilder::getTargetEntryUniqueInfo(StringRef FileName, uint64_t Line,
-                                          llvm::StringRef ParentName) {
-  llvm::sys::fs::UniqueID ID;
-  if (auto EC = llvm::sys::fs::getUniqueID(FileName, ID)) {
-    assert(EC &&
-           "Unable to get unique ID for file, during getTargetEntryUniqueInfo");
-  }
-  return llvm::TargetRegionEntryInfo(ParentName, ID.getDevice(), ID.getFile(),
-                                     Line);
-}
-
 Constant *OpenMPIRBuilder::getOrCreateSrcLocStr(StringRef LocStr,
                                                 uint32_t &SrcLocStrSize) {
   SrcLocStrSize = LocStr.size();
@@ -5127,7 +5115,8 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
           static_cast<OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind>(
               CE->getFlags());
       switch (Flags) {
-      case OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo: {
+      case OffloadEntriesInfoManager::OMPTargetGlobalVarEntryEnter:
+      case OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo:
         if (Config.isEmbedded() && Config.hasRequiresUnifiedSharedMemory())
           continue;
         if (!CE->getAddress()) {
@@ -5138,7 +5127,6 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
         if (CE->getVarSize() == 0)
           continue;
         break;
-      }
       case OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink:
         assert(((Config.isEmbedded() && !CE->getAddress()) ||
                 (!Config.isEmbedded() && CE->getAddress())) &&
@@ -5149,6 +5137,8 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
           ErrorFn(EMIT_MD_GLOBAL_VAR_LINK_ERROR, TargetRegionEntryInfo());
           continue;
         }
+        break;
+        default:
         break;
       }
 
@@ -5168,14 +5158,26 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
   }
 }
 
+TargetRegionEntryInfo
+OpenMPIRBuilder::getTargetEntryUniqueInfo(StringRef FileName, uint64_t Line,
+                                          StringRef ParentName) {
+  llvm::sys::fs::UniqueID ID;
+  if (auto EC = llvm::sys::fs::getUniqueID(FileName, ID)) {
+    assert(EC &&
+           "Unable to get unique ID for file, during getTargetEntryUniqueInfo");
+  }
+  return llvm::TargetRegionEntryInfo(ParentName, ID.getDevice(), ID.getFile(),
+                                     Line);
+}
+
 Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
-    OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
-    OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+    OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind CaptureClause,
+    OffloadEntriesInfoManager::OMPTargetDeviceClauseKind DeviceClause,
     bool IsDeclaration, bool IsExternallyVisible,
     TargetRegionEntryInfo EntryInfo, StringRef MangledName, Module *LlvmModule,
     std::vector<GlobalVariable *> &GeneratedRefs, bool OpenMPSIMD,
-    std::vector<Triple> TargetTriple,
-    Type *LlvmPtrTy, std::function<Constant *()> GlobalInitializer,
+    std::vector<Triple> TargetTriple, Type *LlvmPtrTy,
+    std::function<Constant *()> GlobalInitializer,
     std::function<GlobalValue::LinkageTypes()> VariableLinkage) {
   // TODO: convert this to utilise the IRBuilder Config rather than
   // a passed down argument.
@@ -5183,11 +5185,11 @@ Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
     return nullptr;
 
   if (CaptureClause ==
-          OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::Link ||
+          OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink ||
       ((CaptureClause ==
-            OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::To ||
-        CaptureClause ==
-            OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::Enter) &&
+            OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo ||
+       CaptureClause ==
+            OffloadEntriesInfoManager::OMPTargetGlobalVarEntryEnter) &&
        Config.hasRequiresUnifiedSharedMemory())) {
     SmallString<64> PtrName;
     {
@@ -5216,9 +5218,9 @@ Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
 
       registerTargetGlobalVariable(
           CaptureClause, DeviceClause, IsDeclaration, IsExternallyVisible,
-          EntryInfo, MangledName, LlvmModule, GeneratedRefs, OpenMPSIMD, 
-          TargetTriple, GlobalInitializer, VariableLinkage,
-          LlvmPtrTy, cast<llvm::Constant>(Ptr));
+          EntryInfo, MangledName, LlvmModule, GeneratedRefs, OpenMPSIMD,
+          TargetTriple, GlobalInitializer, VariableLinkage, LlvmPtrTy,
+          cast<llvm::Constant>(Ptr));
     }
 
     return cast<llvm::Constant>(Ptr);
@@ -5228,8 +5230,8 @@ Constant *OpenMPIRBuilder::getAddrOfDeclareTargetVar(
 }
 
 void OpenMPIRBuilder::registerTargetGlobalVariable(
-    OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind CaptureClause,
-    OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind DeviceClause,
+    OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind CaptureClause,
+    OffloadEntriesInfoManager::OMPTargetDeviceClauseKind DeviceClause,
     bool IsDeclaration, bool IsExternallyVisible,
     TargetRegionEntryInfo EntryInfo, llvm::StringRef MangledName,
     llvm::Module *LlvmModule,
@@ -5238,8 +5240,7 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
     std::function<llvm::Constant *()> GlobalInitializer,
     std::function<llvm::GlobalValue::LinkageTypes()> VariableLinkage,
     llvm::Type *LlvmPtrTy, llvm::Constant *Addr) {
-  if (DeviceClause !=
-          OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::Any ||
+  if (DeviceClause != OffloadEntriesInfoManager::OMPTargetDeviceClauseAny ||
       (TargetTriple.empty() && !Config.isEmbedded()))
     return;
 
@@ -5249,9 +5250,9 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
   llvm::GlobalValue::LinkageTypes Linkage;
 
   if ((CaptureClause ==
-           OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::To ||
+           OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo ||
        CaptureClause ==
-           OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::Enter) &&
+           OffloadEntriesInfoManager::OMPTargetGlobalVarEntryEnter) &&
       !Config.hasRequiresUnifiedSharedMemory()) {
     Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
     VarName = MangledName;
@@ -5267,8 +5268,9 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
 
     // This is a workaround carried over from Clang which prevents undesired
     // optimisation of internal variables.
-    if (Config.isEmbedded() && (!IsExternallyVisible ||
-                           Linkage == llvm::GlobalValue::LinkOnceODRLinkage)) {
+    if (Config.isEmbedded() &&
+        (!IsExternallyVisible ||
+         Linkage == llvm::GlobalValue::LinkOnceODRLinkage)) {
       // Do not create a "ref-variable" if the original is not also available
       // on the host.
       if (!OffloadInfoManager.hasDeviceGlobalVarEntryInfo(VarName))
@@ -5288,7 +5290,7 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
     }
   } else {
     if (CaptureClause ==
-        OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::Link)
+        OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink)
       Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink;
     else
       Flags = llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
@@ -5300,8 +5302,7 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
       Addr = getAddrOfDeclareTargetVar(
           CaptureClause, DeviceClause, IsDeclaration, IsExternallyVisible,
           EntryInfo, MangledName, LlvmModule, GeneratedRefs, OpenMPSIMD,
-          TargetTriple, LlvmPtrTy, GlobalInitializer,
-          VariableLinkage);
+          TargetTriple, LlvmPtrTy, GlobalInitializer, VariableLinkage);
       VarName = (Addr) ? Addr->getName() : "";
     }
     VarSize = LlvmModule->getDataLayout().getPointerSize();

@@ -1279,12 +1279,16 @@ SmallVector<llvm::Value *> ModuleTranslation::lookupValues(ValueRange values) {
 llvm::OpenMPIRBuilder *ModuleTranslation::getOpenMPBuilder() {
   if (!ompBuilder) {
     ompBuilder = std::make_unique<llvm::OpenMPIRBuilder>(*llvmModule);
-    ompBuilder->initialize();
 
     bool isDevice = false;
+    llvm::StringRef hostIRFilePath = "";
     if (auto offloadMod =
-            dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule))
+            dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule)) {
       isDevice = offloadMod.getIsDevice();
+      hostIRFilePath = offloadMod.getHostIRFilePath();
+    }
+
+    ompBuilder->initialize(hostIRFilePath);
 
     // TODO: set the flags when available
     llvm::OpenMPIRBuilderConfig Config(

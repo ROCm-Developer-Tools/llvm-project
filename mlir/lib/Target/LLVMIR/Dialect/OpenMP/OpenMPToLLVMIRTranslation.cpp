@@ -1726,20 +1726,16 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
   auto convertToDeviceClauseKind = [](mlir::omp::DeclareTargetAttr attr) {
     switch (attr.getDeviceType().getValue()) {
     case mlir::omp::DeclareTargetDeviceType::host:
-      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-          Host;
+      return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseHost;
       break;
     case mlir::omp::DeclareTargetDeviceType::nohost:
-      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-          NoHost;
+      return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseNoHost;
       break;
     case mlir::omp::DeclareTargetDeviceType::any:
-      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-          Any;
+      return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseAny;
       break;
     default:
-      return llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind::
-          NoDevice;
+      return llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseNone;
       break;
     }
   };
@@ -1747,16 +1743,13 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
   auto convertToCaptureClauseKind = [](mlir::omp::DeclareTargetAttr attr) {
     switch (attr.getCaptureClause().getValue()) {
     case mlir::omp::DeclareTargetCaptureClause::to:
-      return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-          To;
+      return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
       break;
     case mlir::omp::DeclareTargetCaptureClause::link:
-      return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-          Link;
+      return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink;
       break;
     default:
-      return llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind::
-          NoCapture;
+      return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryNone;
       break;
     }
   };
@@ -1779,10 +1772,8 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
       uint64_t line = loc.getLine();
       llvm::StringRef mangledName = gOp.getSymName();
       llvm::Module *llvmModule = moduleTranslation.getLLVMModule();
-      llvm::OffloadEntriesInfoManager::DeclareTargetCaptureClauseKind
-          captureClause = convertToCaptureClauseKind(attribute);
-      llvm::OffloadEntriesInfoManager::DeclareTargetDeviceClauseKind
-          deviceClause = convertToDeviceClauseKind(attribute);
+      auto captureClause = convertToCaptureClauseKind(attribute);
+      auto deviceClause = convertToDeviceClauseKind(attribute);
       // unused for MLIR at the moment, required in Clang for book
       // keeping
       std::vector<llvm::GlobalVariable *> generatedRefs;
