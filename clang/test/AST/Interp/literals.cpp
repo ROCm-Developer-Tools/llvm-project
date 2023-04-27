@@ -101,6 +101,19 @@ constexpr int gimme(int k) {
 }
 static_assert(gimme(5) == 5, "");
 
+namespace PointerToBool {
+
+  constexpr void *N = nullptr;
+  constexpr bool B = N;
+  static_assert(!B, "");
+  static_assert(!N, "");
+
+  constexpr float F = 1.0;
+  constexpr const float *FP = &F;
+  static_assert(FP, "");
+  static_assert(!!FP, "");
+}
+
 namespace SizeOf {
   constexpr int soint = sizeof(int);
   constexpr int souint = sizeof(unsigned int);
@@ -706,6 +719,23 @@ namespace IncDec {
              // ref-note {{cannot refer to element -1 of array of 3 elements}}
     return *p;
   }
+
+  /// This used to leave a 0 on the stack instead of the previous
+  /// value of a.
+  constexpr int bug1Inc() {
+    int a = 3;
+    int b = a++;
+    return b;
+  }
+  static_assert(bug1Inc() == 3);
+
+  constexpr int bug1Dec() {
+    int a = 3;
+    int b = a--;
+    return b;
+  }
+  static_assert(bug1Dec() == 3);
+
 };
 #endif
 

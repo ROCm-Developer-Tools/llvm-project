@@ -206,7 +206,7 @@ public:
   /// if non-empty.
   std::string RecordCommandLine;
 
-  std::map<std::string, std::string> DebugPrefixMap;
+  llvm::SmallVector<std::pair<std::string, std::string>, 0> DebugPrefixMap;
   std::map<std::string, std::string> CoveragePrefixMap;
 
   /// The ABI to use for passing floating point arguments.
@@ -367,9 +367,6 @@ public:
   /// they want to explain why they decided to apply or not apply a given
   /// transformation.
   OptRemark OptimizationRemarkAnalysis;
-
-  /// Set of files defining the rules for the symbol rewriting.
-  std::vector<std::string> RewriteMapFiles;
 
   /// Set of sanitizer checks that are non-fatal (i.e. execution should be
   /// continued when possible).

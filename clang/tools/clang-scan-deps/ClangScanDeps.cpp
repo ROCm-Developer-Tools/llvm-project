@@ -19,6 +19,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileUtilities.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/LLVMDriver.h"
@@ -26,6 +27,7 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/Threading.h"
+#include "llvm/Support/Timer.h"
 #include "llvm/TargetParser/Host.h"
 #include <mutex>
 #include <optional>
@@ -90,6 +92,7 @@ static std::vector<std::string> ModuleDepTargets;
 static bool DeprecatedDriverCommand;
 static ResourceDirRecipeKind ResourceDirRecipe;
 static bool Verbose;
+static bool PrintTiming;
 static std::vector<const char *> CommandLine;
 
 #ifndef NDEBUG
@@ -199,6 +202,8 @@ static void ParseArgs(int argc, char **argv) {
     }
     ResourceDirRecipe = *Kind;
   }
+
+  PrintTiming = Args.hasArg(OPT_print_timing);
 
   Verbose = Args.hasArg(OPT_verbose);
 
@@ -318,11 +323,10 @@ static llvm::json::Array toJSONSorted(const llvm::StringSet<> &Set) {
   return llvm::json::Array(Strings);
 }
 
+// Technically, we don't need to sort the dependency list to get determinism.
+// Leaving these be will simply preserve the import order.
 static llvm::json::Array toJSONSorted(std::vector<ModuleID> V) {
-  llvm::sort(V, [](const ModuleID &A, const ModuleID &B) {
-    return std::tie(A.ModuleName, A.ContextHash) <
-           std::tie(B.ModuleName, B.ContextHash);
-  });
+  llvm::sort(V);
 
   llvm::json::Array Ret;
   for (const ModuleID &MID : V)
@@ -401,11 +405,7 @@ public:
     std::vector<IndexedModuleID> ModuleIDs;
     for (auto &&M : Modules)
       ModuleIDs.push_back(M.first);
-    llvm::sort(ModuleIDs,
-               [](const IndexedModuleID &A, const IndexedModuleID &B) {
-                 return std::tie(A.ID.ModuleName, A.InputIndex) <
-                        std::tie(B.ID.ModuleName, B.InputIndex);
-               });
+    llvm::sort(ModuleIDs);
 
     using namespace llvm::json;
 
@@ -465,20 +465,37 @@ public:
 private:
   struct IndexedModuleID {
     ModuleID ID;
+
+    // FIXME: This is mutable so that it can still be updated after insertion
+    //  into an unordered associative container. This is "fine", since this
+    //  field doesn't contribute to the hash, but it's a brittle hack.
     mutable size_t InputIndex;
 
     bool operator==(const IndexedModuleID &Other) const {
-      return ID.ModuleName == Other.ID.ModuleName &&
-             ID.ContextHash == Other.ID.ContextHash;
+      return std::tie(ID.ModuleName, ID.ContextHash) ==
+             std::tie(Other.ID.ModuleName, Other.ID.ContextHash);
     }
-  };
 
-  struct IndexedModuleIDHasher {
-    std::size_t operator()(const IndexedModuleID &IMID) const {
-      using llvm::hash_combine;
-
-      return hash_combine(IMID.ID.ModuleName, IMID.ID.ContextHash);
+    bool operator<(const IndexedModuleID &Other) const {
+      /// We need the output of clang-scan-deps to be deterministic. However,
+      /// the dependency graph may contain two modules with the same name. How
+      /// do we decide which one to print first? If we made that decision based
+      /// on the context hash, the ordering would be deterministic, but
+      /// different across machines. This can happen for example when the inputs
+      /// or the SDKs (which both contribute to the "context" hash) live in
+      /// different absolute locations. We solve that by tracking the index of
+      /// the first input TU that (transitively) imports the dependency, which
+      /// is always the same for the same input, resulting in deterministic
+      /// sorting that's also reproducible across machines.
+      return std::tie(ID.ModuleName, InputIndex) <
+             std::tie(Other.ID.ModuleName, Other.InputIndex);
     }
+
+    struct Hasher {
+      std::size_t operator()(const IndexedModuleID &IMID) const {
+        return llvm::hash_combine(IMID.ID.ModuleName, IMID.ID.ContextHash);
+      }
+    };
   };
 
   struct InputDeps {
@@ -491,7 +508,7 @@ private:
   };
 
   std::mutex Lock;
-  std::unordered_map<IndexedModuleID, ModuleDeps, IndexedModuleIDHasher>
+  std::unordered_map<IndexedModuleID, ModuleDeps, IndexedModuleID::Hasher>
       Modules;
   std::vector<InputDeps> Inputs;
 };
@@ -857,6 +874,10 @@ int clang_scan_deps_main(int argc, char **argv, const llvm::ToolContext &) {
     llvm::outs() << "Running clang-scan-deps on " << Inputs.size()
                  << " files using " << Pool.getThreadCount() << " workers\n";
   }
+
+  llvm::Timer T;
+  T.startTimer();
+
   for (unsigned I = 0; I < Pool.getThreadCount(); ++I) {
     Pool.async([&, I]() {
       llvm::StringSet<> AlreadySeenModules;
@@ -945,6 +966,12 @@ int clang_scan_deps_main(int argc, char **argv, const llvm::ToolContext &) {
     });
   }
   Pool.wait();
+
+  T.stopTimer();
+  if (PrintTiming)
+    llvm::errs() << llvm::format(
+        "clang-scan-deps timing: %0.2fs wall, %0.2fs process\n",
+        T.getTotalTime().getWallTime(), T.getTotalTime().getProcessTime());
 
   if (RoundTripArgs)
     if (FD && FD->roundTripCommands(llvm::errs()))

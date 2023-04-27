@@ -4571,8 +4571,6 @@ The following is the syntax for constant expressions:
     required to make sense for the type of "pointer to TY". These indexes
     may be implicitly sign-extended or truncated to match the index size
     of CSTPTR's address space.
-``select (COND, VAL1, VAL2)``
-    Perform the :ref:`select operation <i_select>` on constants.
 ``icmp COND (VAL1, VAL2)``
     Perform the :ref:`icmp operation <i_icmp>` on constants.
 ``fcmp COND (VAL1, VAL2)``
@@ -4586,22 +4584,24 @@ The following is the syntax for constant expressions:
 ``shufflevector (VEC1, VEC2, IDXMASK)``
     Perform the :ref:`shufflevector operation <i_shufflevector>` on
     constants.
-``extractvalue (VAL, IDX0, IDX1, ...)``
-    Perform the :ref:`extractvalue operation <i_extractvalue>` on
-    constants. The index list is interpreted in a similar manner as
-    indices in a ':ref:`getelementptr <i_getelementptr>`' operation. At
-    least one index value must be specified.
-``insertvalue (VAL, ELT, IDX0, IDX1, ...)``
-    Perform the :ref:`insertvalue operation <i_insertvalue>` on constants.
-    The index list is interpreted in a similar manner as indices in a
-    ':ref:`getelementptr <i_getelementptr>`' operation. At least one index
-    value must be specified.
-``OPCODE (LHS, RHS)``
-    Perform the specified operation of the LHS and RHS constants. OPCODE
-    may be any of the :ref:`binary <binaryops>` or :ref:`bitwise
-    binary <bitwiseops>` operations. The constraints on operands are
-    the same as those for the corresponding instruction (e.g. no bitwise
-    operations on floating-point values are allowed).
+``add (LHS, RHS)``
+    Perform an addition on constants.
+``sub (LHS, RHS)``
+    Perform a subtraction on constants.
+``mul (LHS, RHS)``
+    Perform a multiplication on constants.
+``shl (LHS, RHS)``
+    Perform a left shift on constants.
+``lshr (LHS, RHS)``
+    Perform a logical right shift on constants.
+``ashr (LHS, RHS)``
+    Perform an arithmetic right shift on constants.
+``and (LHS, RHS)``
+    Perform a bitwise and on constants.
+``or (LHS, RHS)``
+    Perform a bitwise or on constants.
+``xor (LHS, RHS)``
+    Perform a bitwise xor on constants.
 
 Other Values
 ============
@@ -5978,28 +5978,32 @@ The current supported opcode vocabulary is limited:
   of the stack is treated as an address. The second stack entry is treated as an
   address space identifier.
 - ``DW_OP_stack_value`` marks a constant value.
-- ``DW_OP_LLVM_entry_value, N`` may only appear in MIR and at the
-  beginning of a ``DIExpression``. In DWARF a ``DBG_VALUE``
-  instruction binding a ``DIExpression(DW_OP_LLVM_entry_value`` to a
-  register is lowered to a ``DW_OP_entry_value [reg]``, pushing the
-  value the register had upon function entry onto the stack.  The next
-  ``(N - 1)`` operations will be part of the ``DW_OP_entry_value``
-  block argument. For example, ``!DIExpression(DW_OP_LLVM_entry_value,
-  1, DW_OP_plus_uconst, 123, DW_OP_stack_value)`` specifies an
-  expression where the entry value of the debug value instruction's
-  value/address operand is pushed to the stack, and is added
-  with 123. Due to framework limitations ``N`` can currently only
-  be 1.
+- ``DW_OP_LLVM_entry_value, N`` refers to the value a register had upon
+  function entry. When targeting DWARF, a ``DBG_VALUE(reg, ...,
+  DIExpression(DW_OP_LLVM_entry_value, 1, ...)`` is lowered to
+  ``DW_OP_entry_value [reg], ...``, which pushes the value ``reg`` had upon
+  function entry onto the DWARF expression stack.
 
-  The operation is introduced by the ``LiveDebugValues`` pass, which
-  applies it only to function parameters that are unmodified
-  throughout the function. Support is limited to simple register
-  location descriptions, or as indirect locations (e.g., when a struct
-  is passed-by-value to a callee via a pointer to a temporary copy
-  made in the caller). The entry value op is also introduced by the
-  ``AsmPrinter`` pass when a call site parameter value
-  (``DW_AT_call_site_parameter_value``) is represented as entry value
-  of the parameter.
+  The next ``(N - 1)`` operations will be part of the ``DW_OP_entry_value``
+  block argument. For example, ``!DIExpression(DW_OP_LLVM_entry_value, 1,
+  DW_OP_plus_uconst, 123, DW_OP_stack_value)`` specifies an expression where
+  the entry value of ``reg`` is pushed onto the stack, and is added with 123.
+  Due to framework limitations ``N`` must be 1, in other words,
+  ``DW_OP_entry_value`` always refers to the value/address operand of the
+  instruction.
+
+  Because ``DW_OP_LLVM_entry_value`` is defined in terms of registers, it is
+  only allowed in MIR. The operation is introduced by:
+
+    - ``LiveDebugValues`` pass, which applies it to function parameters that
+      are unmodified throughout the function. Support is limited to simple
+      register location descriptions, or as indirect locations (e.g.,
+      parameters passed-by-value to a callee via a pointer to a temporary copy
+      made in the caller).
+    - ``AsmPrinter`` pass when a call site parameter value
+      (``DW_AT_call_site_parameter_value``) is represented as entry value of
+      the parameter.
+
 - ``DW_OP_LLVM_arg, N`` is used in debug intrinsics that refer to more than one
   value, such as one that calculates the sum of two registers. This is always
   used in combination with an ordered list of values, such that

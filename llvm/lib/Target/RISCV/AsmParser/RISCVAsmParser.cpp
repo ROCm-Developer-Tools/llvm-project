@@ -35,6 +35,7 @@
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/RISCVAttributes.h"
 #include "llvm/Support/RISCVISAInfo.h"
@@ -47,6 +48,9 @@ using namespace llvm;
 
 STATISTIC(RISCVNumInstrsCompressed,
           "Number of RISC-V Compressed instructions emitted");
+
+static cl::opt<bool> AddBuildAttributes("riscv-add-build-attributes",
+                                        cl::init(false));
 
 namespace llvm {
 extern const SubtargetFeatureKV RISCVFeatureKV[RISCV::NumSubtargetFeatures];
@@ -81,7 +85,10 @@ class RISCVAsmParser : public MCTargetAsmParser {
   unsigned checkTargetMatchPredicate(MCInst &Inst) override;
 
   bool generateImmOutOfRangeError(OperandVector &Operands, uint64_t ErrorInfo,
-                                  int64_t Lower, int64_t Upper, Twine Msg);
+                                  int64_t Lower, int64_t Upper,
+                                  const Twine &Msg);
+  bool generateImmOutOfRangeError(SMLoc ErrorLoc, int64_t Lower, int64_t Upper,
+                                  const Twine &Msg);
 
   bool MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                OperandVector &Operands, MCStreamer &Out,
@@ -240,6 +247,8 @@ public:
   RISCVAsmParser(const MCSubtargetInfo &STI, MCAsmParser &Parser,
                  const MCInstrInfo &MII, const MCTargetOptions &Options)
       : MCTargetAsmParser(Options, STI, MII) {
+    MCAsmParserExtension::Initialize(Parser);
+
     Parser.addAliasForDirective(".half", ".2byte");
     Parser.addAliasForDirective(".hword", ".2byte");
     Parser.addAliasForDirective(".word", ".4byte");
@@ -265,6 +274,9 @@ public:
 
     const MCObjectFileInfo *MOFI = Parser.getContext().getObjectFileInfo();
     ParserOptions.IsPicEnabled = MOFI->isPositionIndependent();
+
+    if (AddBuildAttributes)
+      getTargetStreamer().emitTargetAttributes(STI, /*EmitStackAlign*/ false);
   }
 };
 
@@ -1158,10 +1170,16 @@ unsigned RISCVAsmParser::checkTargetMatchPredicate(MCInst &Inst) {
 }
 
 bool RISCVAsmParser::generateImmOutOfRangeError(
-    OperandVector &Operands, uint64_t ErrorInfo, int64_t Lower, int64_t Upper,
-    Twine Msg = "immediate must be an integer in the range") {
-  SMLoc ErrorLoc = ((RISCVOperand &)*Operands[ErrorInfo]).getStartLoc();
+    SMLoc ErrorLoc, int64_t Lower, int64_t Upper,
+    const Twine &Msg = "immediate must be an integer in the range") {
   return Error(ErrorLoc, Msg + " [" + Twine(Lower) + ", " + Twine(Upper) + "]");
+}
+
+bool RISCVAsmParser::generateImmOutOfRangeError(
+    OperandVector &Operands, uint64_t ErrorInfo, int64_t Lower, int64_t Upper,
+    const Twine &Msg = "immediate must be an integer in the range") {
+  SMLoc ErrorLoc = ((RISCVOperand &)*Operands[ErrorInfo]).getStartLoc();
+  return generateImmOutOfRangeError(ErrorLoc, Lower, Upper, Msg);
 }
 
 bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
@@ -1553,8 +1571,9 @@ RISCVAsmParser::parseInsnDirectiveOpcode(OperandVector &Operands) {
     break;
   }
 
-  Error(S, "opcode must be a valid opcode name or an immediate in the range "
-           "[0, 127]");
+  generateImmOutOfRangeError(S, 0, 127,
+                             "opcode must be a valid opcode name or an "
+                             "immediate in the range");
   return MatchOperand_ParseFail;
 }
 
@@ -1614,8 +1633,9 @@ RISCVAsmParser::parseInsnCDirectiveOpcode(OperandVector &Operands) {
   }
   }
 
-  Error(S, "opcode must be a valid opcode name or an immediate in the range "
-           "[0, 2]");
+  generateImmOutOfRangeError(S, 0, 2,
+                             "opcode must be a valid opcode name or an "
+                             "immediate in the range");
   return MatchOperand_ParseFail;
 }
 
@@ -1650,8 +1670,7 @@ RISCVAsmParser::parseCSRSystemRegister(OperandVector &Operands) {
       }
     }
 
-    Twine Msg = "immediate must be an integer in the range";
-    Error(S, Msg + " [" + Twine(0) + ", " + Twine((1 << 12) - 1) + "]");
+    generateImmOutOfRangeError(S, 0, (1 << 12) - 1);
     return MatchOperand_ParseFail;
   }
   case AsmToken::Identifier: {
@@ -1678,15 +1697,14 @@ RISCVAsmParser::parseCSRSystemRegister(OperandVector &Operands) {
       return MatchOperand_Success;
     }
 
-    Twine Msg = "operand must be a valid system register name "
-                "or an integer in the range";
-    Error(S, Msg + " [" + Twine(0) + ", " + Twine((1 << 12) - 1) + "]");
+    generateImmOutOfRangeError(S, 0, (1 << 12) - 1,
+                               "operand must be a valid system register name "
+                               "or an integer in the range");
     return MatchOperand_ParseFail;
   }
   case AsmToken::Percent: {
     // Discard operand with modifier.
-    Twine Msg = "immediate must be an integer in the range";
-    Error(S, Msg + " [" + Twine(0) + ", " + Twine((1 << 12) - 1) + "]");
+    generateImmOutOfRangeError(S, 0, (1 << 12) - 1);
     return MatchOperand_ParseFail;
   }
   }

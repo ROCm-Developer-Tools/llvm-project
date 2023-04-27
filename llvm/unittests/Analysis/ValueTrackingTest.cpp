@@ -1448,7 +1448,7 @@ TEST_F(ComputeKnownFPClassTest, FabsUnknown) {
       "  %A = call float @llvm.fabs.f32(float %arg)"
       "  ret float %A\n"
       "}\n");
-  expectKnownFPClass(fcAllFlags, false);
+  expectKnownFPClass(fcPositive | fcNan, false);
 }
 
 TEST_F(ComputeKnownFPClassTest, FNegFabsUnknown) {
@@ -1459,7 +1459,7 @@ TEST_F(ComputeKnownFPClassTest, FNegFabsUnknown) {
       "  %A = fneg float %fabs"
       "  ret float %A\n"
       "}\n");
-  expectKnownFPClass(fcAllFlags, true);
+  expectKnownFPClass(fcNegative | fcNan, true);
 }
 
 TEST_F(ComputeKnownFPClassTest, NegFabsNInf) {
@@ -1470,7 +1470,7 @@ TEST_F(ComputeKnownFPClassTest, NegFabsNInf) {
       "  %A = fneg float %fabs"
       "  ret float %A\n"
       "}\n");
-  expectKnownFPClass(~fcInf, true);
+  expectKnownFPClass((fcNegative & ~fcNegInf) | fcNan, true);
 }
 
 TEST_F(ComputeKnownFPClassTest, FNegFabsNNaN) {
@@ -1481,7 +1481,7 @@ TEST_F(ComputeKnownFPClassTest, FNegFabsNNaN) {
       "  %A = fneg float %fabs"
       "  ret float %A\n"
       "}\n");
-  expectKnownFPClass(~fcNan, true);
+  expectKnownFPClass(fcNegative, true);
 }
 
 TEST_F(ComputeKnownFPClassTest, CopySignNNanSrc0) {
@@ -1505,7 +1505,7 @@ TEST_F(ComputeKnownFPClassTest, CopySignNInfSrc0_NegSign) {
       "  %A = call float @llvm.copysign.f32(float %ninf, float -1.0)"
       "  ret float %A\n"
       "}\n");
-  expectKnownFPClass(fcNegFinite, true);
+  expectKnownFPClass(fcNegFinite | fcNan, true);
 }
 
 TEST_F(ComputeKnownFPClassTest, CopySignNInfSrc0_PosSign) {
@@ -1517,7 +1517,7 @@ TEST_F(ComputeKnownFPClassTest, CopySignNInfSrc0_PosSign) {
       "  %A = call float @llvm.copysign.f32(float %ninf, float 1.0)"
       "  ret float %A\n"
       "}\n");
-  expectKnownFPClass(fcPosFinite, false);
+  expectKnownFPClass(fcPosFinite | fcNan, false);
 }
 
 TEST_F(ComputeKnownFPClassTest, UIToFP) {
@@ -1580,11 +1580,11 @@ TEST_F(ComputeKnownFPClassTest, FSub) {
 
 TEST_F(ComputeKnownFPClassTest, FMul) {
   parseAssembly(
-      "define float @test(float nofpclass(nan inf) %nnan.ninf, float nofpclass(nan) %nnan, float nofpclass(qnan) %no.qnan, float %unknown) {\n"
-      "  %A = fmul float %nnan.ninf, %nnan.ninf"
-      "  %A2 = fmul float %nnan.ninf, %nnan"
-      "  %A3 = fmul float %nnan, %nnan.ninf"
-      "  %A4 = fmul float %nnan.ninf, %no.qnan"
+      "define float @test(float nofpclass(nan inf) %nnan.ninf0, float nofpclass(nan inf) %nnan.ninf1, float nofpclass(nan) %nnan, float nofpclass(qnan) %no.qnan, float %unknown) {\n"
+      "  %A = fmul float %nnan.ninf0, %nnan.ninf1"
+      "  %A2 = fmul float %nnan.ninf0, %nnan"
+      "  %A3 = fmul float %nnan, %nnan.ninf0"
+      "  %A4 = fmul float %nnan.ninf0, %no.qnan"
       "  %A5 = fmul float %nnan, %nnan"
       "  ret float %A\n"
       "}\n");
@@ -1592,23 +1592,23 @@ TEST_F(ComputeKnownFPClassTest, FMul) {
   expectKnownFPClass(fcAllFlags, std::nullopt, A2);
   expectKnownFPClass(fcAllFlags, std::nullopt, A3);
   expectKnownFPClass(fcAllFlags, std::nullopt, A4);
-  expectKnownFPClass(fcAllFlags, std::nullopt, A5);
+  expectKnownFPClass(fcPositive | fcNan, std::nullopt, A5);
 }
 
 TEST_F(ComputeKnownFPClassTest, FMulNoZero) {
   parseAssembly(
-      "define float @test(float nofpclass(zero) %no.zero, float nofpclass(zero nan) %no.zero.nan, float nofpclass(nzero nan) %no.negzero.nan, float nofpclass(pzero nan) %no.poszero.nan, float nofpclass(inf nan) %no.inf.nan, float nofpclass(inf) %no.inf, float nofpclass(nan) %no.nan) {\n"
-      "  %A = fmul float %no.zero.nan, %no.zero.nan"
+      "define float @test(float nofpclass(zero) %no.zero, float nofpclass(zero nan) %no.zero.nan0, float nofpclass(zero nan) %no.zero.nan1, float nofpclass(nzero nan) %no.negzero.nan, float nofpclass(pzero nan) %no.poszero.nan, float nofpclass(inf nan) %no.inf.nan, float nofpclass(inf) %no.inf, float nofpclass(nan) %no.nan) {\n"
+      "  %A = fmul float %no.zero.nan0, %no.zero.nan1"
       "  %A2 = fmul float %no.zero, %no.zero"
-      "  %A3 = fmul float %no.poszero.nan, %no.zero.nan"
+      "  %A3 = fmul float %no.poszero.nan, %no.zero.nan0"
       "  %A4 = fmul float %no.nan, %no.zero"
       "  %A5 = fmul float %no.zero, %no.inf"
-      "  %A6 = fmul float %no.zero.nan, %no.nan"
-      "  %A7 = fmul float %no.nan, %no.zero.nan"
+      "  %A6 = fmul float %no.zero.nan0, %no.nan"
+      "  %A7 = fmul float %no.nan, %no.zero.nan0"
       "  ret float %A\n"
       "}\n");
   expectKnownFPClass(fcFinite | fcInf, std::nullopt, A);
-  expectKnownFPClass(fcAllFlags, std::nullopt, A2);
+  expectKnownFPClass(fcPositive | fcNan, std::nullopt, A2);
   expectKnownFPClass(fcAllFlags, std::nullopt, A3);
   expectKnownFPClass(fcAllFlags, std::nullopt, A4);
   expectKnownFPClass(fcAllFlags, std::nullopt, A5);

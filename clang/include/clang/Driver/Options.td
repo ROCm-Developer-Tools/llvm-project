@@ -967,8 +967,10 @@ def cxx_isystem : JoinedOrSeparate<["-"], "cxx-isystem">, Group<clang_i_Group>,
   MetaVarName<"<directory>">;
 def c : Flag<["-"], "c">, Flags<[NoXarchOption, FlangOption]>, Group<Action_Group>,
   HelpText<"Only run preprocess, compile, and assemble steps">;
-def fconvergent_functions : Flag<["-"], "fconvergent-functions">, Group<f_Group>, Flags<[CC1Option]>,
-  HelpText<"Assume functions may be convergent">;
+defm convergent_functions : BoolFOption<"convergent-functions",
+  LangOpts<"ConvergentFunctions">, DefaultFalse,
+  NegFlag<SetFalse, [], "Assume all functions may be convergent.">,
+  PosFlag<SetTrue, [CC1Option]>>;
 
 def gpu_use_aux_triple_only : Flag<["--"], "gpu-use-aux-triple-only">,
   InternalDriverOpt, HelpText<"Prepare '-aux-triple' only without populating "
@@ -1590,7 +1592,7 @@ def femit_all_decls : Flag<["-"], "femit-all-decls">, Group<f_Group>, Flags<[CC1
 defm emulated_tls : BoolFOption<"emulated-tls",
   CodeGenOpts<"EmulatedTLS">, DefaultFalse,
   PosFlag<SetTrue, [CC1Option], "Use emutls functions to access thread_local variables">,
-  NegFlag<SetFalse>, BothFlags<[CC1Option]>>;
+  NegFlag<SetFalse>>;
 def fencoding_EQ : Joined<["-"], "fencoding=">, Group<f_Group>;
 def ferror_limit_EQ : Joined<["-"], "ferror-limit=">, Group<f_Group>, Flags<[CoreOption]>;
 defm exceptions : BoolFOption<"exceptions",
@@ -2033,11 +2035,6 @@ defm delete_null_pointer_checks : BoolFOption<"delete-null-pointer-checks",
   NegFlag<SetTrue, [CC1Option], "Do not treat usage of null pointers as undefined behavior">,
   PosFlag<SetFalse, [], "Treat usage of null pointers as undefined behavior (default)">,
   BothFlags<[CoreOption]>>;
-
-def frewrite_map_file_EQ : Joined<["-"], "frewrite-map-file=">,
-                           Group<f_Group>,
-                           Flags<[NoXarchOption, CC1Option]>,
-                           MarshallingInfoStringVector<CodeGenOpts<"RewriteMapFiles">>;
 
 defm use_line_directives : BoolFOption<"use-line-directives",
   PreprocessorOutputOpts<"UseLineDirectives">, DefaultFalse,
@@ -3221,7 +3218,8 @@ def fdebug_default_version: Joined<["-"], "fdebug-default-version=">, Group<f_Gr
 def fdebug_prefix_map_EQ
   : Joined<["-"], "fdebug-prefix-map=">, Group<f_Group>,
     Flags<[CC1Option,CC1AsOption]>,
-    HelpText<"remap file source paths in debug info">;
+    MetaVarName<"<old>=<new>">,
+    HelpText<"For paths in debug info, remap directory <old> to <new>. If multiple options match a path, the last option wins">;
 def fcoverage_prefix_map_EQ
   : Joined<["-"], "fcoverage-prefix-map=">, Group<f_Group>,
     Flags<[CC1Option]>,
@@ -3830,11 +3828,6 @@ def mno_prefixed: Flag<["-"], "mno-prefixed">, Group<m_ppc_Features_Group>;
 def mspe : Flag<["-"], "mspe">, Group<m_ppc_Features_Group>;
 def mno_spe : Flag<["-"], "mno-spe">, Group<m_ppc_Features_Group>;
 def mefpu2 : Flag<["-"], "mefpu2">, Group<m_ppc_Features_Group>;
-def mabi_EQ_vec_extabi : Flag<["-"], "mabi=vec-extabi">, Group<m_Group>, Flags<[CC1Option]>,
-  HelpText<"Enable the extended Altivec ABI on AIX (AIX only). Uses volatile and nonvolatile vector registers">,
-  MarshallingInfoFlag<LangOpts<"EnableAIXExtendedAltivecABI">>;
-def mabi_EQ_vec_default : Flag<["-"], "mabi=vec-default">, Group<m_Group>, Flags<[CC1Option]>,
-  HelpText<"Enable the default Altivec ABI on AIX (AIX only). Uses only volatile vector registers.">;
 def mabi_EQ_quadword_atomics : Flag<["-"], "mabi=quadword-atomics">,
   Group<m_Group>, Flags<[CC1Option]>,
   HelpText<"Enable quadword atomics ABI on AIX (AIX PPC64 only). Uses lqarx/stqcx. instructions.">,
@@ -4647,6 +4640,8 @@ def m68020 : Flag<["-"], "m68020">, Group<m_m68k_Features_Group>;
 def m68030 : Flag<["-"], "m68030">, Group<m_m68k_Features_Group>;
 def m68040 : Flag<["-"], "m68040">, Group<m_m68k_Features_Group>;
 def m68060 : Flag<["-"], "m68060">, Group<m_m68k_Features_Group>;
+
+def m68881 : Flag<["-"], "m68881">, Group<m_m68k_Features_Group>;
 
 foreach i = {0-6} in
   def ffixed_a#i : Flag<["-"], "ffixed-a"#i>, Group<m_m68k_Features_Group>,
@@ -5629,6 +5624,9 @@ def mframe_pointer_EQ : Joined<["-"], "mframe-pointer=">,
 def mabi_EQ_ieeelongdouble : Flag<["-"], "mabi=ieeelongdouble">,
   HelpText<"Use IEEE 754 quadruple-precision for long double">,
   MarshallingInfoFlag<LangOpts<"PPCIEEELongDouble">>;
+def mabi_EQ_vec_extabi : Flag<["-"], "mabi=vec-extabi">,
+  HelpText<"Enable the extended Altivec ABI on AIX. Use volatile and nonvolatile vector registers">,
+  MarshallingInfoFlag<LangOpts<"EnableAIXExtendedAltivecABI">>;
 def mfloat_abi : Separate<["-"], "mfloat-abi">,
   HelpText<"The float ABI to use">,
   MarshallingInfoString<CodeGenOpts<"FloatABI">>;
@@ -6552,12 +6550,14 @@ def fno_cuda_host_device_constexpr : Flag<["-"], "fno-cuda-host-device-constexpr
 // OpenMP Options
 //===----------------------------------------------------------------------===//
 
+let Flags = [CC1Option, FC1Option, NoDriverOption] in {
+
 def fopenmp_is_device : Flag<["-"], "fopenmp-is-device">,
-  HelpText<"Generate code only for an OpenMP target device.">,
-  Flags<[CC1Option, FC1Option, NoDriverOption]>;
+  HelpText<"Generate code only for an OpenMP target device.">;
 def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
-  HelpText<"Path to the IR file produced by the frontend for the host.">,
-  Flags<[CC1Option, NoDriverOption]>;
+  HelpText<"Path to the IR file produced by the frontend for the host.">;
+
+} // let Flags = [CC1Option, FC1Option, NoDriverOption]
 
 //===----------------------------------------------------------------------===//
 // SYCL Options

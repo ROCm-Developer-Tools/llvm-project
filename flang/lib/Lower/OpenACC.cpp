@@ -15,6 +15,7 @@
 #include "flang/Lower/Bridge.h"
 #include "flang/Lower/PFTBuilder.h"
 #include "flang/Lower/StatementContext.h"
+#include "flang/Lower/Support/Utils.h"
 #include "flang/Optimizer/Builder/BoxValue.h"
 #include "flang/Optimizer/Builder/FIRBuilder.h"
 #include "flang/Optimizer/Builder/Todo.h"
@@ -100,6 +101,136 @@ genObjectList(const Fortran::parser::AccObjectList &objectList,
   }
 }
 
+static llvm::SmallVector<mlir::Value>
+genBoundsOpsFromBox(fir::FirOpBuilder &builder, mlir::Location loc,
+                    Fortran::lower::AbstractConverter &converter,
+                    Fortran::lower::SymbolRef sym, mlir::Value box, int rank) {
+  llvm::SmallVector<mlir::Value> bounds;
+  mlir::Type idxTy = builder.getIndexType();
+  fir::ExtendedValue dataExv = converter.getSymbolExtendedValue(sym);
+  mlir::Type boundTy = builder.getType<mlir::acc::DataBoundsType>();
+  mlir::Value one = builder.createIntegerConstant(loc, idxTy, 1);
+  assert(box.getType().isa<fir::BaseBoxType>() && "expect firbox or fir.class");
+  for (int dim = 0; dim < rank; ++dim) {
+    mlir::Value d = builder.createIntegerConstant(loc, idxTy, dim);
+    mlir::Value baseLb =
+        fir::factory::readLowerBound(builder, loc, dataExv, dim, one);
+    auto dimInfo =
+        builder.create<fir::BoxDimsOp>(loc, idxTy, idxTy, idxTy, box, d);
+    mlir::Value empty;
+    mlir::Value bound = builder.create<mlir::acc::DataBoundsOp>(
+        loc, boundTy, empty, empty, dimInfo.getExtent(),
+        dimInfo.getByteStride(), true, baseLb);
+    bounds.push_back(bound);
+  }
+  return bounds;
+}
+
+static llvm::SmallVector<mlir::Value>
+genBoundsOps(fir::FirOpBuilder &builder, mlir::Location loc,
+             Fortran::lower::AbstractConverter &converter,
+             Fortran::lower::StatementContext &stmtCtx,
+             const std::list<Fortran::parser::SectionSubscript> &subscripts,
+             std::stringstream &asFortran, const Fortran::parser::Name &name,
+             mlir::Value baseAddr) {
+  int dimension = 0;
+  mlir::Type idxTy = builder.getIndexType();
+  mlir::Type boundTy = builder.getType<mlir::acc::DataBoundsType>();
+  llvm::SmallVector<mlir::Value> bounds;
+  fir::ExtendedValue dataExv = converter.getSymbolExtendedValue(*name.symbol);
+
+  for (const auto &subscript : subscripts) {
+    if (const auto *triplet{
+            std::get_if<Fortran::parser::SubscriptTriplet>(&subscript.u)}) {
+      if (dimension != 0)
+        asFortran << ',';
+      mlir::Value lbound, ubound, extent;
+      std::optional<std::int64_t> lval, uval;
+      mlir::Value one = builder.createIntegerConstant(loc, idxTy, 1);
+      mlir::Value baseLb =
+          fir::factory::readLowerBound(builder, loc, dataExv, dimension, one);
+      bool defaultLb = baseLb == one;
+      mlir::Value stride;
+      bool strideInBytes = false;
+
+      if (fir::unwrapRefType(baseAddr.getType()).isa<fir::BaseBoxType>()) {
+        mlir::Value d = builder.createIntegerConstant(loc, idxTy, dimension);
+        auto dimInfo = builder.create<fir::BoxDimsOp>(loc, idxTy, idxTy, idxTy,
+                                                      baseAddr, d);
+        stride = dimInfo.getByteStride();
+        strideInBytes = true;
+      }
+
+      const auto &lower{std::get<0>(triplet->t)};
+      if (lower) {
+        lval = Fortran::semantics::GetIntValue(lower);
+        if (lval) {
+          if (defaultLb) {
+            lbound = builder.createIntegerConstant(loc, idxTy, *lval - 1);
+          } else {
+            mlir::Value lb = builder.createIntegerConstant(loc, idxTy, *lval);
+            lbound = builder.create<mlir::arith::SubIOp>(loc, lb, baseLb);
+          }
+          asFortran << *lval;
+        } else {
+          const Fortran::lower::SomeExpr *lexpr =
+              Fortran::semantics::GetExpr(*lower);
+          mlir::Value lb =
+              fir::getBase(converter.genExprValue(loc, *lexpr, stmtCtx));
+          lb = builder.createConvert(loc, baseLb.getType(), lb);
+          lbound = builder.create<mlir::arith::SubIOp>(loc, lb, baseLb);
+          asFortran << lexpr->AsFortran();
+        }
+      }
+      asFortran << ':';
+      const auto &upper{std::get<1>(triplet->t)};
+      if (upper) {
+        uval = Fortran::semantics::GetIntValue(upper);
+        if (uval) {
+          if (defaultLb) {
+            ubound = builder.createIntegerConstant(loc, idxTy, *uval - 1);
+          } else {
+            mlir::Value ub = builder.createIntegerConstant(loc, idxTy, *uval);
+            ubound = builder.create<mlir::arith::SubIOp>(loc, ub, baseLb);
+          }
+          asFortran << *uval;
+        } else {
+          const Fortran::lower::SomeExpr *uexpr =
+              Fortran::semantics::GetExpr(*upper);
+          mlir::Value ub =
+              fir::getBase(converter.genExprValue(loc, *uexpr, stmtCtx));
+          ub = builder.createConvert(loc, baseLb.getType(), ub);
+          ubound = builder.create<mlir::arith::SubIOp>(loc, ub, baseLb);
+          asFortran << uexpr->AsFortran();
+        }
+      }
+      if (lower && upper) {
+        if (lval && uval && *uval < *lval) {
+          mlir::emitError(loc, "zero sized array section");
+          break;
+        } else if (std::get<2>(triplet->t)) {
+          const auto &strideExpr{std::get<2>(triplet->t)};
+          if (strideExpr) {
+            mlir::emitError(loc, "stride cannot be specified on "
+                                 "an OpenACC array section");
+            break;
+          }
+        }
+      }
+      if (!ubound) {
+        extent = fir::factory::readExtent(builder, loc, dataExv, dimension);
+        if (lbound)
+          extent = builder.create<mlir::arith::SubIOp>(loc, extent, lbound);
+      }
+      mlir::Value bound = builder.create<mlir::acc::DataBoundsOp>(
+          loc, boundTy, lbound, ubound, extent, stride, strideInBytes, baseLb);
+      bounds.push_back(bound);
+      ++dimension;
+    }
+  }
+  return bounds;
+}
+
 template <typename Op>
 static void
 genDataOperandOperations(const Fortran::parser::AccObjectList &objectList,
@@ -111,8 +242,8 @@ genDataOperandOperations(const Fortran::parser::AccObjectList &objectList,
 
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
 
-  auto createOpAndAddOperand = [&](Fortran::lower::SymbolRef sym,
-                                   llvm::StringRef name, mlir::Location loc) {
+  auto getDataOperandBaseAddr = [&](Fortran::lower::SymbolRef sym,
+                                    mlir::Location loc) -> mlir::Value {
     mlir::Value symAddr = converter.getSymbolAddress(sym);
     // TODO: Might need revisiting to handle for non-shared clauses
     if (!symAddr) {
@@ -124,13 +255,45 @@ genDataOperandOperations(const Fortran::parser::AccObjectList &objectList,
     if (!symAddr)
       llvm::report_fatal_error("could not retrieve symbol address");
 
-    Op op = builder.create<Op>(loc, symAddr.getType(), symAddr);
+    if (auto boxTy = fir::unwrapRefType(symAddr.getType())
+                         .dyn_cast<fir::BaseBoxType>()) {
+      if (boxTy.getEleTy().isa<fir::RecordType>())
+        TODO(loc, "derived type");
+
+      // Load the box when baseAddr is a `fir.ref<fir.box<T>>` or a
+      // `fir.ref<fir.class<T>>` type.
+      if (symAddr.getType().isa<fir::ReferenceType>())
+        return builder.create<fir::LoadOp>(loc, symAddr);
+    }
+    return symAddr;
+  };
+
+  auto createOpAndAddOperand = [&](mlir::Value baseAddr, llvm::StringRef name,
+                                   mlir::Location loc,
+                                   llvm::SmallVector<mlir::Value> &bounds) {
+    if (auto boxTy = baseAddr.getType().dyn_cast<fir::BaseBoxType>()) {
+      // Get the actual data address when the descriptor is an allocatable or
+      // a pointer.
+      if (boxTy.getEleTy().isa<fir::HeapType, fir::PointerType>()) {
+        mlir::Value boxAddr = builder.create<fir::BoxAddrOp>(
+            loc, fir::ReferenceType::get(boxTy.getEleTy()), baseAddr);
+        baseAddr = builder.create<fir::LoadOp>(loc, boxAddr);
+      } else { // Get the address of the boxed value.
+        baseAddr = builder.create<fir::BoxAddrOp>(loc, baseAddr);
+      }
+    }
+
+    Op op = builder.create<Op>(loc, baseAddr.getType(), baseAddr);
     op.setNameAttr(builder.getStringAttr(name));
     op.setStructured(structured);
     op.setDataClause(dataClause);
+    if (bounds.size() > 0)
+      op->insertOperands(1, bounds);
     op->setAttr(Op::getOperandSegmentSizeAttr(),
-                builder.getDenseI32ArrayAttr({1, 0, 0}));
+                builder.getDenseI32ArrayAttr(
+                    {1, 0, static_cast<int32_t>(bounds.size())}));
     dataOperands.push_back(op.getAccPtr());
+    return op;
   };
 
   for (const auto &accObject : objectList.v) {
@@ -144,7 +307,27 @@ genDataOperandOperations(const Fortran::parser::AccObjectList &objectList,
                 if ((*expr).Rank() > 0 &&
                     Fortran::parser::Unwrap<Fortran::parser::ArrayElement>(
                         designator)) {
-                  TODO(operandLocation, "OpenACC array section data operand");
+                  const auto *arrayElement =
+                      Fortran::parser::Unwrap<Fortran::parser::ArrayElement>(
+                          designator);
+                  llvm::SmallVector<mlir::Value> bounds;
+                  const auto *dataRef =
+                      std::get_if<Fortran::parser::DataRef>(&designator.u);
+                  const Fortran::parser::Name &name =
+                      Fortran::parser::GetLastName(*dataRef);
+                  std::stringstream asFortran;
+                  asFortran << name.ToString();
+                  mlir::Value baseAddr =
+                      getDataOperandBaseAddr(*name.symbol, operandLocation);
+                  if (!arrayElement->subscripts.empty()) {
+                    asFortran << '(';
+                    bounds = genBoundsOps(builder, operandLocation, converter,
+                                          stmtCtx, arrayElement->subscripts,
+                                          asFortran, name, baseAddr);
+                  }
+                  asFortran << ')';
+                  createOpAndAddOperand(baseAddr, asFortran.str(),
+                                        operandLocation, bounds);
                 } else if (Fortran::parser::Unwrap<
                                Fortran::parser::StructureComponent>(
                                designator)) {
@@ -155,8 +338,16 @@ genDataOperandOperations(const Fortran::parser::AccObjectList &objectList,
                           &designator.u)}) {
                     const Fortran::parser::Name &name =
                         Fortran::parser::GetLastName(*dataRef);
-                    createOpAndAddOperand(*name.symbol, name.ToString(),
-                                          operandLocation);
+                    mlir::Value baseAddr =
+                        getDataOperandBaseAddr(*name.symbol, operandLocation);
+                    llvm::SmallVector<mlir::Value> bounds;
+                    if (fir::unwrapRefType(baseAddr.getType())
+                            .isa<fir::BaseBoxType>())
+                      bounds = genBoundsOpsFromBox(builder, operandLocation,
+                                                   converter, *name.symbol,
+                                                   baseAddr, (*expr).Rank());
+                    createOpAndAddOperand(baseAddr, name.ToString(),
+                                          operandLocation, bounds);
                   } else { // Unsupported
                     llvm::report_fatal_error(
                         "Unsupported type of OpenACC operand");
@@ -167,8 +358,11 @@ genDataOperandOperations(const Fortran::parser::AccObjectList &objectList,
             [&](const Fortran::parser::Name &name) {
               mlir::Location operandLocation =
                   converter.genLocation(name.source);
-              createOpAndAddOperand(*name.symbol, name.ToString(),
-                                    operandLocation);
+              mlir::Value baseAddr =
+                  getDataOperandBaseAddr(*name.symbol, operandLocation);
+              llvm::SmallVector<mlir::Value> bounds;
+              createOpAndAddOperand(baseAddr, name.ToString(), operandLocation,
+                                    bounds);
             }},
         accObject.u);
   }

@@ -109,9 +109,11 @@ on support follow.
      ``Zicbom``       Assembly Support
      ``Zicbop``       Assembly Support
      ``Zicboz``       Assembly Support
+     ``Zicntr``       (`See Note <#riscv-i2p1-note>`__)
      ``Zicsr``        (`See Note <#riscv-i2p1-note>`__)
      ``Zifencei``     (`See Note <#riscv-i2p1-note>`__)
      ``Zihintpause``  Assembly Support
+     ``Zihpm``        (`See Note <#riscv-i2p1-note>`__)
      ``Zkn``          Supported
      ``Zknd``         Supported (`See note <#riscv-scalar-crypto-note2>`__)
      ``Zkne``         Supported (`See note <#riscv-scalar-crypto-note2>`__)
@@ -165,8 +167,8 @@ Supported
 
 .. _riscv-i2p1-note:
 
-``zicsr``, ``zifencei``
-  Between versions 2.0 and 2.1 of the base I specification, a backwards incompatible change was made to remove selected instructions and CSRs from the base ISA.  These instructions were grouped into a set of new extensions, but were no longer required by the base ISA.  This change is described in "Preface to Document Version 20190608-Base-Ratified" from the specification document.  LLVM currently implements version 2.0 of the base specification.  Thus, instructions from these extensions are accepted as part of the base ISA.  LLVM also allows the explicit specification of the extensions in an march string.
+``zicntr``, ``zicsr``, ``zifencei``, ``zihpm``
+  Between versions 2.0 and 2.1 of the base I specification, a backwards incompatible change was made to remove selected instructions and CSRs from the base ISA.  These instructions were grouped into a set of new extensions, but were no longer required by the base ISA.  This change is partially described in "Preface to Document Version 20190608-Base-Ratified" from the specification document (the ``zicntr`` and ``zihpm`` bits are not mentioned).  LLVM currently implements version 2.1 of the base specification. To maintain compatibility, instructions from these extensions are accepted without being in the ``-march`` string.  LLVM also allows the explicit specification of the extensions in an ``-march`` string.
 
 Experimental Extensions
 =======================
@@ -202,8 +204,8 @@ The primary goal of experimental support is to assist in the process of ratifica
 ``experimental-zvfh``
   LLVM implements `this draft text <https://github.com/riscv/riscv-v-spec/pull/780>`__.
 
-``experimental-zvkb``, ``experimental-zvkg``, ``experimental-zvkn``, ``experimental-zvknha``, ``experimental-zvknhb``, ``experimental-zvkns``, ``experimental-zvks``, ``experimental-zvksed``, ``experimental-zvksh``
-  LLVM implements the `0.3 draft specification <https://github.com/riscv/riscv-crypto/releases/download/v20230206/riscv-crypto-spec-vector.pdf>`__. Note that current vector crypto extension version can be found in: <https://github.com/riscv/riscv-crypto>.
+``experimental-zvbb``, ``experimental-zvbc``, ``experimental-zvkg``, ``experimental-zvkn``, ``experimental-zvkng``, ``experimental-zvknha``, ``experimental-zvknhb``, ``experimental-zvkns``, ``experimental-zvks``, ``experimental-zvksed``, ``experimental-zvksg``, ``experimental-zvksh``, ``experimental-zvkt``
+  LLVM implements the `0.5 draft specification <https://github.com/riscv/riscv-crypto/releases/download/v20230407/riscv-crypto-spec-vector.pdf>`__. Note that current vector crypto extension version can be found in: <https://github.com/riscv/riscv-crypto>.
 
 To use an experimental extension from `clang`, you must add `-menable-experimental-extensions` to the command line, and specify the exact version of the experimental extension you are using.  To use an experimental extension with LLVM's internal developer tools (e.g. `llc`, `llvm-objdump`, `llvm-mc`), you must prefix the extension name with `experimental-`.  Note that you don't need to specify the version with internal tools, and shouldn't include the `experimental-` prefix with `clang`.
 
