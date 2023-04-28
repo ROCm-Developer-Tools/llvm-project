@@ -1019,17 +1019,6 @@ LogicalResult ModuleTranslation::convertFunctions() {
     if (function.isExternal())
       continue;
 
-    // FIXME: Must convert declare target functions on device pass.
-    //        We need a way to identify that function was defined or
-    //        declared inside declare target.
-    //        For now, we assume no declare target functions.
-    //        Target regions will have there own kernels generated.
-    printf("  FFFF Function name %s\n", function.getName().str().c_str());
-    bool isDeclareTargetFunction =
-        mlir::omp::OpenMPDialect::isDeclareTarget(function);
-    if (isDevice && !isDeclareTargetFunction)
-      continue;
-
     if (failed(convertOneFunction(function)))
       return failure();
   }
