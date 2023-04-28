@@ -4112,8 +4112,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
 }
 
 static Function *
-createOutlinedFunction(IRBuilderBase &Builder, StringRef FuncName,
-                       SmallVectorImpl<Value *> &Inputs,
+createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
+                       StringRef FuncName, SmallVectorImpl<Value *> &Inputs,
                        OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
   SmallVector<Type *> ParameterTypes;
   for (auto &Arg : Inputs)
@@ -4130,7 +4130,16 @@ createOutlinedFunction(IRBuilderBase &Builder, StringRef FuncName,
   // Generate the region into the function.
   BasicBlock *EntryBB = BasicBlock::Create(Builder.getContext(), "entry", Func);
   Builder.SetInsertPoint(EntryBB);
+
+  // Insert target init call in the device compilation pass.
+  if (OMPBuilder.Config.isEmbedded())
+    Builder.restoreIP(OMPBuilder.createTargetInit(Builder, /*IsSPMD*/ false));
+
   Builder.restoreIP(CBFunc(Builder.saveIP(), Builder.saveIP()));
+
+  // Insert target deinit call in the device compilation pass.
+  if (OMPBuilder.Config.isEmbedded())
+    OMPBuilder.createTargetDeinit(Builder, /*IsSPMD*/ false);
 
   // Insert return instruction.
   Builder.CreateRetVoid();
@@ -4161,8 +4170,9 @@ emitTargetOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                            OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
 
   OpenMPIRBuilder::FunctionGenCallback &&GenerateOutlinedFunction =
-      [&Builder, &Inputs, &CBFunc](StringRef EntryFnName) {
-        return createOutlinedFunction(Builder, EntryFnName, Inputs, CBFunc);
+      [&OMPBuilder, &Builder, &Inputs, &CBFunc](StringRef EntryFnName) {
+        return createOutlinedFunction(OMPBuilder, Builder, EntryFnName, Inputs,
+                                      CBFunc);
       };
 
   Constant *OutlinedFnID;
@@ -4173,7 +4183,7 @@ emitTargetOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
 
 static void emitTargetCall(IRBuilderBase &Builder, Function *OutlinedFn,
                            SmallVectorImpl<Value *> &Args) {
-  // TODO: Add kernel launch call when device codegen is supported.
+  // TODO: Add kernel launch call
   Builder.CreateCall(OutlinedFn, Args);
 }
 
@@ -4189,7 +4199,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
   Function *OutlinedFn;
   emitTargetOutlinedFunction(*this, Builder, EntryInfo, OutlinedFn, NumTeams,
                              NumThreads, Args, CBFunc);
-  emitTargetCall(Builder, OutlinedFn, Args);
+  if (!Config.isEmbedded())
+    emitTargetCall(Builder, OutlinedFn, Args);
   return Builder.saveIP();
 }
 
