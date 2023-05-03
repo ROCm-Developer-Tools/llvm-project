@@ -26,17 +26,8 @@ include "mlir/Dialect/OpenMP/OpenMPTypeInterfaces.td"
 def OpenMP_Dialect : Dialect {
   let name = "omp";
   let cppNamespace = "::mlir::omp";
-  let dependentDialects = ["::mlir::LLVM::LLVMDialect"];
+  let dependentDialects = ["::mlir::LLVM::LLVMDialect, ::mlir::func::FuncDialect"];
   let useDefaultAttributePrinterParser = 1;
-
-  let extraClassDeclaration = [{
-    // Helper functions for assigning a DeclareTargetDeviceType Attribute to functions
-    static void setDeclareTarget(Operation *funcOrGlobal, mlir::omp::DeclareTargetDeviceType deviceType, 
-                                 mlir::omp::DeclareTargetCaptureClause captureClause);
-    static bool isDeclareTarget(Operation *funcOrGlobal);
-    static mlir::omp::DeclareTargetDeviceType getDeclareTargetDeviceType(Operation *funcOrGlobal);
-    static mlir::omp::DeclareTargetCaptureClause getDeclareTargetCaptureClause(Operation *funcOrGlobal);
-  }];
 }
 
 // OmpCommon requires definition of OpenACC_Dialect.

@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/DialectImplementation.h"
@@ -71,8 +72,23 @@ void OpenMPDialect::initialize() {
   MemRefType::attachInterface<PointerLikeModel<MemRefType>>(*getContext());
   LLVM::LLVMPointerType::attachInterface<
       PointerLikeModel<LLVM::LLVMPointerType>>(*getContext());
+
+  // Attach default offload module interface to module op to access
+  // offload functionality through
   mlir::ModuleOp::attachInterface<mlir::omp::OffloadModuleDefaultModel>(
       *getContext());
+
+  // Attach default declare target interfaces to operations which can be marked
+  // as declare target (Global Operations and Functions/Subroutines in dialects
+  // that Fortran (or other languages that lower to MLIR) translates too
+  mlir::LLVM::GlobalOp::attachInterface<
+      mlir::omp::DeclareTargetDefaultModel<mlir::LLVM::GlobalOp>>(
+      *getContext());
+  mlir::LLVM::LLVMFuncOp::attachInterface<
+      mlir::omp::DeclareTargetDefaultModel<mlir::LLVM::LLVMFuncOp>>(
+      *getContext());
+  mlir::func::FuncOp::attachInterface<
+      mlir::omp::DeclareTargetDefaultModel<mlir::func::FuncOp>>(*getContext());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1439,46 +1455,6 @@ LogicalResult CancellationPointOp::verify() {
   }
   // TODO : Add more when we support taskgroup.
   return success();
-}
-
-//===----------------------------------------------------------------------===//
-// OpenMPDialect helper functions
-//===----------------------------------------------------------------------===//
-
-void OpenMPDialect::setDeclareTarget(
-    Operation *funcOrGlobal, mlir::omp::DeclareTargetDeviceType deviceType,
-    mlir::omp::DeclareTargetCaptureClause captureClause) {
-  funcOrGlobal->setAttr("omp.declare_target",
-                        mlir::omp::DeclareTargetAttr::get(
-                            funcOrGlobal->getContext(),
-                            mlir::omp::DeclareTargetDeviceTypeAttr::get(
-                                funcOrGlobal->getContext(), deviceType),
-                            mlir::omp::DeclareTargetCaptureClauseAttr::get(
-                                funcOrGlobal->getContext(), captureClause)));
-}
-
-bool OpenMPDialect::isDeclareTarget(Operation *funcOrGlobal) {
-  return funcOrGlobal->hasAttr("omp.declare_target");
-}
-
-mlir::omp::DeclareTargetDeviceType
-OpenMPDialect::getDeclareTargetDeviceType(Operation *funcOrGlobal) {
-  if (mlir::Attribute declTar = funcOrGlobal->getAttr("omp.declare_target")) {
-    if (auto declAttr =
-            declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
-      return declAttr.getDeviceType().getValue();
-  }
-  return {};
-}
-
-mlir::omp::DeclareTargetCaptureClause
-OpenMPDialect::getDeclareTargetCaptureClause(Operation *funcOrGlobal) {
-  if (mlir::Attribute declTar = funcOrGlobal->getAttr("omp.declare_target")) {
-    if (auto declAttr =
-            declTar.dyn_cast_or_null<mlir::omp::DeclareTargetAttr>())
-      return declAttr.getCaptureClause().getValue();
-  }
-  return {};
 }
 
 #define GET_ATTRDEF_CLASSES

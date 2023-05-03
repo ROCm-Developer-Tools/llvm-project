@@ -27,25 +27,30 @@ class CaptureImplicitlyDeclareTargetPass
       if (auto currFOp = moduleOp.lookupSymbol<mlir::func::FuncOp>(
               callOp.getCallee().value())) {
         auto parentDt =
-            mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(functionOp);
-        if (mlir::omp::OpenMPDialect::isDeclareTarget(currFOp)) {
+            mlir::dyn_cast<mlir::omp::DeclareTargetInterface>(*functionOp)
+                .getDeclareTargetDeviceType();
+        if (mlir::dyn_cast<mlir::omp::DeclareTargetInterface>(*currFOp)
+                .isDeclareTarget()) {
           auto currentDt =
-              mlir::omp::OpenMPDialect::getDeclareTargetDeviceType(currFOp);
-
+              mlir::dyn_cast<mlir::omp::DeclareTargetInterface>(*currFOp)
+                  .getDeclareTargetDeviceType();
           // Found the same function twice, with different device_types, mark as
           // Any as it belongs to both
           if (currentDt != parentDt &&
               currentDt != mlir::omp::DeclareTargetDeviceType::any) {
-            mlir::omp::OpenMPDialect::setDeclareTarget(
-                currFOp, mlir::omp::DeclareTargetDeviceType::any,
-                mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(
-                    functionOp));
+            mlir::dyn_cast<mlir::omp::DeclareTargetInterface>(*currFOp)
+                .setDeclareTarget(
+                    mlir::omp::DeclareTargetDeviceType::any,
+                    mlir::dyn_cast<mlir::omp::DeclareTargetInterface>(
+                        *functionOp)
+                        .getDeclareTargetCaptureClause());
           }
         } else {
-          mlir::omp::OpenMPDialect::setDeclareTarget(
-              currFOp, parentDt,
-              mlir::omp::OpenMPDialect::getDeclareTargetCaptureClause(
-                  functionOp));
+          mlir::dyn_cast<mlir::omp::DeclareTargetInterface>(*currFOp)
+              .setDeclareTarget(
+                  parentDt,
+                  mlir::dyn_cast<mlir::omp::DeclareTargetInterface>(*functionOp)
+                      .getDeclareTargetCaptureClause());
         }
 
         markNestedFuncs(currFOp, moduleOp);
@@ -55,8 +60,11 @@ class CaptureImplicitlyDeclareTargetPass
 
   void runOnOperation() override {
     mlir::ModuleOp moduleOp = getOperation();
+
     for (auto functionOp : moduleOp.getOps<mlir::func::FuncOp>()) {
-      if (mlir::omp::OpenMPDialect::isDeclareTarget(functionOp)) {
+      auto declareTargetOp =
+          llvm::dyn_cast<mlir::omp::DeclareTargetInterface>(*functionOp);
+      if (declareTargetOp.isDeclareTarget()) {
         markNestedFuncs(functionOp, moduleOp);
       }
     }

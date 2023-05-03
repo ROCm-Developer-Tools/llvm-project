@@ -2332,15 +2332,20 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
   for (auto sym : symbolAndClause) {
     auto *op = mod.lookupSymbol(converter.mangleName(std::get<1>(sym)));
 
-    if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost) {
-      mlir::omp::OpenMPDialect::setDeclareTarget(
-          op, mlir::omp::DeclareTargetDeviceType::nohost, std::get<0>(sym));
-    } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Host) {
-      mlir::omp::OpenMPDialect::setDeclareTarget(
-          op, mlir::omp::DeclareTargetDeviceType::host, std::get<0>(sym));
-    } else if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Any) {
-      mlir::omp::OpenMPDialect::setDeclareTarget(
-          op, mlir::omp::DeclareTargetDeviceType::any, std::get<0>(sym));
+    if (auto declareTargetOp =
+            dyn_cast<mlir::omp::DeclareTargetInterface>(op)) {
+      if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost) {
+        declareTargetOp.setDeclareTarget(
+            mlir::omp::DeclareTargetDeviceType::nohost, std::get<0>(sym));
+      } else if (deviceType ==
+                 Fortran::parser::OmpDeviceTypeClause::Type::Host) {
+        declareTargetOp.setDeclareTarget(
+            mlir::omp::DeclareTargetDeviceType::host, std::get<0>(sym));
+      } else if (deviceType ==
+                 Fortran::parser::OmpDeviceTypeClause::Type::Any) {
+        declareTargetOp.setDeclareTarget(
+            mlir::omp::DeclareTargetDeviceType::any, std::get<0>(sym));
+      }
     }
   }
 }
