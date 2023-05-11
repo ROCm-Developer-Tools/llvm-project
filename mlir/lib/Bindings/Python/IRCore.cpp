@@ -16,6 +16,7 @@
 #include "mlir-c/Debug.h"
 #include "mlir-c/Diagnostics.h"
 #include "mlir-c/IR.h"
+#include "mlir-c/Support.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 
@@ -124,6 +125,9 @@ static const char kOperationPrintBytecodeDocstring[] =
 
 Args:
   file: The file like object to write to.
+  desired_version: The version of bytecode to emit.
+Returns:
+  The bytecode writer status.
 )";
 
 static const char kOperationStrDunderDocstring[] =
@@ -150,6 +154,10 @@ static const char kValueDunderStrDocstring[] =
 If the value is a block argument, this is the assembly form of its type and the
 position in the argument list. If the value is an operation result, this is
 equivalent to printing the operation that produced it.
+)";
+
+static const char kGetNameAsOperand[] =
+    R"(Returns the string form of value as an operand (i.e., the ValueID).
 )";
 
 static const char kValueReplaceAllUsesWithDocstring[] =
@@ -1131,12 +1139,24 @@ void PyOperationBase::print(py::object fileObject, bool binary,
   mlirOpPrintingFlagsDestroy(flags);
 }
 
-void PyOperationBase::writeBytecode(const py::object &fileObject) {
+void PyOperationBase::writeBytecode(const py::object &fileObject,
+                                    std::optional<int64_t> bytecodeVersion) {
   PyOperation &operation = getOperation();
   operation.checkValid();
   PyFileAccumulator accum(fileObject, /*binary=*/true);
-  mlirOperationWriteBytecode(operation, accum.getCallback(),
-                             accum.getUserData());
+
+  if (!bytecodeVersion.has_value())
+    return mlirOperationWriteBytecode(operation, accum.getCallback(),
+                                      accum.getUserData());
+
+  MlirBytecodeWriterConfig config = mlirBytecodeWriterConfigCreate();
+  mlirBytecodeWriterConfigDesiredEmitVersion(config, *bytecodeVersion);
+  MlirLogicalResult res = mlirOperationWriteBytecodeWithConfig(
+      operation, config, accum.getCallback(), accum.getUserData());
+  if (mlirLogicalResultIsFailure(res))
+    throw py::value_error((Twine("Unable to honor desired bytecode version ") +
+                           Twine(*bytecodeVersion))
+                              .str());
 }
 
 py::object PyOperationBase::getAsm(bool binary,
@@ -2757,6 +2777,7 @@ void mlir::python::populateIRCore(py::module &m) {
            py::arg("use_local_scope") = false,
            py::arg("assume_verified") = false, kOperationPrintDocstring)
       .def("write_bytecode", &PyOperationBase::writeBytecode, py::arg("file"),
+           py::arg("desired_version") = py::none(),
            kOperationPrintBytecodeDocstring)
       .def("get_asm", &PyOperationBase::getAsm,
            // Careful: Lots of arguments must match up with get_asm method.
@@ -3319,6 +3340,19 @@ void mlir::python::populateIRCore(py::module &m) {
             return printAccum.join();
           },
           kValueDunderStrDocstring)
+      .def(
+          "get_name",
+          [](PyValue &self, bool useLocalScope) {
+            PyPrintAccumulator printAccum;
+            MlirOpPrintingFlags flags = mlirOpPrintingFlagsCreate();
+            if (useLocalScope)
+              mlirOpPrintingFlagsUseLocalScope(flags);
+            mlirValuePrintAsOperand(self.get(), flags, printAccum.getCallback(),
+                                    printAccum.getUserData());
+            mlirOpPrintingFlagsDestroy(flags);
+            return printAccum.join();
+          },
+          py::arg("use_local_scope") = false, kGetNameAsOperand)
       .def_property_readonly("type",
                              [](PyValue &self) {
                                return PyType(

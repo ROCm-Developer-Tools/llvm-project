@@ -444,7 +444,7 @@ ModuleTranslation::ModuleTranslation(Operation *module,
       debugTranslation(
           std::make_unique<DebugTranslation>(module, *this->llvmModule)),
       loopAnnotationTranslation(std::make_unique<LoopAnnotationTranslation>(
-          module, *this->llvmModule)),
+          *this, module, *this->llvmModule)),
       typeTranslator(this->llvmModule->getContext()),
       iface(module->getContext()) {
   assert(satisfiesLLVMModule(mlirModule) &&
@@ -770,6 +770,10 @@ LogicalResult ModuleTranslation::convertGlobals() {
           /*Data=*/nullptr);
     }
   }
+
+  for (auto op : getModuleBody(mlirModule).getOps<LLVM::GlobalOp>())
+    if (failed(convertDialectAttributes(op)))
+      return failure();
 
   return success();
 }

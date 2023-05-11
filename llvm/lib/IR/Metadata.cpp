@@ -1072,6 +1072,70 @@ MDNode *MDNode::getMostGenericFPMath(MDNode *A, MDNode *B) {
   return B;
 }
 
+// Call instructions with branch weights are only used in SamplePGO as
+// documented in
+/// https://llvm.org/docs/BranchWeightMetadata.html#callinst).
+MDNode *MDNode::mergeDirectCallProfMetadata(MDNode *A, MDNode *B,
+                                            const Instruction *AInstr,
+                                            const Instruction *BInstr) {
+  assert(A && B && AInstr && BInstr && "Caller should guarantee");
+  auto &Ctx = AInstr->getContext();
+  MDBuilder MDHelper(Ctx);
+
+  // LLVM IR verifier verifies !prof metadata has at least 2 operands.
+  assert(A->getNumOperands() >= 2 && B->getNumOperands() >= 2 &&
+         "!prof annotations should have no less than 2 operands");
+  MDString *AMDS = dyn_cast<MDString>(A->getOperand(0));
+  MDString *BMDS = dyn_cast<MDString>(B->getOperand(0));
+  // LLVM IR verfier verifies first operand is MDString.
+  assert(AMDS != nullptr && BMDS != nullptr &&
+         "first operand should be a non-null MDString");
+  StringRef AProfName = AMDS->getString();
+  StringRef BProfName = BMDS->getString();
+  if (AProfName.equals("branch_weights") &&
+      BProfName.equals("branch_weights")) {
+    ConstantInt *AInstrWeight =
+        mdconst::dyn_extract<ConstantInt>(A->getOperand(1));
+    ConstantInt *BInstrWeight =
+        mdconst::dyn_extract<ConstantInt>(B->getOperand(1));
+    assert(AInstrWeight && BInstrWeight && "verified by LLVM verifier");
+    return MDNode::get(Ctx,
+                       {MDHelper.createString("branch_weights"),
+                        MDHelper.createConstant(ConstantInt::get(
+                            Type::getInt64Ty(Ctx),
+                            SaturatingAdd(AInstrWeight->getZExtValue(),
+                                          BInstrWeight->getZExtValue())))});
+  }
+  return nullptr;
+}
+
+// Pass in both instructions and nodes. Instruction information (e.g.,
+// instruction type) helps interpret profiles and make implementation clearer.
+MDNode *MDNode::getMergedProfMetadata(MDNode *A, MDNode *B,
+                                      const Instruction *AInstr,
+                                      const Instruction *BInstr) {
+  if (!(A && B)) {
+    return A ? A : B;
+  }
+
+  assert(AInstr->getMetadata(LLVMContext::MD_prof) == A &&
+         "Caller should guarantee");
+  assert(BInstr->getMetadata(LLVMContext::MD_prof) == B &&
+         "Caller should guarantee");
+
+  const CallInst *ACall = dyn_cast<CallInst>(AInstr);
+  const CallInst *BCall = dyn_cast<CallInst>(BInstr);
+
+  // Both ACall and BCall are direct callsites.
+  if (ACall && BCall && ACall->getCalledFunction() &&
+      BCall->getCalledFunction())
+    return mergeDirectCallProfMetadata(A, B, AInstr, BInstr);
+
+  // The rest of the cases are not implemented but could be added
+  // when there are use cases.
+  return nullptr;
+}
+
 static bool isContiguous(const ConstantRange &A, const ConstantRange &B) {
   return A.getUpper() == B.getLower() || A.getLower() == B.getUpper();
 }
@@ -1475,23 +1539,52 @@ void Instruction::setMetadata(unsigned KindID, MDNode *Node) {
   Value::setMetadata(KindID, Node);
 }
 
+void Instruction::addAnnotationMetadata(SmallVector<StringRef> Annotations) {
+  SmallSetVector<StringRef, 2> AnnotationsSet(Annotations.begin(),
+                                              Annotations.end());
+  MDBuilder MDB(getContext());
+
+  auto *Existing = getMetadata(LLVMContext::MD_annotation);
+  SmallVector<Metadata *, 4> Names;
+  if (Existing) {
+    auto *Tuple = cast<MDTuple>(Existing);
+    for (auto &N : Tuple->operands()) {
+      if (isa<MDString>(N.get()))
+        continue;
+      auto *MDAnnotationTuple = cast<MDTuple>(N);
+      if (any_of(MDAnnotationTuple->operands(), [&AnnotationsSet](auto &Op) {
+            return AnnotationsSet.contains(cast<MDString>(Op)->getString());
+          }))
+        return;
+      Names.push_back(N);
+    }
+  }
+
+  SmallVector<Metadata *> MDAnnotationStrings;
+  for (StringRef Annotation : Annotations)
+    MDAnnotationStrings.push_back(MDB.createString(Annotation));
+  MDNode *InfoTuple = MDTuple::get(getContext(), MDAnnotationStrings);
+  Names.push_back(InfoTuple);
+  MDNode *MD = MDTuple::get(getContext(), Names);
+  setMetadata(LLVMContext::MD_annotation, MD);
+}
+
 void Instruction::addAnnotationMetadata(StringRef Name) {
   MDBuilder MDB(getContext());
 
   auto *Existing = getMetadata(LLVMContext::MD_annotation);
   SmallVector<Metadata *, 4> Names;
-  bool AppendName = true;
   if (Existing) {
     auto *Tuple = cast<MDTuple>(Existing);
     for (auto &N : Tuple->operands()) {
-      if (cast<MDString>(N.get())->getString() == Name)
-        AppendName = false;
+      if (isa<MDString>(N.get()) &&
+          cast<MDString>(N.get())->getString() == Name)
+        return;
       Names.push_back(N.get());
     }
   }
-  if (AppendName)
-    Names.push_back(MDB.createString(Name));
 
+  Names.push_back(MDB.createString(Name));
   MDNode *MD = MDTuple::get(getContext(), Names);
   setMetadata(LLVMContext::MD_annotation, MD);
 }

@@ -879,6 +879,8 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("BinPackArguments", Style.BinPackArguments);
     IO.mapOptional("BinPackParameters", Style.BinPackParameters);
     IO.mapOptional("BitFieldColonSpacing", Style.BitFieldColonSpacing);
+    IO.mapOptional("BracedInitializerIndentWidth",
+                   Style.BracedInitializerIndentWidth);
     IO.mapOptional("BraceWrapping", Style.BraceWrapping);
     IO.mapOptional("BreakAfterAttributes", Style.BreakAfterAttributes);
     IO.mapOptional("BreakAfterJavaFieldAnnotations",
@@ -1337,6 +1339,7 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.BitFieldColonSpacing = FormatStyle::BFCS_Both;
   LLVMStyle.BinPackArguments = true;
   LLVMStyle.BinPackParameters = true;
+  LLVMStyle.BracedInitializerIndentWidth = std::nullopt;
   LLVMStyle.BraceWrapping = {/*AfterCaseLabel=*/false,
                              /*AfterClass=*/false,
                              /*AfterControlStatement=*/FormatStyle::BWACS_Never,
@@ -3482,7 +3485,7 @@ reformat(const FormatStyle &Style, StringRef Code,
     if (Style.InsertBraces) {
       FormatStyle S = Expanded;
       S.InsertBraces = true;
-      Passes.emplace_back([&, S](const Environment &Env) {
+      Passes.emplace_back([&, S = std::move(S)](const Environment &Env) {
         return BracesInserter(Env, S).process(/*SkipAnnotation=*/true);
       });
     }
@@ -3490,7 +3493,7 @@ reformat(const FormatStyle &Style, StringRef Code,
     if (Style.RemoveBracesLLVM) {
       FormatStyle S = Expanded;
       S.RemoveBracesLLVM = true;
-      Passes.emplace_back([&, S](const Environment &Env) {
+      Passes.emplace_back([&, S = std::move(S)](const Environment &Env) {
         return BracesRemover(Env, S).process(/*SkipAnnotation=*/true);
       });
     }
@@ -3498,7 +3501,7 @@ reformat(const FormatStyle &Style, StringRef Code,
     if (Style.RemoveSemicolon) {
       FormatStyle S = Expanded;
       S.RemoveSemicolon = true;
-      Passes.emplace_back([&, S](const Environment &Env) {
+      Passes.emplace_back([&, S = std::move(S)](const Environment &Env) {
         return SemiRemover(Env, S).process(/*SkipAnnotation=*/true);
       });
     }

@@ -34,6 +34,11 @@ LIBC_INLINE uint32_t get_num_blocks_z() {
   return __builtin_amdgcn_grid_size_z() / __builtin_amdgcn_workgroup_size_z();
 }
 
+/// Returns the total number of workgruops in the grid.
+LIBC_INLINE uint64_t get_num_blocks() {
+  return get_num_blocks_x() * get_num_blocks_y() * get_num_blocks_z();
+}
+
 /// Returns the 'x' dimension of the current AMD workgroup's id.
 LIBC_INLINE uint32_t get_block_id_x() {
   return __builtin_amdgcn_workgroup_id_x();
@@ -70,6 +75,11 @@ LIBC_INLINE uint32_t get_num_threads_z() {
   return __builtin_amdgcn_workgroup_size_z();
 }
 
+/// Returns the total number of workitems in the workgroup.
+LIBC_INLINE uint64_t get_num_threads() {
+  return get_num_threads_x() * get_num_threads_y() * get_num_threads_z();
+}
+
 /// Returns the 'x' dimension id of the workitem in the current AMD workgroup.
 LIBC_INLINE uint32_t get_thread_id_x() {
   return __builtin_amdgcn_workitem_id_x();
@@ -96,7 +106,7 @@ LIBC_INLINE uint32_t get_lane_size() { return LANE_SIZE; }
 
 /// Returns the id of the thread inside of an AMD wavefront executing together.
 [[clang::convergent]] LIBC_INLINE uint32_t get_lane_id() {
-  if (LANE_SIZE == 64)
+  if constexpr (LANE_SIZE == 64)
     return __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
   else
     return __builtin_amdgcn_mbcnt_lo(~0u, 0u);
@@ -112,6 +122,16 @@ LIBC_INLINE uint32_t get_lane_size() { return LANE_SIZE; }
   return __builtin_amdgcn_readfirstlane(x);
 }
 
+[[clang::convergent]] LIBC_INLINE uint64_t ballot(uint64_t lane_mask, bool x) {
+  // the lane_mask & gives the nvptx semantics when lane_mask is a subset of
+  // the active threads
+  if constexpr (LANE_SIZE == 64) {
+    return lane_mask & __builtin_amdgcn_ballot_w64(x);
+  } else {
+    return lane_mask & __builtin_amdgcn_ballot_w32(x);
+  }
+}
+
 /// Waits for all the threads in the block to converge and issues a fence.
 [[clang::convergent]] LIBC_INLINE void sync_threads() {
   __builtin_amdgcn_s_barrier();
@@ -119,7 +139,9 @@ LIBC_INLINE uint32_t get_lane_size() { return LANE_SIZE; }
 }
 
 /// Wait for all threads in the wavefront to converge, this is a noop on AMDGPU.
-[[clang::convergent]] LIBC_INLINE void sync_lane(uint64_t) {}
+[[clang::convergent]] LIBC_INLINE void sync_lane(uint64_t) {
+  __builtin_amdgcn_wave_barrier();
+}
 
 } // namespace gpu
 } // namespace __llvm_libc

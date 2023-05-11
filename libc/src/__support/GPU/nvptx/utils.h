@@ -34,6 +34,11 @@ LIBC_INLINE uint32_t get_num_blocks_z() {
   return __nvvm_read_ptx_sreg_nctaid_z();
 }
 
+/// Returns the total number of CUDA blocks.
+LIBC_INLINE uint64_t get_num_blocks() {
+  return get_num_blocks_x() * get_num_blocks_y() * get_num_blocks_z();
+}
+
 /// Returns the 'x' dimension of the current CUDA block's id.
 LIBC_INLINE uint32_t get_block_id_x() { return __nvvm_read_ptx_sreg_ctaid_x(); }
 
@@ -62,6 +67,11 @@ LIBC_INLINE uint32_t get_num_threads_y() {
 /// Returns the number of CUDA threads in the 'z' dimension.
 LIBC_INLINE uint32_t get_num_threads_z() {
   return __nvvm_read_ptx_sreg_ntid_z();
+}
+
+/// Returns the total number of threads in the block.
+LIBC_INLINE uint64_t get_num_threads() {
+  return get_num_threads_x() * get_num_threads_y() * get_num_threads_z();
 }
 
 /// Returns the 'x' dimension id of the thread in the current CUDA block.
@@ -108,16 +118,19 @@ LIBC_INLINE uint32_t get_lane_size() { return LANE_SIZE; }
 #endif
 }
 
+[[clang::convergent]] LIBC_INLINE uint64_t ballot(uint64_t lane_mask, bool x) {
+#if __CUDA_ARCH__ >= 600
+  return __nvvm_vote_ballot_sync(lane_mask, x);
+#else
+  return lane_mask & __nvvm_vote_ballot(x);
+#endif
+}
 /// Waits for all the threads in the block to converge and issues a fence.
 [[clang::convergent]] LIBC_INLINE void sync_threads() { __syncthreads(); }
 
 /// Waits for all threads in the warp to reconverge for independent scheduling.
 [[clang::convergent]] LIBC_INLINE void sync_lane(uint64_t mask) {
-#if __CUDA_ARCH__ >= 700
   __nvvm_bar_warp_sync(mask);
-#else
-  (void)mask;
-#endif
 }
 
 } // namespace gpu

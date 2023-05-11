@@ -600,8 +600,8 @@ bool llvm::IsBlockFollowedByDeoptOrUnreachable(const BasicBlock *BB) {
   unsigned Depth = 0;
   while (BB && Depth++ < MaxDeoptOrUnreachableSuccessorCheckDepth &&
          VisitedBlocks.insert(BB).second) {
-    if (BB->getTerminatingDeoptimizeCall() ||
-        isa<UnreachableInst>(BB->getTerminator()))
+    if (isa<UnreachableInst>(BB->getTerminator()) ||
+        BB->getTerminatingDeoptimizeCall())
       return true;
     BB = BB->getUniqueSuccessor();
   }
@@ -1648,6 +1648,27 @@ void llvm::SplitBlockAndInsertForEachLane(ElementCount EC,
   for (unsigned Idx = 0; Idx < Num; ++Idx) {
     IRB.SetInsertPoint(InsertBefore);
     Func(IRB, ConstantInt::get(IndexTy, Idx));
+  }
+}
+
+void llvm::SplitBlockAndInsertForEachLane(
+    Value *EVL, Instruction *InsertBefore,
+    std::function<void(IRBuilderBase &, Value *)> Func) {
+
+  IRBuilder<> IRB(InsertBefore);
+  Type *Ty = EVL->getType();
+
+  if (!isa<ConstantInt>(EVL)) {
+    auto [BodyIP, Index] = SplitBlockAndInsertSimpleForLoop(EVL, InsertBefore);
+    IRB.SetInsertPoint(BodyIP);
+    Func(IRB, Index);
+    return;
+  }
+
+  unsigned Num = cast<ConstantInt>(EVL)->getZExtValue();
+  for (unsigned Idx = 0; Idx < Num; ++Idx) {
+    IRB.SetInsertPoint(InsertBefore);
+    Func(IRB, ConstantInt::get(Ty, Idx));
   }
 }
 

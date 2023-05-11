@@ -1488,49 +1488,71 @@ LogicalResult transform::NamedSequenceOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
-// SplitHandlesOp
+// SplitHandleOp
 //===----------------------------------------------------------------------===//
 
-void transform::SplitHandlesOp::build(OpBuilder &builder,
-                                      OperationState &result, Value target,
-                                      int64_t numResultHandles) {
+void transform::SplitHandleOp::build(OpBuilder &builder, OperationState &result,
+                                     Value target, int64_t numResultHandles) {
   result.addOperands(target);
-  result.addAttribute(SplitHandlesOp::getNumResultHandlesAttrName(result.name),
-                      builder.getI64IntegerAttr(numResultHandles));
   auto pdlOpType = pdl::OperationType::get(builder.getContext());
   result.addTypes(SmallVector<pdl::OperationType>(numResultHandles, pdlOpType));
 }
 
 DiagnosedSilenceableFailure
-transform::SplitHandlesOp::apply(transform::TransformResults &results,
-                                 transform::TransformState &state) {
-  int64_t numResultHandles =
-      getHandle() ? state.getPayloadOps(getHandle()).size() : 0;
-  int64_t expectedNumResultHandles = getNumResultHandles();
-  if (numResultHandles != expectedNumResultHandles) {
-    // Empty input handle corner case: always propagates empty handles in both
-    // suppress and propagate modes.
-    if (numResultHandles == 0)
-      return DiagnosedSilenceableFailure::success();
-    // If the input handle was not empty and the number of result handles does
-    // not match, this is a legit silenceable error.
+transform::SplitHandleOp::apply(transform::TransformResults &results,
+                                transform::TransformState &state) {
+  int64_t numPayloadOps = state.getPayloadOps(getHandle()).size();
+  auto produceNumOpsError = [&]() {
     return emitSilenceableError()
-           << getHandle() << " expected to contain " << expectedNumResultHandles
-           << " operation handles but it only contains " << numResultHandles
-           << " handles";
+           << getHandle() << " expected to contain " << this->getNumResults()
+           << " payload ops but it contains " << numPayloadOps
+           << " payload ops";
+  };
+
+  // Fail if there are more payload ops than results and no overflow result was
+  // specified.
+  if (numPayloadOps > getNumResults() && !getOverflowResult().has_value())
+    return produceNumOpsError();
+
+  // Fail if there are more results than payload ops. Unless:
+  // - "fail_on_payload_too_small" is set to "false", or
+  // - "pass_through_empty_handle" is set to "true" and there are 0 payload ops.
+  if (numPayloadOps < getNumResults() && getFailOnPayloadTooSmall() &&
+      !(numPayloadOps == 0 && getPassThroughEmptyHandle()))
+    return produceNumOpsError();
+
+  // Distribute payload ops.
+  SmallVector<SmallVector<Operation *, 1>> resultHandles(getNumResults(), {});
+  if (getOverflowResult())
+    resultHandles[*getOverflowResult()].reserve(numPayloadOps -
+                                                getNumResults());
+  for (auto &&en : llvm::enumerate(state.getPayloadOps(getHandle()))) {
+    int64_t resultNum = en.index();
+    if (resultNum >= getNumResults())
+      resultNum = *getOverflowResult();
+    resultHandles[resultNum].push_back(en.value());
   }
-  // Normal successful case.
-  for (const auto &en : llvm::enumerate(state.getPayloadOps(getHandle())))
-    results.set(getResults()[en.index()].cast<OpResult>(), en.value());
+
+  // Set transform op results.
+  for (auto &&it : llvm::enumerate(resultHandles))
+    results.set(getResult(it.index()).cast<OpResult>(), it.value());
+
   return DiagnosedSilenceableFailure::success();
 }
 
-void transform::SplitHandlesOp::getEffects(
+void transform::SplitHandleOp::getEffects(
     SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
   onlyReadsHandle(getHandle(), effects);
   producesHandle(getResults(), effects);
   // There are no effects on the Payload IR as this is only a handle
   // manipulation.
+}
+
+LogicalResult transform::SplitHandleOp::verify() {
+  if (getOverflowResult().has_value() &&
+      !(*getOverflowResult() >= 0 && *getOverflowResult() < getNumResults()))
+    return emitOpError("overflow_result is not a valid result index");
+  return success();
 }
 
 //===----------------------------------------------------------------------===//

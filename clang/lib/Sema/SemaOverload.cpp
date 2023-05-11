@@ -26,6 +26,7 @@
 #include "clang/Basic/PartialDiagnostic.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
+#include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Overload.h"
@@ -141,6 +142,7 @@ ImplicitConversionRank clang::GetConversionRank(ImplicitConversionKind Kind) {
     ICR_Conversion,
     ICR_Conversion,
     ICR_Conversion,
+    ICR_Conversion,
     ICR_OCL_Scalar_Widening,
     ICR_Complex_Real_Conversion,
     ICR_Conversion,
@@ -183,6 +185,7 @@ static const char* GetImplicitConversionName(ImplicitConversionKind Kind) {
     "Derived-to-base conversion",
     "Vector conversion",
     "SVE Vector conversion",
+    "RVV Vector conversion",
     "Vector splat",
     "Complex-real conversion",
     "Block Pointer conversion",
@@ -1294,7 +1297,7 @@ bool Sema::IsOverload(FunctionDecl *New, FunctionDecl *Old,
     // We check the return type and template parameter lists for function
     // templates first; the remaining checks follow.
     bool SameTemplateParameterList = TemplateParameterListsAreEqual(
-        NewTemplate->getTemplateParameters(),
+        NewTemplate, NewTemplate->getTemplateParameters(), OldTemplate,
         OldTemplate->getTemplateParameters(), false, TPL_TemplateMatch);
     bool SameReturnType = Context.hasSameType(Old->getDeclaredReturnType(),
                                               New->getDeclaredReturnType());
@@ -1758,6 +1761,14 @@ static bool IsVectorConversion(Sema &S, QualType FromType, QualType ToType,
     if (S.Context.areCompatibleSveTypes(FromType, ToType) ||
         S.Context.areLaxCompatibleSveTypes(FromType, ToType)) {
       ICK = ICK_SVE_Vector_Conversion;
+      return true;
+    }
+
+  if (ToType->isRVVSizelessBuiltinType() ||
+      FromType->isRVVSizelessBuiltinType())
+    if (S.Context.areCompatibleRVVTypes(FromType, ToType) ||
+        S.Context.areLaxCompatibleRVVTypes(FromType, ToType)) {
+      ICK = ICK_RVV_Vector_Conversion;
       return true;
     }
 
@@ -4327,6 +4338,20 @@ CompareStandardConversionSequences(Sema &S, SourceLocation Loc,
                  : ImplicitConversionSequence::Worse;
   }
 
+  if (SCS1.Second == ICK_RVV_Vector_Conversion &&
+      SCS2.Second == ICK_RVV_Vector_Conversion) {
+    bool SCS1IsCompatibleRVVVectorConversion =
+        S.Context.areCompatibleRVVTypes(SCS1.getFromType(), SCS1.getToType(2));
+    bool SCS2IsCompatibleRVVVectorConversion =
+        S.Context.areCompatibleRVVTypes(SCS2.getFromType(), SCS2.getToType(2));
+
+    if (SCS1IsCompatibleRVVVectorConversion !=
+        SCS2IsCompatibleRVVVectorConversion)
+      return SCS1IsCompatibleRVVVectorConversion
+                 ? ImplicitConversionSequence::Better
+                 : ImplicitConversionSequence::Worse;
+  }
+
   return ImplicitConversionSequence::Indistinguishable;
 }
 
@@ -5765,6 +5790,7 @@ static bool CheckConvertedConstantConversions(Sema &S,
   case ICK_Derived_To_Base:
   case ICK_Vector_Conversion:
   case ICK_SVE_Vector_Conversion:
+  case ICK_RVV_Vector_Conversion:
   case ICK_Vector_Splat:
   case ICK_Complex_Real:
   case ICK_Block_Pointer_Conversion:
@@ -6517,23 +6543,20 @@ void Sema::AddOverloadCandidate(
   }
 
   // Functions with internal linkage are only viable in the same module unit.
-  if (auto *MF = Function->getOwningModule()) {
-    if (getLangOpts().CPlusPlusModules && !MF->isModuleMapModule() &&
-        !isModuleUnitOfCurrentTU(MF)) {
-      /// FIXME: Currently, the semantics of linkage in clang is slightly
-      /// different from the semantics in C++ spec. In C++ spec, only names
-      /// have linkage. So that all entities of the same should share one
-      /// linkage. But in clang, different entities of the same could have
-      /// different linkage.
-      NamedDecl *ND = Function;
-      if (auto *SpecInfo = Function->getTemplateSpecializationInfo())
-        ND = SpecInfo->getTemplate();
-      
-      if (ND->getFormalLinkage() == Linkage::InternalLinkage) {
-        Candidate.Viable = false;
-        Candidate.FailureKind = ovl_fail_module_mismatched;
-        return;
-      }
+  if (getLangOpts().CPlusPlusModules && Function->isInAnotherModuleUnit()) {
+    /// FIXME: Currently, the semantics of linkage in clang is slightly
+    /// different from the semantics in C++ spec. In C++ spec, only names
+    /// have linkage. So that all entities of the same should share one
+    /// linkage. But in clang, different entities of the same could have
+    /// different linkage.
+    NamedDecl *ND = Function;
+    if (auto *SpecInfo = Function->getTemplateSpecializationInfo())
+      ND = SpecInfo->getTemplate();
+
+    if (ND->getFormalLinkage() == Linkage::InternalLinkage) {
+      Candidate.Viable = false;
+      Candidate.FailureKind = ovl_fail_module_mismatched;
+      return;
     }
   }
 
@@ -9903,7 +9926,7 @@ bool clang::isBetterOverloadCandidate(
     }
   }
 
-  // C++ [over.match.best]p1: (Changed in C++2b)
+  // C++ [over.match.best]p1: (Changed in C++23)
   //
   //   -- if F is a static member function, ICS1(F) is defined such
   //      that ICS1(F) is neither better nor worse than ICS1(G) for
@@ -15073,7 +15096,7 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
   bool IsError = false;
 
   // Initialize the implicit object parameter if needed.
-  // Since C++2b, this could also be a call to a static call operator
+  // Since C++23, this could also be a call to a static call operator
   // which we emit as a regular CallExpr.
   if (Method->isInstance()) {
     ExprResult ObjRes = PerformObjectArgumentInitialization(

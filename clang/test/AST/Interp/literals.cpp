@@ -80,6 +80,12 @@ static_assert(~255 == -256, "");
 static_assert(~INT_MIN == INT_MAX, "");
 static_assert(~INT_MAX == INT_MIN, "");
 
+static_assert(-(1 << 31), ""); // expected-error {{not an integral constant expression}} \
+                               // expected-note {{outside the range of representable values}} \
+                               // ref-error {{not an integral constant expression}} \
+                               // ref-note {{outside the range of representable values}} \
+
+
 enum E {};
 constexpr E e = static_cast<E>(0);
 static_assert(~e == -1, "");
@@ -808,4 +814,18 @@ constexpr int ignoredDecls() {
   return F{12}.a;
 }
 static_assert(ignoredDecls() == 12, "");
+
+struct A{};
+constexpr int ignoredExprs() {
+  (void)(1 / 2);
+  A a;
+  a; // expected-warning {{unused}} \
+     // ref-warning {{unused}}
+  (void)a;
+  (a); // expected-warning {{unused}} \
+       // ref-warning {{unused}}
+
+  return 0;
+}
+
 #endif

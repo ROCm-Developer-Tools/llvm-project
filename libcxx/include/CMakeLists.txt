@@ -69,6 +69,10 @@ set(files
   __algorithm/partition_point.h
   __algorithm/pop_heap.h
   __algorithm/prev_permutation.h
+  __algorithm/pstl_any_all_none_of.h
+  __algorithm/pstl_fill.h
+  __algorithm/pstl_find.h
+  __algorithm/pstl_for_each.h
   __algorithm/push_heap.h
   __algorithm/ranges_adjacent_find.h
   __algorithm/ranges_all_of.h
@@ -385,11 +389,17 @@ set(files
   __functional/unwrap_ref.h
   __functional/weak_result_type.h
   __fwd/array.h
+  __fwd/fstream.h
   __fwd/get.h
   __fwd/hash.h
+  __fwd/ios.h
+  __fwd/istream.h
   __fwd/memory_resource.h
+  __fwd/ostream.h
   __fwd/pair.h
   __fwd/span.h
+  __fwd/sstream.h
+  __fwd/streambuf.h
   __fwd/string.h
   __fwd/string_view.h
   __fwd/subrange.h
@@ -494,8 +504,38 @@ set(files
   __numeric/transform_exclusive_scan.h
   __numeric/transform_inclusive_scan.h
   __numeric/transform_reduce.h
+  __pstl/internal/algorithm_fwd.h
+  __pstl/internal/algorithm_impl.h
+  __pstl/internal/execution_defs.h
+  __pstl/internal/execution_impl.h
+  __pstl/internal/glue_algorithm_defs.h
+  __pstl/internal/glue_algorithm_impl.h
+  __pstl/internal/glue_memory_defs.h
+  __pstl/internal/glue_memory_impl.h
+  __pstl/internal/glue_numeric_defs.h
+  __pstl/internal/glue_numeric_impl.h
+  __pstl/internal/memory_impl.h
+  __pstl/internal/numeric_fwd.h
+  __pstl/internal/numeric_impl.h
+  __pstl/internal/omp/parallel_for.h
+  __pstl/internal/omp/parallel_for_each.h
+  __pstl/internal/omp/parallel_invoke.h
+  __pstl/internal/omp/parallel_merge.h
+  __pstl/internal/omp/parallel_scan.h
+  __pstl/internal/omp/parallel_stable_partial_sort.h
+  __pstl/internal/omp/parallel_stable_sort.h
+  __pstl/internal/omp/parallel_transform_reduce.h
+  __pstl/internal/omp/parallel_transform_scan.h
+  __pstl/internal/omp/util.h
+  __pstl/internal/parallel_backend.h
+  __pstl/internal/parallel_backend_omp.h
+  __pstl/internal/parallel_backend_serial.h
+  __pstl/internal/parallel_backend_tbb.h
+  __pstl/internal/parallel_backend_utils.h
+  __pstl/internal/parallel_impl.h
+  __pstl/internal/unseq_backend_simd.h
+  __pstl/internal/utils.h
   __pstl_algorithm
-  __pstl_execution
   __pstl_memory
   __pstl_numeric
   __random/bernoulli_distribution.h
@@ -540,6 +580,7 @@ set(files
   __ranges/as_rvalue_view.h
   __ranges/common_view.h
   __ranges/concepts.h
+  __ranges/container_compatible_range.h
   __ranges/copyable_box.h
   __ranges/counted.h
   __ranges/dangling.h
@@ -552,6 +593,7 @@ set(files
   __ranges/enable_borrowed_range.h
   __ranges/enable_view.h
   __ranges/filter_view.h
+  __ranges/from_range.h
   __ranges/iota_view.h
   __ranges/istream_view.h
   __ranges/join_view.h
@@ -574,6 +616,7 @@ set(files
   __ranges/views.h
   __ranges/zip_view.h
   __split_buffer
+  __std_mbstate_t.h
   __string/char_traits.h
   __string/constexpr_c_functions.h
   __string/extern_template_lists.h
@@ -586,9 +629,6 @@ set(files
   __support/musl/xlocale.h
   __support/newlib/xlocale.h
   __support/openbsd/xlocale.h
-  __support/solaris/floatingpoint.h
-  __support/solaris/wchar.h
-  __support/solaris/xlocale.h
   __support/win32/locale_win32.h
   __support/xlocale/__nop_locale_mgmt.h
   __support/xlocale/__posix_l_fallback.h
@@ -661,6 +701,7 @@ set(files
   __type_traits/is_empty.h
   __type_traits/is_enum.h
   __type_traits/is_equality_comparable.h
+  __type_traits/is_execution_policy.h
   __type_traits/is_final.h
   __type_traits/is_floating_point.h
   __type_traits/is_function.h
@@ -707,6 +748,7 @@ set(files
   __type_traits/is_trivially_copyable.h
   __type_traits/is_trivially_default_constructible.h
   __type_traits/is_trivially_destructible.h
+  __type_traits/is_trivially_lexicographically_comparable.h
   __type_traits/is_trivially_move_assignable.h
   __type_traits/is_trivially_move_constructible.h
   __type_traits/is_unbounded_array.h
@@ -761,6 +803,7 @@ set(files
   __utility/priority_tag.h
   __utility/rel_ops.h
   __utility/swap.h
+  __utility/terminate_on_exception.h
   __utility/to_underlying.h
   __utility/unreachable.h
   __variant/monostate.h
@@ -866,39 +909,6 @@ set(files
   numeric
   optional
   ostream
-  pstl/internal/algorithm_fwd.h
-  pstl/internal/algorithm_impl.h
-  pstl/internal/execution_defs.h
-  pstl/internal/execution_impl.h
-  pstl/internal/glue_algorithm_defs.h
-  pstl/internal/glue_algorithm_impl.h
-  pstl/internal/glue_execution_defs.h
-  pstl/internal/glue_memory_defs.h
-  pstl/internal/glue_memory_impl.h
-  pstl/internal/glue_numeric_defs.h
-  pstl/internal/glue_numeric_impl.h
-  pstl/internal/memory_impl.h
-  pstl/internal/numeric_fwd.h
-  pstl/internal/numeric_impl.h
-  pstl/internal/omp/parallel_for.h
-  pstl/internal/omp/parallel_for_each.h
-  pstl/internal/omp/parallel_invoke.h
-  pstl/internal/omp/parallel_merge.h
-  pstl/internal/omp/parallel_scan.h
-  pstl/internal/omp/parallel_stable_partial_sort.h
-  pstl/internal/omp/parallel_stable_sort.h
-  pstl/internal/omp/parallel_transform_reduce.h
-  pstl/internal/omp/parallel_transform_scan.h
-  pstl/internal/omp/util.h
-  pstl/internal/parallel_backend.h
-  pstl/internal/parallel_backend_omp.h
-  pstl/internal/parallel_backend_serial.h
-  pstl/internal/parallel_backend_tbb.h
-  pstl/internal/parallel_backend_utils.h
-  pstl/internal/parallel_impl.h
-  pstl/internal/pstl_config.h
-  pstl/internal/unseq_backend_simd.h
-  pstl/internal/utils.h
   queue
   random
   ranges

@@ -36,46 +36,53 @@ define void @test() sanitize_hwaddress personality ptr @__gxx_personality_v0 {
 ; CHECK-NEXT:    [[TMP13:%.*]] = or i64 [[TMP1]], 4294967295
 ; CHECK-NEXT:    [[HWASAN_SHADOW:%.*]] = add i64 [[TMP13]], 1
 ; CHECK-NEXT:    [[TMP14:%.*]] = inttoptr i64 [[HWASAN_SHADOW]] to ptr
+; CHECK-NEXT:    [[HWASAN_UAR_TAG:%.*]] = lshr i64 [[TMP4]], 56
 ; CHECK-NEXT:    [[X:%.*]] = alloca { i32, [12 x i8] }, align 16
 ; CHECK-NEXT:    [[TMP15:%.*]] = xor i64 [[TMP2]], 0
 ; CHECK-NEXT:    [[TMP16:%.*]] = ptrtoint ptr [[X]] to i64
-; CHECK-NEXT:    [[TMP17:%.*]] = shl i64 [[TMP15]], 56
-; CHECK-NEXT:    [[TMP18:%.*]] = or i64 [[TMP16]], [[TMP17]]
-; CHECK-NEXT:    [[X_HWASAN:%.*]] = inttoptr i64 [[TMP18]] to ptr
+; CHECK-NEXT:    [[TMP17:%.*]] = and i64 [[TMP16]], 72057594037927935
+; CHECK-NEXT:    [[TMP18:%.*]] = shl i64 [[TMP15]], 56
+; CHECK-NEXT:    [[TMP19:%.*]] = or i64 [[TMP17]], [[TMP18]]
+; CHECK-NEXT:    [[X_HWASAN:%.*]] = inttoptr i64 [[TMP19]] to ptr
 ; CHECK-NEXT:    [[EXN_SLOT:%.*]] = alloca ptr, align 8
 ; CHECK-NEXT:    [[EHSELECTOR_SLOT:%.*]] = alloca i32, align 4
 ; CHECK-NEXT:    call void @llvm.lifetime.start.p0(i64 16, ptr [[X]])
-; CHECK-NEXT:    [[TMP19:%.*]] = trunc i64 [[TMP15]] to i8
-; CHECK-NEXT:    [[TMP20:%.*]] = ptrtoint ptr [[X]] to i64
-; CHECK-NEXT:    [[TMP21:%.*]] = lshr i64 [[TMP20]], 4
-; CHECK-NEXT:    [[TMP22:%.*]] = getelementptr i8, ptr [[TMP14]], i64 [[TMP21]]
-; CHECK-NEXT:    [[TMP23:%.*]] = getelementptr i8, ptr [[TMP22]], i32 0
-; CHECK-NEXT:    store i8 4, ptr [[TMP23]], align 1
-; CHECK-NEXT:    [[TMP24:%.*]] = getelementptr i8, ptr [[X]], i32 15
-; CHECK-NEXT:    store i8 [[TMP19]], ptr [[TMP24]], align 1
+; CHECK-NEXT:    [[TMP20:%.*]] = trunc i64 [[TMP15]] to i8
+; CHECK-NEXT:    [[TMP21:%.*]] = ptrtoint ptr [[X]] to i64
+; CHECK-NEXT:    [[TMP22:%.*]] = and i64 [[TMP21]], 72057594037927935
+; CHECK-NEXT:    [[TMP23:%.*]] = lshr i64 [[TMP22]], 4
+; CHECK-NEXT:    [[TMP24:%.*]] = getelementptr i8, ptr [[TMP14]], i64 [[TMP23]]
+; CHECK-NEXT:    [[TMP25:%.*]] = getelementptr i8, ptr [[TMP24]], i32 0
+; CHECK-NEXT:    store i8 4, ptr [[TMP25]], align 1
+; CHECK-NEXT:    [[TMP26:%.*]] = getelementptr i8, ptr [[X]], i32 15
+; CHECK-NEXT:    store i8 [[TMP20]], ptr [[TMP26]], align 1
 ; CHECK-NEXT:    invoke void @mayFail(ptr [[X_HWASAN]])
 ; CHECK-NEXT:    to label [[INVOKE_CONT:%.*]] unwind label [[LPAD:%.*]]
 ; CHECK:       invoke.cont:
-; CHECK-NEXT:    [[TMP25:%.*]] = ptrtoint ptr [[X]] to i64
-; CHECK-NEXT:    [[TMP26:%.*]] = lshr i64 [[TMP25]], 4
-; CHECK-NEXT:    [[TMP27:%.*]] = getelementptr i8, ptr [[TMP14]], i64 [[TMP26]]
-; CHECK-NEXT:    call void @llvm.memset.p0.i64(ptr align 1 [[TMP27]], i8 0, i64 1, i1 false)
+; CHECK-NEXT:    [[TMP27:%.*]] = trunc i64 [[HWASAN_UAR_TAG]] to i8
+; CHECK-NEXT:    [[TMP28:%.*]] = ptrtoint ptr [[X]] to i64
+; CHECK-NEXT:    [[TMP29:%.*]] = and i64 [[TMP28]], 72057594037927935
+; CHECK-NEXT:    [[TMP30:%.*]] = lshr i64 [[TMP29]], 4
+; CHECK-NEXT:    [[TMP31:%.*]] = getelementptr i8, ptr [[TMP14]], i64 [[TMP30]]
+; CHECK-NEXT:    call void @llvm.memset.p0.i64(ptr align 1 [[TMP31]], i8 [[TMP27]], i64 1, i1 false)
 ; CHECK-NEXT:    call void @llvm.lifetime.end.p0(i64 16, ptr [[X]])
 ; CHECK-NEXT:    ret void
 ; CHECK:       lpad:
-; CHECK-NEXT:    [[TMP28:%.*]] = landingpad { ptr, i32 }
+; CHECK-NEXT:    [[TMP32:%.*]] = landingpad { ptr, i32 }
 ; CHECK-NEXT:    cleanup
-; CHECK-NEXT:    [[TMP29:%.*]] = extractvalue { ptr, i32 } [[TMP28]], 0
+; CHECK-NEXT:    [[TMP33:%.*]] = extractvalue { ptr, i32 } [[TMP32]], 0
 ; CHECK-NEXT:    call void @llvm.hwasan.check.memaccess.shortgranules(ptr [[TMP14]], ptr [[EXN_SLOT]], i32 19)
-; CHECK-NEXT:    store ptr [[TMP29]], ptr [[EXN_SLOT]], align 8
-; CHECK-NEXT:    [[TMP30:%.*]] = extractvalue { ptr, i32 } [[TMP28]], 1
+; CHECK-NEXT:    store ptr [[TMP33]], ptr [[EXN_SLOT]], align 8
+; CHECK-NEXT:    [[TMP34:%.*]] = extractvalue { ptr, i32 } [[TMP32]], 1
 ; CHECK-NEXT:    call void @llvm.hwasan.check.memaccess.shortgranules(ptr [[TMP14]], ptr [[EHSELECTOR_SLOT]], i32 18)
-; CHECK-NEXT:    store i32 [[TMP30]], ptr [[EHSELECTOR_SLOT]], align 4
+; CHECK-NEXT:    store i32 [[TMP34]], ptr [[EHSELECTOR_SLOT]], align 4
 ; CHECK-NEXT:    call void @onExcept(ptr [[X_HWASAN]])
-; CHECK-NEXT:    [[TMP31:%.*]] = ptrtoint ptr [[X]] to i64
-; CHECK-NEXT:    [[TMP32:%.*]] = lshr i64 [[TMP31]], 4
-; CHECK-NEXT:    [[TMP33:%.*]] = getelementptr i8, ptr [[TMP14]], i64 [[TMP32]]
-; CHECK-NEXT:    call void @llvm.memset.p0.i64(ptr align 1 [[TMP33]], i8 0, i64 1, i1 false)
+; CHECK-NEXT:    [[TMP35:%.*]] = trunc i64 [[HWASAN_UAR_TAG]] to i8
+; CHECK-NEXT:    [[TMP36:%.*]] = ptrtoint ptr [[X]] to i64
+; CHECK-NEXT:    [[TMP37:%.*]] = and i64 [[TMP36]], 72057594037927935
+; CHECK-NEXT:    [[TMP38:%.*]] = lshr i64 [[TMP37]], 4
+; CHECK-NEXT:    [[TMP39:%.*]] = getelementptr i8, ptr [[TMP14]], i64 [[TMP38]]
+; CHECK-NEXT:    call void @llvm.memset.p0.i64(ptr align 1 [[TMP39]], i8 [[TMP35]], i64 1, i1 false)
 ; CHECK-NEXT:    call void @llvm.lifetime.end.p0(i64 16, ptr [[X]])
 ; CHECK-NEXT:    br label [[EH_RESUME:%.*]]
 ; CHECK:       eh.resume:

@@ -346,15 +346,8 @@ namespace {
 
       if (Fixup.getKind() >= FirstLiteralRelocationKind)
         return;
-      MCFixupKindInfo Info = getFixupKindInfo(Fixup.getKind());
       Value = adjustFixupValue(Fixup.getKind(), Value);
       if (!Value) return;           // Doesn't change encoding.
-
-      // Shift the value into position.
-      if (Endian == support::little)
-        Value <<= Info.TargetOffset;
-      else
-        Value <<= 32 - Info.TargetOffset - Info.TargetSize;
 
       unsigned NumBytes = getFixupKindNumBytes(Fixup.getKind());
       unsigned Offset = Fixup.getOffset();

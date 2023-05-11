@@ -18,6 +18,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/CodeGen/LowLevelType.h"
 #include "llvm/CodeGen/MIRYamlMapping.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -47,7 +48,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/LowLevelTypeImpl.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -491,17 +491,17 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
 
   // Print the debug variable information.
   for (const MachineFunction::VariableDbgInfo &DebugVar :
-       MF.getVariableDbgInfo()) {
-    assert(DebugVar.Slot >= MFI.getObjectIndexBegin() &&
-           DebugVar.Slot < MFI.getObjectIndexEnd() &&
+       MF.getInStackSlotVariableDbgInfo()) {
+    int Idx = DebugVar.getStackSlot();
+    assert(Idx >= MFI.getObjectIndexBegin() && Idx < MFI.getObjectIndexEnd() &&
            "Invalid stack object index");
-    if (DebugVar.Slot < 0) { // Negative index means fixed objects.
+    if (Idx < 0) { // Negative index means fixed objects.
       auto &Object =
-          YMF.FixedStackObjects[FixedStackObjectsIdx[DebugVar.Slot +
+          YMF.FixedStackObjects[FixedStackObjectsIdx[Idx +
                                                      MFI.getNumFixedObjects()]];
       printStackObjectDbgInfo(DebugVar, Object, MST);
     } else {
-      auto &Object = YMF.StackObjects[StackObjectsIdx[DebugVar.Slot]];
+      auto &Object = YMF.StackObjects[StackObjectsIdx[Idx]];
       printStackObjectDbgInfo(DebugVar, Object, MST);
     }
   }

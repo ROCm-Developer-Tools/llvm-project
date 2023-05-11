@@ -262,8 +262,15 @@ static bool isCompatibleReplacement(const Instruction *I, const Use &Operand,
   case Instruction::Call:
   case Instruction::Invoke:
   case Instruction::CallBr: {
-    const CallBase *II = cast<CallBase>(I);
-    const Function *Callee = II->getCalledFunction();
+    const Function *Callee = cast<CallBase>(I)->getCalledFunction();
+    // If it's an indirect call, give up.
+    if (!Callee)
+      return false;
+    // If callee is not an intrinsic, operand 0 is the function to be called.
+    // Since we cannot assume that the replacement is a function pointer,
+    // we give up.
+    if (!Callee->getIntrinsicID() && OperandNo == 0)
+      return false;
     return !Callee->hasParamAttribute(OperandNo, Attribute::ImmArg);
   }
   default:
@@ -309,7 +316,7 @@ Instruction *RandomIRBuilder::connectToSink(BasicBlock &BB,
       std::shuffle(Dominators.begin(), Dominators.end(), Rand);
       for (BasicBlock *Dom : Dominators) {
         for (Instruction &I : *Dom) {
-          if (PointerType *PtrTy = dyn_cast<PointerType>(I.getType()))
+          if (isa<PointerType>(I.getType()))
             return new StoreInst(V, &I, Insts.back());
         }
       }

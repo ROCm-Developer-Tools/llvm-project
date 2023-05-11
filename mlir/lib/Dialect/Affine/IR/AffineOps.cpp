@@ -20,6 +20,7 @@
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 #include <numeric>
@@ -701,12 +702,12 @@ static std::optional<int64_t> getUpperBound(Value iv) {
 
 /// Get a lower or upper (depending on `isUpper`) bound for `expr` while using
 /// the constant lower and upper bounds for its inputs provided in
-/// `constLowerBounds` and `constUpperBounds`. Return None if such a bound can't
-/// be computed. This method only handles simple sum of product expressions
-/// (w.r.t constant coefficients) so as to not depend on anything heavyweight in
-/// `Analysis`. Expressions of the form: c0*d0 + c1*d1 + c2*s0 + ... + c_n are
-/// handled. Expressions involving floordiv, ceildiv, mod or semi-affine ones
-/// will lead a none being returned.
+/// `constLowerBounds` and `constUpperBounds`. Return std::nullopt if such a
+/// bound can't be computed. This method only handles simple sum of product
+/// expressions (w.r.t constant coefficients) so as to not depend on anything
+/// heavyweight in `Analysis`. Expressions of the form: c0*d0 + c1*d1 + c2*s0 +
+/// ... + c_n are handled. Expressions involving floordiv, ceildiv, mod or
+/// semi-affine ones will lead std::nullopt being returned.
 static std::optional<int64_t>
 getBoundForExpr(AffineExpr expr, unsigned numDims, unsigned numSymbols,
                 ArrayRef<std::optional<int64_t>> constLowerBounds,
@@ -932,6 +933,118 @@ static void simplifyExprAndOperands(AffineExpr &expr, unsigned numDims,
        binExpr.getKind() == AffineExprKind::Mod)) {
     expr = getAffineConstantExpr(0, expr.getContext());
   }
+}
+
+/// Simplify the expressions in `map` while making use of lower or upper bounds
+/// of its operands. If `isMax` is true, the map is to be treated as a max of
+/// its result expressions, and min otherwise. Eg: min (d0, d1) -> (8, 4 * d0 +
+/// d1) can be simplified to (8) if the operands are respectively lower bounded
+/// by 2 and 0 (the second expression can't be lower than 8).
+static void simplifyMinOrMaxExprWithOperands(AffineMap &map,
+                                             ArrayRef<Value> operands,
+                                             bool isMax) {
+  // Can't simplify.
+  if (operands.empty())
+    return;
+
+  // Get the upper or lower bound on an affine.for op IV using its range.
+  // Get the constant lower or upper bounds on the operands.
+  SmallVector<std::optional<int64_t>> constLowerBounds, constUpperBounds;
+  constLowerBounds.reserve(operands.size());
+  constUpperBounds.reserve(operands.size());
+  for (Value operand : operands) {
+    constLowerBounds.push_back(getLowerBound(operand));
+    constUpperBounds.push_back(getUpperBound(operand));
+  }
+
+  // We will compute the lower and upper bounds on each of the expressions
+  // Then, we will check (depending on max or min) as to whether a specific
+  // bound is redundant by checking if its highest (in case of max) and its
+  // lowest (in the case of min) value is already lower than (or higher than)
+  // the lower bound (or upper bound in the case of min) of another bound.
+  SmallVector<std::optional<int64_t>, 4> lowerBounds, upperBounds;
+  lowerBounds.reserve(map.getNumResults());
+  upperBounds.reserve(map.getNumResults());
+  for (AffineExpr e : map.getResults()) {
+    if (auto constExpr = e.dyn_cast<AffineConstantExpr>()) {
+      lowerBounds.push_back(constExpr.getValue());
+      upperBounds.push_back(constExpr.getValue());
+    } else {
+      lowerBounds.push_back(getBoundForExpr(e, map.getNumDims(),
+                                            map.getNumSymbols(),
+                                            constLowerBounds, constUpperBounds,
+                                            /*isUpper=*/false));
+      upperBounds.push_back(getBoundForExpr(e, map.getNumDims(),
+                                            map.getNumSymbols(),
+                                            constLowerBounds, constUpperBounds,
+                                            /*isUpper=*/true));
+    }
+  }
+
+  // Collect expressions that are not redundant.
+  SmallVector<AffineExpr, 4> irredundantExprs;
+  for (auto exprEn : llvm::enumerate(map.getResults())) {
+    AffineExpr e = exprEn.value();
+    unsigned i = exprEn.index();
+    // Some expressions can be turned into constants.
+    if (lowerBounds[i] && upperBounds[i] && *lowerBounds[i] == *upperBounds[i])
+      e = getAffineConstantExpr(*lowerBounds[i], e.getContext());
+
+    // Check if the expression is redundant.
+    if (isMax) {
+      if (!upperBounds[i]) {
+        irredundantExprs.push_back(e);
+        continue;
+      }
+      // If there exists another expression such that its lower bound is greater
+      // than this expression's upper bound, it's redundant.
+      if (!llvm::any_of(llvm::enumerate(lowerBounds), [&](const auto &en) {
+            auto otherLowerBound = en.value();
+            unsigned pos = en.index();
+            if (pos == i || !otherLowerBound)
+              return false;
+            if (*otherLowerBound > *upperBounds[i])
+              return true;
+            if (*otherLowerBound < *upperBounds[i])
+              return false;
+            // Equality case. When both expressions are considered redundant, we
+            // don't want to get both of them. We keep the one that appears
+            // first.
+            if (upperBounds[pos] && lowerBounds[i] &&
+                lowerBounds[i] == upperBounds[i] &&
+                otherLowerBound == *upperBounds[pos] && i < pos)
+              return false;
+            return true;
+          }))
+        irredundantExprs.push_back(e);
+    } else {
+      if (!lowerBounds[i]) {
+        irredundantExprs.push_back(e);
+        continue;
+      }
+      // Likewise for the `min` case. Use the complement of the condition above.
+      if (!llvm::any_of(llvm::enumerate(upperBounds), [&](const auto &en) {
+            auto otherUpperBound = en.value();
+            unsigned pos = en.index();
+            if (pos == i || !otherUpperBound)
+              return false;
+            if (*otherUpperBound < *lowerBounds[i])
+              return true;
+            if (*otherUpperBound > *lowerBounds[i])
+              return false;
+            if (lowerBounds[pos] && upperBounds[i] &&
+                lowerBounds[i] == upperBounds[i] &&
+                otherUpperBound == lowerBounds[pos] && i < pos)
+              return false;
+            return true;
+          }))
+        irredundantExprs.push_back(e);
+    }
+  }
+
+  // Create the map without the redundant expressions.
+  map = AffineMap::get(map.getNumDims(), map.getNumSymbols(), irredundantExprs,
+                       map.getContext());
 }
 
 /// Simplify the map while exploiting information on the values in `operands`.
@@ -1248,11 +1361,11 @@ SmallVector<OpFoldResult>
 mlir::affine::makeComposedFoldedMultiResultAffineApply(
     OpBuilder &b, Location loc, AffineMap map,
     ArrayRef<OpFoldResult> operands) {
-  return llvm::to_vector(llvm::map_range(
-      llvm::seq<unsigned>(0, map.getNumResults()), [&](unsigned i) {
-        return makeComposedFoldedAffineApply(b, loc, map.getSubMap({i}),
-                                             operands);
-      }));
+  return llvm::map_to_vector(llvm::seq<unsigned>(0, map.getNumResults()),
+                             [&](unsigned i) {
+                               return makeComposedFoldedAffineApply(
+                                   b, loc, map.getSubMap({i}), operands);
+                             });
 }
 
 Value mlir::affine::makeComposedAffineMin(OpBuilder &b, Location loc,
@@ -2217,6 +2330,8 @@ static LogicalResult canonicalizeLoopBounds(AffineForOp forOp) {
 
   composeAffineMapAndOperands(&lbMap, &lbOperands);
   canonicalizeMapAndOperands(&lbMap, &lbOperands);
+  simplifyMinOrMaxExprWithOperands(lbMap, lbOperands, /*isMax=*/true);
+  simplifyMinOrMaxExprWithOperands(ubMap, ubOperands, /*isMax=*/false);
   lbMap = removeDuplicateExprs(lbMap);
 
   composeAffineMapAndOperands(&ubMap, &ubOperands);
@@ -4478,13 +4593,13 @@ void AffineDelinearizeIndexOp::build(OpBuilder &builder, OperationState &result,
   result.addTypes(SmallVector<Type>(basis.size(), builder.getIndexType()));
   result.addOperands(linearIndex);
   SmallVector<Value> basisValues =
-      llvm::to_vector(llvm::map_range(basis, [&](OpFoldResult ofr) -> Value {
+      llvm::map_to_vector(basis, [&](OpFoldResult ofr) -> Value {
         std::optional<int64_t> staticDim = getConstantIntValue(ofr);
         if (staticDim.has_value())
           return builder.create<arith::ConstantIndexOp>(result.location,
                                                         *staticDim);
         return ofr.dyn_cast<Value>();
-      }));
+      });
   result.addOperands(basisValues);
 }
 
