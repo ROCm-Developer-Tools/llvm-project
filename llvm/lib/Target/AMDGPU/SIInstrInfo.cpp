@@ -578,9 +578,12 @@ static void indirectCopyToAGPR(const SIInstrInfo &TII,
   if (!RegsOverlap) {
     for (auto Def = MI, E = MBB.begin(); Def != E; ) {
       --Def;
-      if (!Def->definesRegister(SrcReg, &RI))
+
+      if (!Def->modifiesRegister(SrcReg, &RI))
         continue;
-      if (Def->getOpcode() != AMDGPU::V_ACCVGPR_WRITE_B32_e64)
+
+      if (Def->getOpcode() != AMDGPU::V_ACCVGPR_WRITE_B32_e64 ||
+          Def->getOperand(0).getReg() != SrcReg)
         break;
 
       MachineOperand &DefOp = Def->getOperand(1);
@@ -615,8 +618,8 @@ static void indirectCopyToAGPR(const SIInstrInfo &TII,
     }
   }
 
-  RS.enterBasicBlock(MBB);
-  RS.forward(MI);
+  RS.enterBasicBlockEnd(MBB);
+  RS.backward(MI);
 
   // Ideally we want to have three registers for a long reg_sequence copy
   // to hide 2 waitstates between v_mov_b32 and accvgpr_write.

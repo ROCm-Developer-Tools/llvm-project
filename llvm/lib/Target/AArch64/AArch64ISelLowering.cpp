@@ -580,6 +580,8 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::MULHS, MVT::i32, Expand);
 
   // AArch64 doesn't have {U|S}MUL_LOHI.
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);
   setOperationAction(ISD::SMUL_LOHI, MVT::i64, Expand);
 
@@ -714,7 +716,7 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::FROUND,      MVT::v4f16, Expand);
     setOperationAction(ISD::FROUNDEVEN,  MVT::v4f16, Expand);
     setOperationAction(ISD::FMA,         MVT::v4f16, Expand);
-    setOperationAction(ISD::SETCC,       MVT::v4f16, Expand);
+    setOperationAction(ISD::SETCC,       MVT::v4f16, Custom);
     setOperationAction(ISD::BR_CC,       MVT::v4f16, Expand);
     setOperationAction(ISD::SELECT,      MVT::v4f16, Expand);
     setOperationAction(ISD::SELECT_CC,   MVT::v4f16, Expand);
@@ -1051,7 +1053,7 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
     // FIXME: v1f64 shouldn't be legal if we can avoid it, because it leads to
     // silliness like this:
     for (auto Op :
-         {ISD::SELECT,         ISD::SELECT_CC,      ISD::SETCC,
+         {ISD::SELECT,         ISD::SELECT_CC,
           ISD::BR_CC,          ISD::FADD,           ISD::FSUB,
           ISD::FMUL,           ISD::FDIV,           ISD::FMA,
           ISD::FNEG,           ISD::FABS,           ISD::FCEIL,
@@ -1413,6 +1415,7 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::MLOAD, VT, Custom);
       setOperationAction(ISD::SPLAT_VECTOR, VT, Legal);
       setOperationAction(ISD::SELECT, VT, Custom);
+      setOperationAction(ISD::SETCC, VT, Custom);
       setOperationAction(ISD::FADD, VT, Custom);
       setOperationAction(ISD::FCOPYSIGN, VT, Custom);
       setOperationAction(ISD::FDIV, VT, Custom);
@@ -2061,7 +2064,7 @@ void AArch64TargetLowering::computeKnownBitsForTargetNode(
     KnownBits Known2;
     Known = DAG.computeKnownBits(Op->getOperand(0), Depth + 1);
     Known2 = DAG.computeKnownBits(Op->getOperand(1), Depth + 1);
-    Known = KnownBits::commonBits(Known, Known2);
+    Known = Known.intersectWith(Known2);
     break;
   }
   case AArch64ISD::BICi: {
@@ -17880,8 +17883,8 @@ static SDValue performNegCSelCombine(SDNode *N, SelectionDAG &DAG) {
 // instruction can still be used profitably. This function puts the DAG into a
 // more appropriate form for those patterns to trigger.
 static SDValue performAddSubLongCombine(SDNode *N,
-                                        TargetLowering::DAGCombinerInfo &DCI,
-                                        SelectionDAG &DAG) {
+                                        TargetLowering::DAGCombinerInfo &DCI) {
+  SelectionDAG &DAG = DCI.DAG;
   if (DCI.isBeforeLegalizeOps())
     return SDValue();
 
@@ -18215,9 +18218,9 @@ static SDValue performSubAddMULCombine(SDNode *N, SelectionDAG &DAG) {
 // for vectors of type <1 x i64> and <2 x i64> when SVE is available.
 // It will transform the add/sub to a scalable version, so that we can
 // make use of SVE's MLA/MLS that will be generated for that pattern
-static SDValue performMulAddSubCombine(SDNode *N,
-                                       TargetLowering::DAGCombinerInfo &DCI,
-                                       SelectionDAG &DAG) {
+static SDValue
+performSVEMulAddSubCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI) {
+  SelectionDAG &DAG = DCI.DAG;
   // Make sure that the types are legal
   if (!DCI.isAfterLegalizeDAG())
     return SDValue();
@@ -18263,28 +18266,64 @@ static SDValue performMulAddSubCombine(SDNode *N,
   return SDValue();
 }
 
+// Given a i64 add from a v1i64 extract, convert to a neon v1i64 add. This can
+// help, for example, to produce ssra from sshr+add.
+static SDValue performAddSubIntoVectorOp(SDNode *N, SelectionDAG &DAG) {
+  EVT VT = N->getValueType(0);
+  if (VT != MVT::i64)
+    return SDValue();
+  SDValue Op0 = N->getOperand(0);
+  SDValue Op1 = N->getOperand(1);
+
+  // At least one of the operands should be an extract, and the other should be
+  // something that is easy to convert to v1i64 type (in this case a load).
+  if (Op0.getOpcode() != ISD::EXTRACT_VECTOR_ELT &&
+      Op0.getOpcode() != ISD::LOAD)
+    return SDValue();
+  if (Op1.getOpcode() != ISD::EXTRACT_VECTOR_ELT &&
+      Op1.getOpcode() != ISD::LOAD)
+    return SDValue();
+
+  SDLoc DL(N);
+  if (Op0.getOpcode() == ISD::EXTRACT_VECTOR_ELT &&
+      Op0.getOperand(0).getValueType() == MVT::v1i64) {
+    Op0 = Op0.getOperand(0);
+    Op1 = DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, MVT::v1i64, Op1);
+  } else if (Op1.getOpcode() == ISD::EXTRACT_VECTOR_ELT &&
+             Op1.getOperand(0).getValueType() == MVT::v1i64) {
+    Op0 = DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, MVT::v1i64, Op0);
+    Op1 = Op1.getOperand(0);
+  } else
+    return SDValue();
+
+  return DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, MVT::i64,
+                     DAG.getNode(N->getOpcode(), DL, MVT::v1i64, Op0, Op1),
+                     DAG.getConstant(0, DL, MVT::i64));
+}
+
 static SDValue performAddSubCombine(SDNode *N,
-                                    TargetLowering::DAGCombinerInfo &DCI,
-                                    SelectionDAG &DAG) {
-  if (SDValue Val = performMulAddSubCombine(N, DCI, DAG))
-    return Val;
+                                    TargetLowering::DAGCombinerInfo &DCI) {
   // Try to change sum of two reductions.
-  if (SDValue Val = performAddUADDVCombine(N, DAG))
+  if (SDValue Val = performAddUADDVCombine(N, DCI.DAG))
     return Val;
-  if (SDValue Val = performAddDotCombine(N, DAG))
+  if (SDValue Val = performAddDotCombine(N, DCI.DAG))
     return Val;
-  if (SDValue Val = performAddCSelIntoCSinc(N, DAG))
+  if (SDValue Val = performAddCSelIntoCSinc(N, DCI.DAG))
     return Val;
-  if (SDValue Val = performNegCSelCombine(N, DAG))
+  if (SDValue Val = performNegCSelCombine(N, DCI.DAG))
     return Val;
-  if (SDValue Val = performVectorAddSubExtCombine(N, DAG))
+  if (SDValue Val = performVectorAddSubExtCombine(N, DCI.DAG))
     return Val;
-  if (SDValue Val = performAddCombineForShiftedOperands(N, DAG))
+  if (SDValue Val = performAddCombineForShiftedOperands(N, DCI.DAG))
     return Val;
-  if (SDValue Val = performSubAddMULCombine(N, DAG))
+  if (SDValue Val = performSubAddMULCombine(N, DCI.DAG))
+    return Val;
+  if (SDValue Val = performSVEMulAddSubCombine(N, DCI))
+    return Val;
+  if (SDValue Val = performAddSubIntoVectorOp(N, DCI.DAG))
     return Val;
 
-  return performAddSubLongCombine(N, DCI, DAG);
+  return performAddSubLongCombine(N, DCI);
 }
 
 // Massage DAGs which we can use the high-half "long" operations on into
@@ -18381,14 +18420,28 @@ static SDValue tryCombineShiftImm(unsigned IID, SDNode *N, SelectionDAG &DAG) {
     break;
   }
 
+  EVT VT = N->getValueType(0);
+  SDValue Op = N->getOperand(1);
+  SDLoc dl(N);
+  if (VT == MVT::i64) {
+    Op = DAG.getNode(ISD::SCALAR_TO_VECTOR, dl, MVT::v1i64, Op);
+    VT = MVT::v1i64;
+  }
+
   if (IsRightShift && ShiftAmount <= -1 && ShiftAmount >= -(int)ElemBits) {
-    SDLoc dl(N);
-    return DAG.getNode(Opcode, dl, N->getValueType(0), N->getOperand(1),
-                       DAG.getConstant(-ShiftAmount, dl, MVT::i32));
+    Op = DAG.getNode(Opcode, dl, VT, Op,
+                     DAG.getConstant(-ShiftAmount, dl, MVT::i32));
+    if (N->getValueType(0) == MVT::i64)
+      Op = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, MVT::i64, Op,
+                       DAG.getConstant(0, dl, MVT::i64));
+    return Op;
   } else if (!IsRightShift && ShiftAmount >= 0 && ShiftAmount < ElemBits) {
-    SDLoc dl(N);
-    return DAG.getNode(Opcode, dl, N->getValueType(0), N->getOperand(1),
-                       DAG.getConstant(ShiftAmount, dl, MVT::i32));
+    Op = DAG.getNode(Opcode, dl, VT, Op,
+                     DAG.getConstant(ShiftAmount, dl, MVT::i32));
+    if (N->getValueType(0) == MVT::i64)
+      Op = DAG.getNode(ISD::EXTRACT_VECTOR_ELT, dl, MVT::i64, Op,
+                       DAG.getConstant(0, dl, MVT::i64));
+    return Op;
   }
 
   return SDValue();
@@ -22295,7 +22348,7 @@ SDValue AArch64TargetLowering::PerformDAGCombine(SDNode *N,
     return performVecReduceBitwiseCombine(N, DCI, DAG);
   case ISD::ADD:
   case ISD::SUB:
-    return performAddSubCombine(N, DCI, DAG);
+    return performAddSubCombine(N, DCI);
   case ISD::BUILD_VECTOR:
     return performBuildVectorCombine(N, DCI, DAG);
   case ISD::TRUNCATE:

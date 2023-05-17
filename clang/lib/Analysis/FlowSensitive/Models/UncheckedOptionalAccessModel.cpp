@@ -234,7 +234,7 @@ auto isComparisonOperatorCall(L lhs_arg_matcher, R rhs_arg_matcher) {
       hasArgument(1, rhs_arg_matcher));
 }
 
-// Ensures that `Expr` is mapped to a `BoolValue` and returns it.
+/// Ensures that `Expr` is mapped to a `BoolValue` and returns it.
 BoolValue &forceBoolValue(Environment &Env, const Expr &Expr) {
   auto *Value = cast_or_null<BoolValue>(Env.getValue(Expr, SkipPast::None));
   if (Value != nullptr)
@@ -356,7 +356,7 @@ void initializeOptionalReference(const Expr *OptionalExpr,
 }
 
 /// Returns true if and only if `OptionalVal` is initialized and known to be
-/// empty in `Env.
+/// empty in `Env`.
 bool isEmptyOptional(const Value &OptionalVal, const Environment &Env) {
   auto *HasValueVal =
       cast_or_null<BoolValue>(OptionalVal.getProperty("has_value"));
@@ -365,17 +365,33 @@ bool isEmptyOptional(const Value &OptionalVal, const Environment &Env) {
 }
 
 /// Returns true if and only if `OptionalVal` is initialized and known to be
-/// non-empty in `Env.
+/// non-empty in `Env`.
 bool isNonEmptyOptional(const Value &OptionalVal, const Environment &Env) {
   auto *HasValueVal =
       cast_or_null<BoolValue>(OptionalVal.getProperty("has_value"));
   return HasValueVal != nullptr && Env.flowConditionImplies(*HasValueVal);
 }
 
+StorageLocation *maybeSkipPointer(StorageLocation *Loc,
+                                  const Environment &Env) {
+  if (Loc == nullptr)
+    return nullptr;
+  if (auto *Val = dyn_cast_or_null<PointerValue>(Env.getValue(*Loc)))
+    return &Val->getPointeeLoc();
+  return Loc;
+}
+
+Value *getValueBehindPossiblePointer(const Expr &E, const Environment &Env) {
+  Value *Val = Env.getValue(E, SkipPast::Reference);
+  if (auto *PointerVal = dyn_cast_or_null<PointerValue>(Val))
+    return Env.getValue(PointerVal->getPointeeLoc());
+  return Val;
+}
+
 void transferUnwrapCall(const Expr *UnwrapExpr, const Expr *ObjectExpr,
                         LatticeTransferState &State) {
   if (auto *OptionalVal =
-          State.Env.getValue(*ObjectExpr, SkipPast::ReferenceThenPointer)) {
+          getValueBehindPossiblePointer(*ObjectExpr, State.Env)) {
     if (State.Env.getStorageLocation(*UnwrapExpr, SkipPast::None) == nullptr)
       if (auto *Loc = maybeInitializeOptionalValueMember(
               UnwrapExpr->getType(), *OptionalVal, State.Env))
@@ -396,8 +412,8 @@ void transferOptionalHasValueCall(const CXXMemberCallExpr *CallExpr,
                                   const MatchFinder::MatchResult &,
                                   LatticeTransferState &State) {
   if (auto *HasValueVal = getHasValue(
-          State.Env, State.Env.getValue(*CallExpr->getImplicitObjectArgument(),
-                                        SkipPast::ReferenceThenPointer))) {
+          State.Env, getValueBehindPossiblePointer(
+                         *CallExpr->getImplicitObjectArgument(), State.Env))) {
     auto &CallExprLoc = State.Env.createStorageLocation(*CallExpr);
     State.Env.setValue(CallExprLoc, *HasValueVal);
     State.Env.setStorageLocation(*CallExpr, CallExprLoc);
@@ -419,8 +435,7 @@ void transferValueOrImpl(const clang::Expr *ValueOrPredExpr,
           ->getImplicitObjectArgument();
 
   auto *HasValueVal = getHasValue(
-      State.Env,
-      State.Env.getValue(*ObjectArgumentExpr, SkipPast::ReferenceThenPointer));
+      State.Env, getValueBehindPossiblePointer(*ObjectArgumentExpr, State.Env));
   if (HasValueVal == nullptr)
     return;
 
@@ -472,8 +487,8 @@ void transferCallReturningOptional(const CallExpr *E,
 
 void assignOptionalValue(const Expr &E, Environment &Env,
                          BoolValue &HasValueVal) {
-  if (auto *OptionalLoc =
-          Env.getStorageLocation(E, SkipPast::ReferenceThenPointer)) {
+  if (auto *OptionalLoc = maybeSkipPointer(
+          Env.getStorageLocation(E, SkipPast::Reference), Env)) {
     Env.setValue(*OptionalLoc, createOptionalValue(Env, HasValueVal));
   }
 }
@@ -550,13 +565,11 @@ void transferNulloptAssignment(const CXXOperatorCallExpr *E,
   transferAssignment(E, State.Env.getBoolLiteralValue(false), State);
 }
 
-void transferSwap(const Expr &E1, SkipPast E1Skip, const Expr &E2,
+void transferSwap(StorageLocation *Loc1, StorageLocation *Loc2,
                   Environment &Env) {
   // We account for cases where one or both of the optionals are not modeled,
   // either lacking associated storage locations, or lacking values associated
   // to such storage locations.
-  auto *Loc1 = Env.getStorageLocation(E1, E1Skip);
-  auto *Loc2 = Env.getStorageLocation(E2, SkipPast::Reference);
 
   if (Loc1 == nullptr) {
     if (Loc2 != nullptr)
@@ -590,14 +603,20 @@ void transferSwapCall(const CXXMemberCallExpr *E,
                       const MatchFinder::MatchResult &,
                       LatticeTransferState &State) {
   assert(E->getNumArgs() == 1);
-  transferSwap(*E->getImplicitObjectArgument(), SkipPast::ReferenceThenPointer,
-               *E->getArg(0), State.Env);
+  transferSwap(maybeSkipPointer(
+                   State.Env.getStorageLocation(*E->getImplicitObjectArgument(),
+                                                SkipPast::Reference),
+                   State.Env),
+               State.Env.getStorageLocation(*E->getArg(0), SkipPast::Reference),
+               State.Env);
 }
 
 void transferStdSwapCall(const CallExpr *E, const MatchFinder::MatchResult &,
                          LatticeTransferState &State) {
   assert(E->getNumArgs() == 2);
-  transferSwap(*E->getArg(0), SkipPast::Reference, *E->getArg(1), State.Env);
+  transferSwap(State.Env.getStorageLocation(*E->getArg(0), SkipPast::Reference),
+               State.Env.getStorageLocation(*E->getArg(1), SkipPast::Reference),
+               State.Env);
 }
 
 void transferStdForwardCall(const CallExpr *E, const MatchFinder::MatchResult &,
@@ -756,6 +775,17 @@ auto buildTransferMatchSwitch() {
           })
 
       // optional::operator*, optional::operator->
+      // FIXME: This does something slightly strange for `operator->`.
+      // `transferUnwrapCall()` may create a new value of type `T` for the
+      // `optional<T>`, and it associates that value with `E`. In the case of
+      // `operator->`, `E` is a pointer. As a result, we associate an
+      // expression of pointer type with a storage location of non-pointer type
+      // `T`. This can confound other code that expects expressions of
+      // pointer type to be associated with `PointerValue`s, such as the
+      // centrally provided accessors `getImplicitObjectLocation()` and
+      // `getBaseObjectLocation()`, and this is the reason we need to use our
+      // own 'maybeSkipPointer()` and `getValueBehindPossiblePointer()` instead
+      // of these accessors.
       .CaseOfCFGStmt<CallExpr>(valueOperatorCall(std::nullopt),
                                [](const CallExpr *E,
                                   const MatchFinder::MatchResult &,
@@ -834,11 +864,9 @@ auto buildTransferMatchSwitch() {
       .Build();
 }
 
-std::vector<SourceLocation> diagnoseUnwrapCall(const Expr *UnwrapExpr,
-                                               const Expr *ObjectExpr,
+std::vector<SourceLocation> diagnoseUnwrapCall(const Expr *ObjectExpr,
                                                const Environment &Env) {
-  if (auto *OptionalVal =
-          Env.getValue(*ObjectExpr, SkipPast::ReferenceThenPointer)) {
+  if (auto *OptionalVal = getValueBehindPossiblePointer(*ObjectExpr, Env)) {
     auto *Prop = OptionalVal->getProperty("has_value");
     if (auto *HasValueVal = cast_or_null<BoolValue>(Prop)) {
       if (Env.flowConditionImplies(*HasValueVal))
@@ -864,16 +892,16 @@ auto buildDiagnoseMatchSwitch(
           valueCall(IgnorableOptional),
           [](const CXXMemberCallExpr *E, const MatchFinder::MatchResult &,
              const Environment &Env) {
-            return diagnoseUnwrapCall(E, E->getImplicitObjectArgument(), Env);
+            return diagnoseUnwrapCall(E->getImplicitObjectArgument(), Env);
           })
 
       // optional::operator*, optional::operator->
-      .CaseOfCFGStmt<CallExpr>(
-          valueOperatorCall(IgnorableOptional),
-          [](const CallExpr *E, const MatchFinder::MatchResult &,
-             const Environment &Env) {
-            return diagnoseUnwrapCall(E, E->getArg(0), Env);
-          })
+      .CaseOfCFGStmt<CallExpr>(valueOperatorCall(IgnorableOptional),
+                               [](const CallExpr *E,
+                                  const MatchFinder::MatchResult &,
+                                  const Environment &Env) {
+                                 return diagnoseUnwrapCall(E->getArg(0), Env);
+                               })
       .Build();
 }
 

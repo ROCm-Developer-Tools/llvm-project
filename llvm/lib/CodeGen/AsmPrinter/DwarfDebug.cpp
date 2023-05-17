@@ -397,14 +397,17 @@ DwarfDebug::DwarfDebug(AsmPrinter *A)
   // 1: For ELF when requested.
   // 2: For XCOFF64: the AIX assembler will fill in debug section lengths
   //    according to the DWARF64 format for 64-bit assembly, so we must use
-  //    DWARF64 in the compiler too for 64-bit mode.
+  //    DWARF64 in the compiler for 64-bit mode on non-integrated-as mode.
+  bool IsXcoff = TT.isOSBinFormatXCOFF();
+  bool UseIntegratedAs = Asm->OutStreamer->isIntegratedAssemblerRequired();
   Dwarf64 &=
-      ((Asm->TM.Options.MCOptions.Dwarf64 || MMI->getModule()->isDwarf64()) &&
-       TT.isOSBinFormatELF()) ||
-      TT.isOSBinFormatXCOFF();
+      ((TT.isOSBinFormatELF() || (IsXcoff && UseIntegratedAs)) &&
+       (Asm->TM.Options.MCOptions.Dwarf64 || MMI->getModule()->isDwarf64())) ||
+      (IsXcoff && !UseIntegratedAs);
 
-  if (!Dwarf64 && TT.isArch64Bit() && TT.isOSBinFormatXCOFF())
-    report_fatal_error("XCOFF requires DWARF64 for 64-bit mode!");
+  if (!Dwarf64 && TT.isArch64Bit() && IsXcoff && !UseIntegratedAs)
+    report_fatal_error(
+        "XCOFF requires DWARF64 for 64-bit mode on non-integrated-as mode!");
 
   UseRangesSection = !NoDwarfRangesSection && !TT.isNVPTX();
 
@@ -1529,7 +1532,7 @@ void DwarfDebug::collectVariableInfoFromMFTable(
     DwarfCompileUnit &TheCU, DenseSet<InlinedEntity> &Processed) {
   SmallDenseMap<InlinedEntity, DbgVariable *> MFVars;
   LLVM_DEBUG(dbgs() << "DwarfDebug: collecting variables from MF side table\n");
-  for (const auto &VI : Asm->MF->getInStackSlotVariableDbgInfo()) {
+  for (const auto &VI : Asm->MF->getVariableDbgInfo()) {
     if (!VI.Var)
       continue;
     assert(VI.Var->isValidLocationForIntrinsic(VI.Loc) &&
@@ -1549,13 +1552,24 @@ void DwarfDebug::collectVariableInfoFromMFTable(
     ensureAbstractEntityIsCreatedIfScoped(TheCU, Var.first, Scope->getScopeNode());
     auto RegVar = std::make_unique<DbgVariable>(
                     cast<DILocalVariable>(Var.first), Var.second);
-    RegVar->initializeMMI(VI.Expr, VI.getStackSlot());
+    if (VI.inStackSlot())
+      RegVar->initializeMMI(VI.Expr, VI.getStackSlot());
+    else {
+      MachineLocation MLoc(VI.getEntryValueRegister(), /*IsIndirect*/ true);
+      auto LocEntry = DbgValueLocEntry(MLoc);
+      RegVar->initializeDbgValue(DbgValueLoc(VI.Expr, LocEntry));
+    }
     LLVM_DEBUG(dbgs() << "Created DbgVariable for " << VI.Var->getName()
                       << "\n");
 
-    if (DbgVariable *DbgVar = MFVars.lookup(Var))
-      DbgVar->addMMIEntry(*RegVar);
-    else if (InfoHolder.addScopeVariable(Scope, RegVar.get())) {
+    if (DbgVariable *DbgVar = MFVars.lookup(Var)) {
+      if (DbgVar->getValueLoc())
+        LLVM_DEBUG(dbgs() << "Dropping repeated entry value debug info for "
+                             "variable "
+                          << VI.Var->getName() << "\n");
+      else
+        DbgVar->addMMIEntry(*RegVar);
+    } else if (InfoHolder.addScopeVariable(Scope, RegVar.get())) {
       MFVars.insert({Var, RegVar.get()});
       ConcreteEntities.push_back(std::move(RegVar));
     }

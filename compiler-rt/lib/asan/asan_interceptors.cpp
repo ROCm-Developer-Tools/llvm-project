@@ -23,6 +23,7 @@
 #include "asan_suppressions.h"
 #include "asan_thread.h"
 #include "lsan/lsan_common.h"
+#include "sanitizer_common/sanitizer_internal_defs.h"
 #include "sanitizer_common/sanitizer_libc.h"
 
 // There is no general interception at all on Fuchsia.

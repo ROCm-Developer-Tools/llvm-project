@@ -13,6 +13,7 @@
 #ifndef OPENACC_OPS
 #define OPENACC_OPS
 
+include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/IR/BuiltinTypes.td"
 include "mlir/IR/EnumAttr.td"
@@ -29,31 +30,33 @@ class OpenACC_Op<string mnemonic, list<Trait> traits = []> :
   Op<OpenACC_Dialect, mnemonic, traits>;
 
 // Reduction operation enumeration.
-def OpenACC_ReductionOpAdd     : I32EnumAttrCase<"redop_add", 0>;
-def OpenACC_ReductionOpMul     : I32EnumAttrCase<"redop_mul", 1>;
-def OpenACC_ReductionOpMax     : I32EnumAttrCase<"redop_max", 2>;
-def OpenACC_ReductionOpMin     : I32EnumAttrCase<"redop_min", 3>;
-def OpenACC_ReductionOpAnd     : I32EnumAttrCase<"redop_and", 4>;
-def OpenACC_ReductionOpOr      : I32EnumAttrCase<"redop_or", 5>;
-def OpenACC_ReductionOpXor     : I32EnumAttrCase<"redop_xor", 6>;
-def OpenACC_ReductionOpLogEqv  : I32EnumAttrCase<"redop_leqv", 7>;
-def OpenACC_ReductionOpLogNeqv : I32EnumAttrCase<"redop_lneqv", 8>;
-def OpenACC_ReductionOpLogAnd  : I32EnumAttrCase<"redop_land", 9>;
-def OpenACC_ReductionOpLogOr   : I32EnumAttrCase<"redop_lor", 10>;
+def OpenACC_ReductionOperatorAdd     : I32EnumAttrCase<"redop_add", 0>;
+def OpenACC_ReductionOperatorMul     : I32EnumAttrCase<"redop_mul", 1>;
+def OpenACC_ReductionOperatorMax     : I32EnumAttrCase<"redop_max", 2>;
+def OpenACC_ReductionOperatorMin     : I32EnumAttrCase<"redop_min", 3>;
+def OpenACC_ReductionOperatorAnd     : I32EnumAttrCase<"redop_and", 4>;
+def OpenACC_ReductionOperatorOr      : I32EnumAttrCase<"redop_or", 5>;
+def OpenACC_ReductionOperatorXor     : I32EnumAttrCase<"redop_xor", 6>;
+def OpenACC_ReductionOperatorLogEqv  : I32EnumAttrCase<"redop_leqv", 7>;
+def OpenACC_ReductionOperatorLogNeqv : I32EnumAttrCase<"redop_lneqv", 8>;
+def OpenACC_ReductionOperatorLogAnd  : I32EnumAttrCase<"redop_land", 9>;
+def OpenACC_ReductionOperatorLogOr   : I32EnumAttrCase<"redop_lor", 10>;
 
-def OpenACC_ReductionOp : I32EnumAttr<"ReductionOp",
+def OpenACC_ReductionOperator : I32EnumAttr<"ReductionOperator",
     "built-in reduction operations supported by OpenACC",
-    [OpenACC_ReductionOpAdd, OpenACC_ReductionOpMul, OpenACC_ReductionOpMax,
-     OpenACC_ReductionOpMin, OpenACC_ReductionOpAnd, OpenACC_ReductionOpOr,
-     OpenACC_ReductionOpXor, OpenACC_ReductionOpLogEqv,
-     OpenACC_ReductionOpLogNeqv, OpenACC_ReductionOpLogAnd,
-     OpenACC_ReductionOpLogOr
+    [OpenACC_ReductionOperatorAdd, OpenACC_ReductionOperatorMul,
+     OpenACC_ReductionOperatorMax, OpenACC_ReductionOperatorMin,
+     OpenACC_ReductionOperatorAnd, OpenACC_ReductionOperatorOr,
+     OpenACC_ReductionOperatorXor, OpenACC_ReductionOperatorLogEqv,
+     OpenACC_ReductionOperatorLogNeqv, OpenACC_ReductionOperatorLogAnd,
+     OpenACC_ReductionOperatorLogOr
     ]> {
   let genSpecializedAttr = 0;
   let cppNamespace = "::mlir::acc";
 }
-def OpenACC_ReductionOpAttr : EnumAttr<OpenACC_Dialect, OpenACC_ReductionOp,
-                                       "reduction_op">;
+def OpenACC_ReductionOperatorAttr : EnumAttr<OpenACC_Dialect,
+                                             OpenACC_ReductionOperator,
+                                             "reduction_operator">;
 
 // Type used in operation below.
 def IntOrIndex : AnyTypeOf<[AnyInteger, Index]>;
@@ -87,6 +90,7 @@ def OpenACC_GetDevicePtrClause    : I64EnumAttrCase<"acc_getdeviceptr", 16>;
 def OpenACC_UpdateHost            : I64EnumAttrCase<"acc_update_host", 17>;
 def OpenACC_UpdateSelf            : I64EnumAttrCase<"acc_update_self", 18>;
 def OpenACC_UpdateDevice          : I64EnumAttrCase<"acc_update_device", 19>;
+def OpenACC_UseDevice             : I64EnumAttrCase<"acc_use_device", 20>;
 
 def OpenACC_DataClauseEnum : I64EnumAttr<"DataClause",
     "data clauses supported by OpenACC",
@@ -96,7 +100,7 @@ def OpenACC_DataClauseEnum : I64EnumAttr<"DataClause",
      OpenACC_AttachClause, OpenACC_DetachClause, OpenACC_NoCreateClause,
      OpenACC_PrivateClause, OpenACC_FirstPrivateClause,
      OpenACC_IsDevicePtrClause, OpenACC_GetDevicePtrClause, OpenACC_UpdateHost,
-     OpenACC_UpdateSelf, OpenACC_UpdateDevice,
+     OpenACC_UpdateSelf, OpenACC_UpdateDevice, OpenACC_UseDevice,
     ]> {
   let cppNamespace = "::mlir::acc";
 }
@@ -298,6 +302,14 @@ def OpenACC_UpdateDeviceOp : OpenACC_DataEntryOp<"update_device",
   let summary = "Represents acc update device semantics.";
 }
 
+//===----------------------------------------------------------------------===//
+// 2.8 use_device clause
+//===----------------------------------------------------------------------===//
+def OpenACC_UseDeviceOp : OpenACC_DataEntryOp<"use_device",
+    "mlir::acc::DataClause::acc_use_device"> {
+  let summary = "Represents acc use_device semantics.";
+}
+
 // Data exit operation does not refer to OpenACC spec terminology, but to
 // terminology used in this dialect. It refers to data operations that will appear
 // after data or compute region. It will be used as the base of acc dialect
@@ -418,7 +430,7 @@ def OpenACC_ParallelOp : OpenACC_Op<"parallel",
                        Optional<I1>:$ifCond,
                        Optional<I1>:$selfCond,
                        UnitAttr:$selfAttr,
-                       OptionalAttr<OpenACC_ReductionOpAttr>:$reductionOp,
+                       OptionalAttr<OpenACC_ReductionOperatorAttr>:$reductionOp,
                        Variadic<AnyType>:$reductionOperands,
                        Variadic<AnyType>:$gangPrivateOperands,
                        Variadic<AnyType>:$gangFirstPrivateOperands,
@@ -483,7 +495,7 @@ def OpenACC_SerialOp : OpenACC_Op<"serial",
                        Optional<I1>:$ifCond,
                        Optional<I1>:$selfCond,
                        UnitAttr:$selfAttr,
-                       OptionalAttr<OpenACC_ReductionOpAttr>:$reductionOp,
+                       OptionalAttr<OpenACC_ReductionOperatorAttr>:$reductionOp,
                        Variadic<AnyType>:$reductionOperands,
                        Variadic<AnyType>:$gangPrivateOperands,
                        Variadic<AnyType>:$gangFirstPrivateOperands,
@@ -741,6 +753,44 @@ def OpenACC_ExitDataOp : OpenACC_Op<"exit_data", [AttrSizedOperandSegments]> {
 }
 
 //===----------------------------------------------------------------------===//
+// 2.8 Host_Data Construct
+//===----------------------------------------------------------------------===//
+
+def OpenACC_HostDataOp : OpenACC_Op<"host_data", [AttrSizedOperandSegments]> {
+  let summary = "host_data construct";
+
+  let description = [{
+    The "acc.host_data" operation represents the OpenACC host_data construct.
+
+    Example:
+
+    ```mlir
+    %0 = acc.use_device varPtr(%a : !llvm.ptr<f32>) -> !llvm.ptr<f32>
+    acc.host_data dataOperands(%0 : !llvm.ptr<f32>) {
+
+    }
+    ```
+  }];
+
+  let arguments = (ins Optional<I1>:$ifCond,
+                       Variadic<OpenACC_PointerLikeTypeInterface>:$dataOperands,
+                       UnitAttr:$ifPresent);
+
+  let regions = (region AnyRegion:$region);
+
+  let assemblyFormat = [{
+    oilist(
+        `if` `(` $ifCond `)`
+      | `dataOperands` `(` $dataOperands `:` type($dataOperands) `)`
+    )
+    $region attr-dict-with-keyword
+  }];
+
+  let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+}
+
+//===----------------------------------------------------------------------===//
 // 2.9 loop Construct
 //===----------------------------------------------------------------------===//
 
@@ -780,7 +830,7 @@ def OpenACC_LoopOp : OpenACC_Op<"loop",
                        UnitAttr:$hasVector,
                        Variadic<IntOrIndex>:$tileOperands,
                        Variadic<AnyType>:$privateOperands,
-                       OptionalAttr<OpenACC_ReductionOpAttr>:$reductionOp,
+                       OptionalAttr<OpenACC_ReductionOperatorAttr>:$reductionOp,
                        Variadic<AnyType>:$reductionOperands);
 
   let results = (outs Variadic<AnyType>:$results);
@@ -812,7 +862,7 @@ def OpenACC_LoopOp : OpenACC_Op<"loop",
 }
 
 // Yield operation for the acc.loop and acc.parallel operations.
-def OpenACC_YieldOp : OpenACC_Op<"yield", [Terminator,
+def OpenACC_YieldOp : OpenACC_Op<"yield", [ReturnLike, Terminator,
     ParentOneOf<["ParallelOp, LoopOp, SerialOp"]>]> {
   let summary = "Acc yield and termination operation";
 

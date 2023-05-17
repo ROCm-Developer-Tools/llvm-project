@@ -300,6 +300,7 @@ static mlir::LogicalResult convertFortranSourceToMLIR(
   (void)mlir::applyPassManagerCLOptions(pm);
   if (passPipeline.hasAnyOccurrences()) {
     // run the command-line specified pipeline
+    hlfir::registerHLFIRPasses();
     (void)passPipeline.addToPipeline(pm, [&](const llvm::Twine &msg) {
       mlir::emitError(mlir::UnknownLoc::get(&ctx)) << msg;
       return mlir::failure();
@@ -375,7 +376,7 @@ int main(int argc, char **argv) {
   // enable parsing of OpenACC
   if (enableOpenACC) {
     options.features.Enable(Fortran::common::LanguageFeature::OpenACC);
-    options.predefinitions.emplace_back("_OPENACC", "201911");
+    options.predefinitions.emplace_back("_OPENACC", "202011");
   }
 
   Fortran::common::IntrinsicTypeDefaultKinds defaultKinds;

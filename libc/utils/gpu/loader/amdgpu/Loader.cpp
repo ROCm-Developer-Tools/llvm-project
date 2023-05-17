@@ -221,6 +221,10 @@ hsa_status_t launch_kernel(hsa_agent_t dev_agent, hsa_executable_t executable,
              /*timeout_hint=*/1024, HSA_WAIT_STATE_ACTIVE) != 0)
     handle_server();
 
+  // Handle the server one more time in case the kernel exited with a pending
+  // send still in flight.
+  handle_server();
+
   // Destroy the resources acquired to launch the kernel and return.
   if (hsa_status_t err = hsa_amd_memory_pool_free(args))
     handle_error(err);
@@ -330,7 +334,7 @@ int load(int argc, char **argv, char **envp, void *image, size_t size,
   hsa_amd_memory_fill(dev_ret, 0, sizeof(int));
 
   // Allocate finegrained memory for the RPC server and client to share.
-  uint64_t port_size = __llvm_libc::rpc::default_port_count;
+  uint64_t port_size = __llvm_libc::rpc::DEFAULT_PORT_COUNT;
   uint32_t wavefront_size = 0;
   if (hsa_status_t err = hsa_agent_get_info(
           dev_agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &wavefront_size))
