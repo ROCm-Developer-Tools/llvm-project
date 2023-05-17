@@ -1033,10 +1033,14 @@ LogicalResult ModuleTranslation::convertFunctions() {
     isDevice = offloadMod.getIsDevice();
   }
 
+  printf("\n  --------- Start Function conversion loop isDevicePass?: %d\n",isDevice);
   for (auto function : getModuleBody(mlirModule).getOps<LLVMFuncOp>()) {
     // Ignore external functions.
-    if (function.isExternal())
+    if (function.isExternal()) {
+      printf("  KKKK Skipping conversion for external function:%s \n", 
+		      function.getName().str().c_str());
       continue;
+    }
 
     // FIXME: Must convert declare target functions on device pass.
     //        We need a way to identify that function was defined or
@@ -1045,8 +1049,8 @@ LogicalResult ModuleTranslation::convertFunctions() {
     //        Target regions will have there own kernels generated.
     bool isDeclareTargetFunction =
         mlir::omp::OpenMPDialect::isDeclareTarget(function);
-    printf("  FFFF Function name %s isDevice:%d isDeclareTarget:%d convert?:%d \n", 
-     function.getName().str().c_str(),isDevice,isDeclareTargetFunction,
+    printf("  FFFF Function name %s  isDeclareTarget?:%d convert?:%d \n", 
+     function.getName().str().c_str(),isDeclareTargetFunction,
       !(isDevice && !isDeclareTargetFunction));
     if (isDevice && !isDeclareTargetFunction)
       continue;
@@ -1054,6 +1058,7 @@ LogicalResult ModuleTranslation::convertFunctions() {
     if (failed(convertOneFunction(function)))
       return failure();
   }
+  printf("  --------- Done Function conversion loop isDevicePass?: %d\n",isDevice);
 
   return success();
 }
