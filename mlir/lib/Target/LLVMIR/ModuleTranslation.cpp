@@ -1042,18 +1042,14 @@ LogicalResult ModuleTranslation::convertFunctions() {
       continue;
     }
 
-    // FIXME: Must convert declare target functions on device pass.
-    //        We need a way to identify that function was defined or
-    //        declared inside declare target.
-    //        For now, we assume no declare target functions.
-    //        Target regions will have there own kernels generated.
+    // one-loop solution: No filtering in device pass for isDeclareTarget.
+    // All functions get coverted/lowered so that kernel functions are created
+    // and lowered to LLVMIR as they are encountered. Then, non-device functions
+    // will be deleted from the LLVM-IR on the device pass.
     bool isDeclareTargetFunction =
         mlir::omp::OpenMPDialect::isDeclareTarget(function);
-    printf("  FFFF Function name %s  isDeclareTarget?:%d convert?:%d \n", 
-     function.getName().str().c_str(),isDeclareTargetFunction,
-      !(isDevice && !isDeclareTargetFunction));
-    if (isDevice && !isDeclareTargetFunction)
-      continue;
+    printf("  FFFF calling convertOneFunction for %s  isDeclareTarget?:%d \n",
+     function.getName().str().c_str(),isDeclareTargetFunction);
 
     if (failed(convertOneFunction(function)))
       return failure();
