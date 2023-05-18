@@ -301,12 +301,6 @@ bool CodeGenAction::beginSourceFileAction() {
   pm.enableVerifier(/*verifyPasses=*/true);
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
 
-  // Add OpenMP-related passes
-  if (ci.getInvocation().getFrontendOpts().features.IsEnabled(
-          Fortran::common::LanguageFeature::OpenMP)) {
-    pm.addPass(fir::createCaptureImplicitlyDeclareTargetPass());
-  }
-
   if (mlir::failed(pm.run(*mlirModule))) {
     unsigned diagID = ci.getDiagnostics().getCustomDiagID(
         clang::DiagnosticsEngine::Error,

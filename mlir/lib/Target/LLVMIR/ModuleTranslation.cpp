@@ -919,7 +919,29 @@ LogicalResult ModuleTranslation::convertOneFunction(LLVMFuncOp func) {
   detail::connectPHINodes(func.getBody(), *this);
 
   // Finally, convert dialect attributes attached to the function.
-  return convertDialectAttributes(func);
+  LogicalResult result = convertDialectAttributes(func);
+
+  // All functions are translated first to ensure target regions are always
+  // processed, so that they can be outlined. However, they must be deleted
+  // afterwards if the device they are intended for does not match the device we
+  // are currently generating code for.
+  if (auto offloadMod =
+          dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule)) {
+    bool isDevicePass = offloadMod.getIsDevice();
+    omp::DeclareTargetDeviceType declareType =
+        omp::DeclareTargetDeviceType::host;
+
+    auto declareTargetOp =
+        dyn_cast<mlir::omp::DeclareTargetInterface>(func.getOperation());
+    if (declareTargetOp && declareTargetOp.isDeclareTarget())
+      declareType = declareTargetOp.getDeclareTargetDeviceType();
+
+    if ((isDevicePass && declareType == omp::DeclareTargetDeviceType::host) ||
+        (!isDevicePass && declareType == omp::DeclareTargetDeviceType::nohost))
+      maskedFunctions.push_back(llvmFunc);
+  }
+
+  return result;
 }
 
 LogicalResult ModuleTranslation::convertDialectAttributes(Operation *op) {
@@ -1025,6 +1047,8 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
 }
 
 LogicalResult ModuleTranslation::convertFunctions() {
+  maskedFunctions.clear();
+
   // Convert functions.
 
   bool isDevice = false;
@@ -1046,8 +1070,10 @@ LogicalResult ModuleTranslation::convertFunctions() {
     // All functions get coverted/lowered so that kernel functions are created
     // and lowered to LLVMIR as they are encountered. Then, non-device functions
     // will be deleted from the LLVM-IR on the device pass.
+    auto declareTargetOp =
+        dyn_cast<mlir::omp::DeclareTargetInterface>(function.getOperation());
     bool isDeclareTargetFunction =
-        mlir::omp::OpenMPDialect::isDeclareTarget(function);
+        declareTargetOp && declareTargetOp.isDeclareTarget();
     printf("  FFFF calling convertOneFunction for %s  isDeclareTarget?:%d \n",
      function.getName().str().c_str(),isDeclareTargetFunction);
 
@@ -1055,6 +1081,14 @@ LogicalResult ModuleTranslation::convertFunctions() {
       return failure();
   }
   printf("  --------- Done Function conversion loop isDevicePass?: %d\n",isDevice);
+
+  // Delete translated functions that are intended for a device we are currently
+  // not generating code for.
+  for (auto *llvmFunction : maskedFunctions)
+    llvmFunction->dropAllReferences();
+
+  for (auto *llvmFunction : maskedFunctions)
+    llvmFunction->eraseFromParent();
 
   return success();
 }

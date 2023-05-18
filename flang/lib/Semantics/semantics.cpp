@@ -31,6 +31,7 @@
 #include "check-select-type.h"
 #include "check-stop.h"
 #include "compute-offsets.h"
+#include "finalize-omp.h"
 #include "mod-file.h"
 #include "resolve-labels.h"
 #include "resolve-names.h"
@@ -170,6 +171,7 @@ static bool PerformStatementSemantics(
   ResolveNames(context, program, context.globalScope());
   RewriteParseTree(context, program);
   ComputeOffsets(context, context.globalScope());
+  FinalizeOMP(context, program);
   CheckDeclarations(context);
   StatementSemanticsPass1{context}.Walk(program);
   StatementSemanticsPass2 pass2{context};

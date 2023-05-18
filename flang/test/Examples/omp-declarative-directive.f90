@@ -37,5 +37,7 @@ end
 ! CHECK-NEXT:- file:            '{{[^"]*}}omp-declarative-directive.f90'
 ! CHECK-NEXT:  line:            21
 ! CHECK-NEXT:  construct:       declare target
-! CHECK-NEXT:  clauses:         []
+! CHECK-NEXT:  clauses:    
+! CHECK-NEXT:    - clause:      ''
+! CHECK-NEXT:      details:     ''
 ! CHECK-NEXT:...
