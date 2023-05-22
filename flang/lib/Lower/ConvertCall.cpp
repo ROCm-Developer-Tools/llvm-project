@@ -1356,11 +1356,12 @@ genHLFIRIntrinsicRefCore(PreparedActualArguments &loweredActuals,
     if (auto array = normalisedResult.dyn_cast<fir::SequenceType>()) {
       resultShape = hlfir::ExprType::Shape{array.getShape()};
       elementType = array.getEleTy();
-    } else {
-      elementType = normalisedResult;
+      return hlfir::ExprType::get(builder.getContext(), resultShape,
+                                  elementType,
+                                  /*polymorphic=*/false);
     }
-    return hlfir::ExprType::get(builder.getContext(), resultShape, elementType,
-                                /*polymorphic=*/false);
+    elementType = normalisedResult;
+    return elementType;
   };
 
   auto buildSumOperation = [](fir::FirOpBuilder &builder, mlir::Location loc,
@@ -1516,11 +1517,10 @@ public:
     // iterations are cleaned up inside the iterations.
     if (!callContext.resultType) {
       // Subroutine case. Generate call inside loop nest.
-      auto [innerLoop, oneBasedIndicesVector] =
-          hlfir::genLoopNest(loc, builder, shape);
-      mlir::ValueRange oneBasedIndices = oneBasedIndicesVector;
+      hlfir::LoopNest loopNest = hlfir::genLoopNest(loc, builder, shape);
+      mlir::ValueRange oneBasedIndices = loopNest.oneBasedIndices;
       auto insPt = builder.saveInsertionPoint();
-      builder.setInsertionPointToStart(innerLoop.getBody());
+      builder.setInsertionPointToStart(loopNest.innerLoop.getBody());
       callContext.stmtCtx.pushScope();
       for (auto &preparedActual : loweredActuals)
         if (preparedActual)

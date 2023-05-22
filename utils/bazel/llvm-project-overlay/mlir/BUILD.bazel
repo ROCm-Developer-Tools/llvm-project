@@ -2403,6 +2403,7 @@ cc_library(
     srcs = ["lib/Dialect/SparseTensor/IR/SparseTensorDialect.cpp"],
     hdrs = [
         "include/mlir/Dialect/SparseTensor/IR/SparseTensor.h",
+        "include/mlir/Dialect/SparseTensor/IR/SparseTensorStorageLayout.h",
         "include/mlir/Dialect/SparseTensor/IR/SparseTensorType.h",
     ],
     includes = ["include"],
@@ -6162,6 +6163,14 @@ gentbl_cc_library(
         (
             ["-gen-op-interface-defs"],
             "include/mlir/Interfaces/MemorySlotOpInterfaces.cpp.inc",
+        ),
+        (
+            ["-gen-type-interface-decls"],
+            "include/mlir/Interfaces/MemorySlotTypeInterfaces.h.inc",
+        ),
+        (
+            ["-gen-type-interface-defs"],
+            "include/mlir/Interfaces/MemorySlotTypeInterfaces.cpp.inc",
         ),
     ],
     tblgen = ":mlir-tblgen",
@@ -10523,11 +10532,11 @@ td_library(
     ],
     includes = ["include"],
     deps = [
-        ":MemorySlotInterfacesTdFiles",
         ":ArithOpsTdFiles",
         ":CastInterfacesTdFiles",
         ":ControlFlowInterfacesTdFiles",
         ":CopyOpInterfaceTdFiles",
+        ":MemorySlotInterfacesTdFiles",
         ":OpBaseTdFiles",
         ":ShapedOpInterfacesTdFiles",
         ":SideEffectInterfacesTdFiles",
@@ -10603,9 +10612,9 @@ cc_library(
         ":DialectUtils",
         ":IR",
         ":InferTypeOpInterface",
-        ":MemorySlotInterfaces",
         ":MemRefBaseIncGen",
         ":MemRefOpsIncGen",
+        ":MemorySlotInterfaces",
         ":ShapedOpInterfaces",
         ":ValueBoundsOpInterface",
         ":ViewLikeInterface",

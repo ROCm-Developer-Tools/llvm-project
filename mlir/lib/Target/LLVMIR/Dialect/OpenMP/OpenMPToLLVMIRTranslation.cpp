@@ -694,6 +694,11 @@ convertOmpTaskOp(omp::TaskOp taskOp, llvm::IRBuilderBase &builder,
     return taskOp.emitError("unhandled clauses for translation to LLVM IR");
   }
   auto bodyCB = [&](InsertPointTy allocaIP, InsertPointTy codegenIP) {
+    // Save the alloca insertion point on ModuleTranslation stack for use in
+    // nested regions.
+    LLVM::ModuleTranslation::SaveStack<OpenMPAllocaStackFrame> frame(
+        moduleTranslation, allocaIP);
+
     builder.restoreIP(codegenIP);
     convertOmpOpRegions(taskOp.getRegion(), "omp.task.region", builder,
                         moduleTranslation, bodyGenStatus);
@@ -1573,7 +1578,8 @@ LogicalResult convertFlagsAttr(Operation *op, mlir::omp::FlagsAttr attribute,
           .getAssumeNoNestedParallelism() /*LangOpts().OpenMPNoNestedParallelism*/
       ,
       "__omp_rtl_assume_no_nested_parallelism");
-
+  ompBuilder->M.addModuleFlag(llvm::Module::Max, "openmp-device",
+                              attribute.getOpenmpDeviceVersion());
   return success();
 }
 
@@ -1700,6 +1706,13 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
   return llvm::TypeSwitch<Attribute, LogicalResult>(attribute.getValue())
       .Case([&](mlir::omp::FlagsAttr rtlAttr) {
         return convertFlagsAttr(op, rtlAttr, moduleTranslation);
+      })
+      .Case([&](mlir::omp::VersionAttr versionAttr) {
+        llvm::OpenMPIRBuilder *ompBuilder =
+            moduleTranslation.getOpenMPBuilder();
+        ompBuilder->M.addModuleFlag(llvm::Module::Max, "openmp",
+                                    versionAttr.getVersion());
+        return success();
       })
       .Default([&](Attribute attr) {
         // fall through for omp attributes that do not require lowering and/or
