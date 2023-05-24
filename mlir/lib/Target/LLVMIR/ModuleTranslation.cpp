@@ -903,7 +903,29 @@ LogicalResult ModuleTranslation::convertOneFunction(LLVMFuncOp func) {
   detail::connectPHINodes(func.getBody(), *this);
 
   // Finally, convert dialect attributes attached to the function.
-  return convertDialectAttributes(func);
+  LogicalResult result = convertDialectAttributes(func);
+
+  // All functions are translated first to ensure target regions are always
+  // processed, so that they can be outlined. However, they must be deleted
+  // afterwards if the device they are intended for does not match the device we
+  // are currently generating code for.
+  if (auto offloadMod =
+          dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule)) {
+    bool isDevicePass = offloadMod.getIsDevice();
+    omp::DeclareTargetDeviceType declareType =
+        omp::DeclareTargetDeviceType::host;
+
+    auto declareTargetOp =
+        dyn_cast<mlir::omp::DeclareTargetInterface>(func.getOperation());
+    if (declareTargetOp && declareTargetOp.isDeclareTarget())
+      declareType = declareTargetOp.getDeclareTargetDeviceType();
+
+    if ((isDevicePass && declareType == omp::DeclareTargetDeviceType::host) ||
+        (!isDevicePass && declareType == omp::DeclareTargetDeviceType::nohost))
+      maskedFunctions.push_back(llvmFunc);
+  }
+
+  return result;
 }
 
 LogicalResult ModuleTranslation::convertDialectAttributes(Operation *op) {
@@ -1009,6 +1031,8 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
 }
 
 LogicalResult ModuleTranslation::convertFunctions() {
+  maskedFunctions.clear();
+  
   // Convert functions.
   for (auto function : getModuleBody(mlirModule).getOps<LLVMFuncOp>()) {
     // Ignore external functions.
@@ -1019,6 +1043,14 @@ LogicalResult ModuleTranslation::convertFunctions() {
       return failure();
   }
 
+  // Delete translated functions that are intended for a device we are currently
+  // not generating code for.
+  for (auto *llvmFunction : maskedFunctions)
+    llvmFunction->dropAllReferences();
+
+  for (auto *llvmFunction : maskedFunctions)
+    llvmFunction->eraseFromParent();
+  
   return success();
 }
 

@@ -28,12 +28,6 @@ def OpenMP_Dialect : Dialect {
   let cppNamespace = "::mlir::omp";
   let dependentDialects = ["::mlir::LLVM::LLVMDialect, ::mlir::func::FuncDialect"];
   let useDefaultAttributePrinterParser = 1;
-  let extraClassDeclaration = [{
-    // @@@AG: Make this into a well defined attribute if we maintain its use
-    static void setDeclareTarget(Operation *func, StringRef deviceType);
-    static bool isDeclareTarget(Operation *func);
-    static StringRef getDeclareTargetDeviceType(Operation *func);
-  }];
   let usePropertiesForAttributes = 1;
 }
 
