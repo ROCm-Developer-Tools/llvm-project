@@ -2498,19 +2498,24 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
                          Fortran::lower::pft::Evaluation &eval,
                          const Fortran::parser::OpenMPDeclareTargetConstruct
                              &declareTargetConstruct) {
-  std::vector<Fortran::semantics::Symbol> symbols;
-  auto findFuncAndVarSyms = [&](const Fortran::parser::OmpObjectList &objList) {
+  llvm::SmallVector<std::pair<mlir::omp::DeclareTargetCaptureClause,
+                              Fortran::semantics::Symbol>,
+                    0>
+      symbolAndClause;
+  auto findFuncAndVarSyms = [&](const Fortran::parser::OmpObjectList &objList,
+                                mlir::omp::DeclareTargetCaptureClause clause) {
     for (const auto &ompObject : objList.v) {
       Fortran::common::visit(
           Fortran::common::visitors{
               [&](const Fortran::parser::Designator &designator) {
                 if (const Fortran::parser::Name *name =
                         getDesignatorNameIfDataRef(designator)) {
-                  symbols.push_back(*name->symbol);
+                  symbolAndClause.push_back(
+                      std::make_pair(clause, *name->symbol));
                 }
               },
               [&](const Fortran::parser::Name &name) {
-                symbols.push_back(*name.symbol);
+                symbolAndClause.push_back(std::make_pair(clause, *name.symbol));
               }},
           ompObject.u);
     }
@@ -2519,37 +2524,35 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
   const auto &spec{std::get<Fortran::parser::OmpDeclareTargetSpecifier>(
       declareTargetConstruct.t)};
   auto mod = converter.getFirOpBuilder().getModule();
-  bool isOpenMPDevice = false;
-  if (auto offloadMod =
-          dyn_cast<mlir::omp::OffloadModuleInterface>(mod.getOperation())) {
-    isOpenMPDevice = offloadMod.getIsDevice();
-  }
 
   // The default capture type
   auto deviceType = Fortran::parser::OmpDeviceTypeClause::Type::Any;
-
   if (const auto *objectList{
           Fortran::parser::Unwrap<Fortran::parser::OmpObjectList>(spec.u)}) {
     // Case: declare target(func, var1, var2)
-    findFuncAndVarSyms(*objectList);
+    findFuncAndVarSyms(*objectList, mlir::omp::DeclareTargetCaptureClause::to);
   } else if (const auto *clauseList{
                  Fortran::parser::Unwrap<Fortran::parser::OmpClauseList>(
                      spec.u)}) {
     if (clauseList->v.empty()) {
       // Case: declare target, implicit capture of function
-      symbols.push_back(eval.getOwningProcedure()->getSubprogramSymbol());
+      symbolAndClause.push_back(
+          std::make_pair(mlir::omp::DeclareTargetCaptureClause::to,
+                         eval.getOwningProcedure()->getSubprogramSymbol()));
     }
 
     for (const auto &clause : clauseList->v) {
       if (const auto *toClause{
               std::get_if<Fortran::parser::OmpClause::To>(&clause.u)}) {
         // Case: declare target to(func, var1, var2)...
-        findFuncAndVarSyms(toClause->v);
+        findFuncAndVarSyms(toClause->v,
+                           mlir::omp::DeclareTargetCaptureClause::to);
       } else if (const auto *linkClause{
                      std::get_if<Fortran::parser::OmpClause::Link>(
                          &clause.u)}) {
         // Case: declare target link(var1, var2)...
-        findFuncAndVarSyms(linkClause->v);
+        findFuncAndVarSyms(linkClause->v,
+                           mlir::omp::DeclareTargetCaptureClause::link);
       } else if (const auto *deviceClause{
                      std::get_if<Fortran::parser::OmpClause::DeviceType>(
                          &clause.u)}) {
@@ -2558,76 +2561,42 @@ void handleDeclareTarget(Fortran::lower::AbstractConverter &converter,
       }
     }
   }
-  // TODO for func:
-  // 1) handle link: done, can't use with function
-  // 2) handle to: done
-  // 3) the default case where neither are specified: done
-  // 4) nested implicit functions
 
-  // TODO for data:
-  // 1) lots... need to make test case first.
+  for (auto sym : symbolAndClause) {
+    auto *op = mod.lookupSymbol(converter.mangleName(std::get<1>(sym)));
 
-  // might have to do the implicit capture further in during rewrite?
-  // Or if there is an end of module action
-  // or earlier during parsing...
-  // auto markAllFuncs = [&](mlir::func::FuncOp fOp) {
-  //   for (auto block = fOp.getBody().getBlocks().begin();
-  //        block != fOp.getBody().getBlocks().end(); ++block) {
-  //     llvm::errs() << "iterate on body \n";
-  //     for (auto op = block->begin(); op != block->end(); ++op) {
-  //       llvm::errs() << "iterate on op \n";
-  //       op->dump();
-  //       // probably needs to be a fir.CallOp, and then find the FuncOp
-  //       if (auto funcOp = mlir::dyn_cast<mlir::func::FuncOp>(op)) {
-  //         // markAllFuncs on func
-  //         // check if attr exists, if not apply it.
-  //         llvm::errs() << "markAllFuncs: " << funcOp->getName() << "\n";
-  //       }
-  //     }
-  //   }
-  // };
+    auto declareTargetOp = dyn_cast<mlir::omp::DeclareTargetInterface>(op);
+    if (!declareTargetOp)
+      fir::emitFatalError(
+          converter.getCurrentLocation(),
+          "Attempt to apply declare target on unsupproted operation");
 
-  // mod.dump();
-
-  for (auto sym : symbols) {
-    auto *op = mod.lookupSymbol(converter.mangleName(sym));
-
-    // find any functions that are implicitly captured by this
-    // declare target and mark them with declare_target_type.
-    //
-    // This may be better to do at the parser/semantic level
-
-    // could be done inside of Bridge.cpp lowerFunc or lowerModule
-    // if (auto funcOp = mlir::dyn_cast<mlir::func::FuncOp>(op))
-    // markAllFuncs(funcOp);
-
-    // delete function early if we know it is going to be discared, if
-    // it is device_type any we keep it. This feels a little
-    // inconsistent as we can only remove things we know are unneeded
-    // at this stage, so we'll still end up with a module of mixed
-    // functions with some needing removal at a later stage in either
-    // case.
-    if ((deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost &&
-         !isOpenMPDevice) ||
-        (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Host &&
-         isOpenMPDevice)) {
-      op->dropAllUses();
-      op->dropAllReferences();
-      op->dropAllDefinedValueUses();
-      op->remove();
-    } else {
-      // Method 1: Remove function here if not desired and add adhoc
-      // attribute to the MLIR Funcs for special handling later
-      if (deviceType == Fortran::parser::OmpDeviceTypeClause::Type::Nohost) {
-        mlir::omp::OpenMPDialect::setDeclareTarget(op, "nohost");
-      } else if (deviceType ==
-                 Fortran::parser::OmpDeviceTypeClause::Type::Host) {
-        mlir::omp::OpenMPDialect::setDeclareTarget(op, "host");
-      } else if (deviceType ==
-                 Fortran::parser::OmpDeviceTypeClause::Type::Any) {
-        mlir::omp::OpenMPDialect::setDeclareTarget(op, "any");
-      }
+    mlir::omp::DeclareTargetDeviceType newDeviceType;
+    switch (deviceType) {
+    case Fortran::parser::OmpDeviceTypeClause::Type::Nohost:
+      newDeviceType = mlir::omp::DeclareTargetDeviceType::nohost;
+      break;
+    case Fortran::parser::OmpDeviceTypeClause::Type::Host:
+      newDeviceType = mlir::omp::DeclareTargetDeviceType::host;
+      break;
+    case Fortran::parser::OmpDeviceTypeClause::Type::Any:
+      newDeviceType = mlir::omp::DeclareTargetDeviceType::any;
+      break;
     }
+
+    // The function or global already has a declare target applied to it,
+    // very likely through implicit capture (usage in another declare
+    // target function/subroutine). It should be marked as any if it has
+    // been assigned both host and nohost, else we skip, as there is no
+    // change
+    if (declareTargetOp.isDeclareTarget()) {
+      if (declareTargetOp.getDeclareTargetDeviceType() != newDeviceType)
+        declareTargetOp.setDeclareTarget(
+            mlir::omp::DeclareTargetDeviceType::any, std::get<0>(sym));
+      continue;
+    }
+
+    declareTargetOp.setDeclareTarget(newDeviceType, std::get<0>(sym));
   }
 }
 
