@@ -1010,35 +1010,14 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
 
 LogicalResult ModuleTranslation::convertFunctions() {
   // Convert functions.
-
-  bool isDevice = false;
-  if (auto offloadMod =
-          dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule)) {
-    isDevice = offloadMod.getIsDevice();
-  }
-
-  printf("\n  --------- Start Function conversion loop isDevicePass?: %d\n",isDevice);
   for (auto function : getModuleBody(mlirModule).getOps<LLVMFuncOp>()) {
     // Ignore external functions.
-    if (function.isExternal()) {
-      printf("  KKKK Skipping conversion for external function:%s \n", 
-		      function.getName().str().c_str());
+    if (function.isExternal())
       continue;
-    }
-
-    // one-loop solution: No filtering in device pass for isDeclareTarget.
-    // All functions get coverted/lowered so that kernel functions are created
-    // and lowered to LLVMIR as they are encountered. Then, non-device functions
-    // will be deleted from the LLVM-IR on the device pass.
-    bool isDeclareTargetFunction =
-        mlir::omp::OpenMPDialect::isDeclareTarget(function);
-    printf("  FFFF calling convertOneFunction for %s  isDeclareTarget?:%d \n",
-     function.getName().str().c_str(),isDeclareTargetFunction);
 
     if (failed(convertOneFunction(function)))
       return failure();
   }
-  printf("  --------- Done Function conversion loop isDevicePass?: %d\n",isDevice);
 
   return success();
 }
