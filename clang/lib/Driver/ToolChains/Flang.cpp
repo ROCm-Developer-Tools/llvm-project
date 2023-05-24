@@ -12,6 +12,7 @@
 
 #include "clang/Driver/Options.h"
 #include "llvm/Frontend/Debug/Options.h"
+#include "llvm/Support/Path.h"
 
 #include <cassert>
 
@@ -429,6 +430,11 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   const InputInfo &Input = Inputs[0];
+  if (Input.isFilename()) {
+    CmdArgs.push_back("-main-file-name");
+    CmdArgs.push_back(
+        Args.MakeArgString(llvm::sys::path::filename(Input.getBaseInput())));
+  }
   types::ID InputType = Input.getType();
 
   // Add preprocessing options like -I, -D, etc. if we are using the
