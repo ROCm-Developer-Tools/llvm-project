@@ -1605,10 +1605,6 @@ static bool targetOpSupported(Operation &opInst) {
   return true;
 }
 
-// EmitTargetCall needs a new callbackfn arg and createTarget also requires one,
-// to pass to EmitTargetCall. The CallbackFn should be based on
-// GenMapInfoCallbackTy which is just the type that gets passed to the map
-// functions
 static void
 createDefaultMapInfos(llvm::OpenMPIRBuilder &ompBuilder,
                       llvm::SmallVectorImpl<llvm::Value *> &args,
