@@ -1932,6 +1932,9 @@ public:
                                          StringRef EntryFnIDName,
                                          int32_t NumTeams, int32_t NumThreads);
 
+  using GenMapInfoCallbackTy =
+      function_ref<MapInfosTy &(InsertPointTy CodeGenIP)>;
+
   /// Generator for '#omp target data'
   ///
   /// \param Loc The location where the target data construct was encountered.
@@ -1948,8 +1951,7 @@ public:
   OpenMPIRBuilder::InsertPointTy createTargetData(
       const LocationDescription &Loc, InsertPointTy AllocaIP,
       InsertPointTy CodeGenIP, Value *DeviceID, Value *IfCond,
-      TargetDataInfo &Info,
-      function_ref<MapInfosTy &(InsertPointTy CodeGenIP)> GenMapInfoCB,
+      TargetDataInfo &Info, GenMapInfoCallbackTy GenMapInfoCB,
       omp::RuntimeFunction *MapperFunc = nullptr,
       function_ref<InsertPointTy(InsertPointTy CodeGenIP, int BodyGenType)>
           BodyGenCB = nullptr);
@@ -1974,6 +1976,7 @@ public:
                              TargetRegionEntryInfo &EntryInfo, int32_t NumTeams,
                              int32_t NumThreads,
                              SmallVectorImpl<Value *> &Inputs,
+                             GenMapInfoCallbackTy GenMapInfoCB,
                              TargetBodyGenCallbackTy BodyGenCB);
 
   /// Declarations for LLVM-IR types (simple, array, function and structure) are

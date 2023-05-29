@@ -4157,8 +4157,7 @@ Constant *OpenMPIRBuilder::registerTargetRegionFunction(
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
     const LocationDescription &Loc, InsertPointTy AllocaIP,
     InsertPointTy CodeGenIP, Value *DeviceID, Value *IfCond,
-    TargetDataInfo &Info,
-    function_ref<MapInfosTy &(InsertPointTy CodeGenIP)> GenMapInfoCB,
+    TargetDataInfo &Info, GenMapInfoCallbackTy GenMapInfoCB,
     omp::RuntimeFunction *MapperFunc,
     function_ref<InsertPointTy(InsertPointTy CodeGenIP, int BodyGenType)>
         BodyGenCB) {
@@ -4374,52 +4373,20 @@ emitTargetOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                                       OutlinedFnID);
 }
 
-static void createDefaultMapInfos(OpenMPIRBuilder &OMPBuilder,
-                                  SmallVectorImpl<Value *> &Args,
-                                  OpenMPIRBuilder::MapInfosTy &combinedInfo) {
-  for (auto Arg : Args) {
-    if (!Arg->getType()->isPointerTy()) {
-      // TODO: Only LLVMPointerTypes are handled.
-      combinedInfo.BasePointers.clear();
-      combinedInfo.Pointers.clear();
-      combinedInfo.Sizes.clear();
-      combinedInfo.Types.clear();
-      combinedInfo.Names.clear();
-      return;
-    }
-    combinedInfo.BasePointers.emplace_back(Arg);
-    combinedInfo.Pointers.emplace_back(Arg);
-    uint32_t SrcLocStrSize;
-    combinedInfo.Names.emplace_back(OMPBuilder.getOrCreateSrcLocStr(
-        "Unknown loc - stub implementation", SrcLocStrSize));
-    combinedInfo.Types.emplace_back(omp::OpenMPOffloadMappingFlags(
-        omp::OpenMPOffloadMappingFlags::OMP_MAP_FROM |
-        omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM));
-    combinedInfo.Sizes.emplace_back(OMPBuilder.Builder.getInt64(
-        OMPBuilder.M.getDataLayout().getTypeAllocSize(Arg->getType())));
-  }
-}
-
 static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                            OpenMPIRBuilder::InsertPointTy AllocaIP,
                            Function *OutlinedFn, Constant *OutlinedFnID,
                            int32_t NumTeams, int32_t NumThreads,
-                           SmallVectorImpl<Value *> &Args) {
-  // 1. Call function to create CombinedInfo, maybe we need callbacks here?
-  OpenMPIRBuilder::MapInfosTy CombinedInfos;
-  auto GenMapInfoCB = [&](OpenMPIRBuilder::InsertPointTy CodeGenIP)
-      -> OpenMPIRBuilder::MapInfosTy & {
-    createDefaultMapInfos(OMPBuilder, Args, CombinedInfos);
-    return CombinedInfos;
-  };
+                           SmallVectorImpl<Value *> &Args,
+                           OpenMPIRBuilder::GenMapInfoCallbackTy GenMapInfoCB) {
 
-  // 2. Call emitOffloadingArrays
+  // Call emitOffloadingArrays
   llvm::OpenMPIRBuilder::TargetDataInfo Info(
       /*RequiresDevicePointerInfo=*/false,
       /*SeparateBeginEndCalls=*/true);
 
-  OMPBuilder.emitOffloadingArrays(AllocaIP, Builder.saveIP(),
-                                  GenMapInfoCB(Builder.saveIP()), Info,
+  auto MapInfo = GenMapInfoCB(Builder.saveIP());
+  OMPBuilder.emitOffloadingArrays(AllocaIP, Builder.saveIP(), MapInfo, Info,
                                   /*IsNonContiguous=*/true);
 
   // 3. Call emitOffloadingArraysArgument
@@ -4440,7 +4407,7 @@ static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
     return Builder.saveIP();
   };
 
-  unsigned NumTargetItems = CombinedInfos.BasePointers.size();
+  unsigned NumTargetItems = MapInfo.BasePointers.size();
   llvm::Value *DeviceID = Builder.getInt64(OMP_DEVICEID_UNDEF);
   llvm::Value *NumTeamsVal = Builder.getInt32(NumTeams);
   llvm::Value *NumThreadsVal = Builder.getInt32(NumThreads);
@@ -4467,7 +4434,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
     const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy AllocaIP,
     OpenMPIRBuilder::InsertPointTy CodeGenIP, TargetRegionEntryInfo &EntryInfo,
     int32_t NumTeams, int32_t NumThreads, SmallVectorImpl<Value *> &Args,
-    TargetBodyGenCallbackTy CBFunc) {
+    GenMapInfoCallbackTy GenMapInfoCB, TargetBodyGenCallbackTy CBFunc) {
   if (!updateToLocation(Loc))
     return InsertPointTy();
 
@@ -4481,7 +4448,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
                              AllocaIP);
   if (!Config.isEmbedded())
     emitTargetCall(*this, Builder, AllocaIP, OutlinedFn, OutlinedFnID, NumTeams,
-                   NumThreads, Args);
+                   NumThreads, Args, GenMapInfoCB);
 
   return Builder.saveIP();
 }
