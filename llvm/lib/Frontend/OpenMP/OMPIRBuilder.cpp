@@ -4288,6 +4288,45 @@ static Value *castInput(IRBuilderBase &Builder, unsigned AddrSpace,
   return CastAddr;
 }
 
+static void emitUsed(StringRef Name, std::vector<llvm::WeakTrackingVH> &List,
+                     Type *Int8PtrTy, Module &M) {
+  if (List.empty())
+    return;
+
+  // Convert List to what ConstantArray needs.
+  SmallVector<Constant *, 8> UsedArray;
+  UsedArray.resize(List.size());
+  for (unsigned i = 0, e = List.size(); i != e; ++i) {
+    UsedArray[i] = ConstantExpr::getPointerBitCastOrAddrSpaceCast(
+        cast<Constant>(&*List[i]), Int8PtrTy);
+  }
+
+  if (UsedArray.empty())
+    return;
+  ArrayType *ATy = ArrayType::get(Int8PtrTy, UsedArray.size());
+
+  auto *GV =
+      new GlobalVariable(M, ATy, false, llvm::GlobalValue::AppendingLinkage,
+                         llvm::ConstantArray::get(ATy, UsedArray), Name);
+
+  GV->setSection("llvm.metadata");
+}
+
+static void
+emitExecutionMode(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
+                  StringRef FunctionName, bool Mode,
+                  std::vector<llvm::WeakTrackingVH> &LLVMCompilerUsed) {
+  auto Int8Ty = Type::getInt8Ty(Builder.getContext());
+  auto *GVMode = new llvm::GlobalVariable(
+      OMPBuilder.M, Int8Ty, /*isConstant=*/true,
+      llvm::GlobalValue::WeakAnyLinkage,
+      llvm::ConstantInt::get(Int8Ty, Mode ? OMP_TGT_EXEC_MODE_SPMD
+                                          : OMP_TGT_EXEC_MODE_GENERIC),
+      Twine(FunctionName, "_exec_mode"));
+  GVMode->setVisibility(llvm::GlobalVariable::ProtectedVisibility);
+  LLVMCompilerUsed.emplace_back(GVMode);
+}
+
 static Function *
 createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                        StringRef FuncName, SmallVectorImpl<Value *> &Inputs,
@@ -4308,6 +4347,12 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   auto Func = Function::Create(FuncType, GlobalValue::InternalLinkage, FuncName,
                                Builder.GetInsertBlock()->getModule());
 
+  if (OMPBuilder.Config.isEmbedded()) {
+    std::vector<llvm::WeakTrackingVH> LLVMCompilerUsed;
+    emitExecutionMode(OMPBuilder, Builder, FuncName, false, LLVMCompilerUsed);
+    Type *Int8PtrTy = Type::getInt8Ty(Builder.getContext())->getPointerTo();
+    emitUsed("llvm.compiler.used", LLVMCompilerUsed, Int8PtrTy, OMPBuilder.M);
+  }
   // Save insert point.
   auto OldInsertPoint = Builder.saveIP();
 
@@ -5541,7 +5586,9 @@ void OpenMPIRBuilder::OutlineInfo::collectBlocks(
 void OpenMPIRBuilder::createOffloadEntry(Constant *ID, Constant *Addr,
                                          uint64_t Size, int32_t Flags,
                                          GlobalValue::LinkageTypes) {
-  if (!Config.isTargetCodegen()) {
+  // TODO Original check was 'if (!Config.isTargetCodegen())', which fails to
+  // produce nvvm.annotations for the device
+  if (!Config.isEmbedded()) {
     emitOffloadingEntry(ID, Addr->getName(), Size, Flags);
     return;
   }
