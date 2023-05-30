@@ -20,8 +20,8 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMInterfaces.h"
 #include "mlir/Dialect/LLVMIR/Transforms/LegalizeForExport.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
-#include "mlir/Dialect/OpenMP/OpenMPInterfaces.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPInterfaces.h"
 #include "mlir/IR/AttrTypeSubElements.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -1411,6 +1411,8 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
   // Convert module itself.
   if (failed(translator.convertOperation(*module, llvmBuilder)))
     return nullptr;
+
+  // translator.llvmModule->dump();
 
   if (llvm::verifyModule(*translator.llvmModule, &llvm::errs()))
     return nullptr;

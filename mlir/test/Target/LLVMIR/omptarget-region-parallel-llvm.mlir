@@ -12,7 +12,7 @@ module attributes {omp.is_target_device = false} {
     %7 = llvm.alloca %6 x i32 {bindc_name = "c", in_type = i32, operand_segment_sizes = array<i32: 0, 0>, uniq_name = "_QFomp_target_regionEc"} : (i64) -> !llvm.ptr<i32>
     llvm.store %1, %3 : !llvm.ptr<i32>
     llvm.store %0, %5 : !llvm.ptr<i32>
-    omp.target {
+    omp.target map((ByRef, tofrom -> %3 : !llvm.ptr<i32>), (ByRef, tofrom -> %5 : !llvm.ptr<i32>), (ByRef, tofrom -> %7 : !llvm.ptr<i32>)) {
       omp.parallel {
         %8 = llvm.load %3 : !llvm.ptr<i32>
         %9 = llvm.load %5 : !llvm.ptr<i32>

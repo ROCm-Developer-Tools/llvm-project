@@ -330,9 +330,6 @@ public:
 
   /// Kind of device clause for declare target variables
   /// and functions
-  /// NOTE: Currently not used as a part of a variable entry
-  /// used for Flang and Clang to interface with the variable
-  /// related registration functions
   enum OMPTargetDeviceClauseKind : uint32_t {
     /// The target is marked for all devices
     OMPTargetDeviceClauseAny = 0x0,
@@ -342,6 +339,19 @@ public:
     OMPTargetDeviceClauseHost = 0x2,
     /// The target is marked as having no clause
     OMPTargetDeviceClauseNone = 0x3
+  };
+
+  /// The method in which the variable has been
+  /// captured, which depends on the type and
+  /// the manner in which it was captured by
+  /// the device function e.g. implicitly, or
+  /// through a map. 
+  enum OMPTargetVarCaptureKind : uint32_t {
+    OMPTargetVarCaptureThis = 0x0,
+    OMPTargetVarCaptureByRef = 0x1,
+    OMPTargetVarCaptureByCopy = 0x2,
+    OMPTargetVarCaptureVLAType = 0x3,
+    OMPTargetVarCaptureNone = 0x4
   };
 
   /// Device global variable entries info.
@@ -2134,14 +2144,14 @@ public:
   /// \param Inputs The input values to the region that will be passed.
   /// as arguments to the outlined function.
   /// \param BodyGenCB Callback that will generate the region code.
-  InsertPointTy createTarget(const LocationDescription &Loc,
-                             OpenMPIRBuilder::InsertPointTy AllocaIP,
-                             OpenMPIRBuilder::InsertPointTy CodeGenIP,
-                             TargetRegionEntryInfo &EntryInfo, int32_t NumTeams,
-                             int32_t NumThreads,
-                             SmallVectorImpl<Value *> &Inputs,
-                             GenMapInfoCallbackTy GenMapInfoCB,
-                             TargetBodyGenCallbackTy BodyGenCB);
+  InsertPointTy createTarget(
+      const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy AllocaIP,
+      OpenMPIRBuilder::InsertPointTy CodeGenIP,
+      TargetRegionEntryInfo &EntryInfo, int32_t NumTeams, int32_t NumThreads,
+      SmallVectorImpl<Value *> &Inputs, SmallVectorImpl<Type *> &ArgTypes,
+      SmallVectorImpl<OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+          &InputsCaptureKind,
+      GenMapInfoCallbackTy GenMapInfoCB, TargetBodyGenCallbackTy BodyGenCB);
 
   /// Declarations for LLVM-IR types (simple, array, function and structure) are
   /// generated below. Their names are defined and used in OpenMPKinds.def. Here

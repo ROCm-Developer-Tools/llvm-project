@@ -337,7 +337,7 @@ func.func @_QPomp_target_data_empty() {
 func.func @_QPomp_target() {
   %0 = fir.alloca !fir.array<512xi32> {bindc_name = "a", uniq_name = "_QFomp_targetEa"}
   %c64_i32 = arith.constant 64 : i32
-  omp.target   thread_limit(%c64_i32 : i32) map((tofrom -> %0 : !fir.ref<!fir.array<512xi32>>)) {
+  omp.target   thread_limit(%c64_i32 : i32) map((ByRef, tofrom -> %0 : !fir.ref<!fir.array<512xi32>>)) {
     %c10_i32 = arith.constant 10 : i32
     %c1_i64 = arith.constant 1 : i64
     %c1_i64_0 = arith.constant 1 : i64
@@ -353,7 +353,7 @@ func.func @_QPomp_target() {
 // CHECK:           %[[VAL_0:.*]] = llvm.mlir.constant(1 : i64) : i64
 // CHECK:           %[[VAL_1:.*]] = llvm.alloca %[[VAL_0]] x !llvm.array<512 x i32> {bindc_name = "a", in_type = !fir.array<512xi32>, operand_segment_sizes = array<i32: 0, 0>, uniq_name = "_QFomp_targetEa"} : (i64) -> !llvm.ptr<array<512 x i32>>
 // CHECK:           %[[VAL_2:.*]] = llvm.mlir.constant(64 : i32) : i32
-// CHECK:           omp.target   thread_limit(%[[VAL_2]] : i32) map((tofrom -> %[[VAL_1]] : !llvm.ptr<array<512 x i32>>)) {
+// CHECK:           omp.target   thread_limit(%[[VAL_2]] : i32) map((ByRef, tofrom -> %[[VAL_1]] : !llvm.ptr<array<512 x i32>>)) {
 // CHECK:             %[[VAL_3:.*]] = llvm.mlir.constant(10 : i32) : i32
 // CHECK:             %[[VAL_4:.*]] = llvm.mlir.constant(1 : i64) : i64
 // CHECK:             %[[VAL_5:.*]] = llvm.mlir.constant(1 : i64) : i64

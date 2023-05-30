@@ -4,7 +4,7 @@
 
 module attributes {omp.is_target_device = true} {
   llvm.func @writeindex_omp_outline_0_(%arg0: !llvm.ptr<i32>, %arg1: !llvm.ptr<i32>) attributes {omp.outline_parent_name = "writeindex_"} {
-    omp.target   map((from -> %arg0 : !llvm.ptr<i32>), (implicit -> %arg1: !llvm.ptr<i32>)) {
+    omp.target   map((ByRef, from -> %arg0 : !llvm.ptr<i32>), (ByRef, implicit -> %arg1: !llvm.ptr<i32>)) {
       %0 = llvm.mlir.constant(20 : i32) : i32
       %1 = llvm.mlir.constant(10 : i32) : i32
       llvm.store %1, %arg0 : !llvm.ptr<i32>

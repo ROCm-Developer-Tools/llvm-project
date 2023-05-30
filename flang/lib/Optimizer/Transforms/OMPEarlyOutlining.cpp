@@ -5,7 +5,7 @@
 #include "flang/Optimizer/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPDialect.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
@@ -41,6 +41,30 @@ class OMPEarlyOutliningPass
     mlir::Region &targetRegion = targetOp.getRegion();
     mlir::getUsedValuesDefinedAbove(targetRegion, inputs);
 
+    // swap the global into the arg if declare target
+    //  llvm::errs() << "printing inputs \n";
+    llvm::SetVector<mlir::Value> declareTargetAddrOfOld;
+    llvm::SetVector<mlir::Value> declareTargetAddrOfNew;
+    llvm::SetVector<mlir::Operation *> declareTargetclone;
+    for (auto input : inputs) {
+      if (input.getDefiningOp()) {
+        if (fir::AddrOfOp addressOfOp =
+                mlir::dyn_cast<fir::AddrOfOp>(input.getDefiningOp())) {
+          if (fir::GlobalOp gOp = mlir::dyn_cast<fir::GlobalOp>(
+                  addressOfOp->getParentOfType<mlir::ModuleOp>().lookupSymbol(
+                      addressOfOp.getSymbol()))) {
+            if (auto declareTargetGlobal =
+                    llvm::dyn_cast<mlir::omp::DeclareTargetInterface>(
+                        gOp.getOperation())) {
+              declareTargetAddrOfOld.insert(input);
+              inputs.remove(input);
+              declareTargetclone.insert(addressOfOp);
+            }
+          }
+        }
+      }
+    }
+
     // Create new function and initialize
     mlir::FunctionType funcType = builder.getFunctionType(
         mlir::TypeRange(inputs.getArrayRef()), mlir::TypeRange());
@@ -68,9 +92,19 @@ class OMPEarlyOutliningPass
                 newFunc.getOperation()))
       earlyOutlineOp.setParentName(parentName);
 
+    // The assumption is that we're using addressOfOp to indicate the correct
+    // global that the map with a declare target argument corresponds to and
+    // this addressOfOp has only a single return value, which is currently
+    // the case
+    for (auto &clone : declareTargetclone)
+      declareTargetAddrOfNew.insert(builder.clone(*clone)->getResult(0));
+
     // Create input map from inputs to function parameters.
     mlir::IRMapping valueMap;
     for (auto InArg : llvm::zip(inputs, newInputs))
+      valueMap.map(std::get<0>(InArg), std::get<1>(InArg));
+
+    for (auto InArg : llvm::zip(declareTargetAddrOfOld, declareTargetAddrOfNew))
       valueMap.map(std::get<0>(InArg), std::get<1>(InArg));
 
     // Clone the target op into the new function

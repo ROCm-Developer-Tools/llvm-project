@@ -5156,6 +5156,24 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
   Inputs.push_back(BPtr);
   Inputs.push_back(CPtr);
 
+  llvm::SmallVector<llvm::Type *> InputTypes;
+  InputTypes.push_back(Int32Ty);
+  InputTypes.push_back(Int32Ty);
+  InputTypes.push_back(Int32Ty);
+
+
+  SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+      InputCaptureKinds;
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+
   llvm::OpenMPIRBuilder::MapInfosTy CombinedInfos;
   auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
       -> llvm::OpenMPIRBuilder::MapInfosTy & {
@@ -5165,10 +5183,9 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
 
   TargetRegionEntryInfo EntryInfo("func", 42, 4711, 17);
   OpenMPIRBuilder::LocationDescription OmpLoc({Builder.saveIP(), DL});
-
-  Builder.restoreIP(OMPBuilder.createTarget(OmpLoc, Builder.saveIP(),
-                                            Builder.saveIP(), EntryInfo, -1, -1,
-                                            Inputs, GenMapInfoCB, BodyGenCB));
+  Builder.restoreIP(OMPBuilder.createTarget(
+      OmpLoc, Builder.saveIP(), Builder.saveIP(), EntryInfo, -1, -1, Inputs,
+      InputTypes, InputCaptureKinds, GenMapInfoCB, BodyGenCB));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
 
@@ -5205,6 +5222,19 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
       Constant::getNullValue(PointerType::get(Ctx, 0)),
       Constant::getNullValue(PointerType::get(Ctx, 0))};
 
+  llvm::SmallVector<llvm::Type *> InputTypes;
+  InputTypes.push_back(Type::getInt32Ty(Ctx));
+  InputTypes.push_back(Type::getInt32Ty(Ctx));
+  
+  SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+      InputCaptureKinds;
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  
   llvm::OpenMPIRBuilder::MapInfosTy CombinedInfos;
   auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
       -> llvm::OpenMPIRBuilder::MapInfosTy & {
@@ -5225,11 +5255,10 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
                                    F->getEntryBlock().getFirstInsertionPt());
   TargetRegionEntryInfo EntryInfo("parent", /*DeviceID=*/1, /*FileID=*/2,
                                   /*Line=*/3, /*Count=*/0);
-
-  Builder.restoreIP(OMPBuilder.createTarget(
-      Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
-      /*NumThreads=*/-1, CapturedArgs, GenMapInfoCB, BodyGenCB));
-
+  Builder.restoreIP(
+      OMPBuilder.createTarget(Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
+                              /*NumThreads=*/-1, CapturedArgs, InputTypes,
+                              InputCaptureKinds, GenMapInfoCB, BodyGenCB));
   Builder.CreateRetVoid();
   OMPBuilder.finalize();
 

@@ -10,7 +10,7 @@
 #define FORTRAN_TOOLS_POINTER_MODELS_H
 
 #include "mlir/Dialect/OpenACC/OpenACC.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPDialect.h"
 
 /// models for FIR pointer like types that already provide a `getElementType`
 /// method
