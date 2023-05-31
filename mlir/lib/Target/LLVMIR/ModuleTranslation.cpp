@@ -1101,6 +1101,37 @@ LogicalResult ModuleTranslation::createAliasScopeMetadata() {
   return success();
 }
 
+static void emitUsed(llvm::StringRef Name,
+                     llvm::SmallVector<llvm::WeakTrackingVH> &List,
+                     llvm::Module &M, llvm::LLVMContext &llvmContext) {
+  if (List.empty())
+    return;
+  // Convert List to what ConstantArray needs
+  llvm::SmallVector<llvm::Constant *, 8> UsedArray;
+  UsedArray.resize(List.size());
+  llvm::IRBuilder<> builder(llvmContext);
+  for (unsigned i = 0, e = List.size(); i != e; ++i) {
+    UsedArray[i] = llvm::ConstantExpr::getPointerBitCastOrAddrSpaceCast(
+        cast<llvm::Constant>(&*List[i]), builder.getInt8PtrTy());
+  }
+  if (UsedArray.empty())
+    return;
+  llvm::ArrayType *ATy =
+      llvm::ArrayType::get(builder.getInt8PtrTy(), UsedArray.size());
+  auto *GV = new llvm::GlobalVariable(
+      M, ATy, false, llvm::GlobalValue::AppendingLinkage,
+      llvm::ConstantArray::get(ATy, UsedArray), Name);
+  GV->setSection("llvm.metadata");
+}
+
+LogicalResult ModuleTranslation::createLLVMUsed() {
+  // TODO: Add information about other LLVM IR constants which are generated and
+  // they are required to be present in the object file
+  if (ompBuilder)
+    emitUsed("llvm.compiler.used", ompBuilder->LLVMCompilerUsed, *llvmModule,
+             getLLVMContext());
+  return success();
+}
 llvm::MDNode *
 ModuleTranslation::getAliasScope(Operation *op,
                                  SymbolRefAttr aliasScopeRef) const {
@@ -1409,6 +1440,11 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
 
   // Convert module itself.
   if (failed(translator.convertOperation(*module, llvmBuilder)))
+    return nullptr;
+
+  // Prevent global variables which are generated during translation
+  // from optimizing out
+  if (failed(translator.createLLVMUsed()))
     return nullptr;
 
   if (llvm::verifyModule(*translator.llvmModule, &llvm::errs()))

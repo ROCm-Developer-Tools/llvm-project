@@ -277,6 +277,10 @@ private:
   LogicalResult convertGlobals();
   LogicalResult convertOneFunction(LLVMFuncOp func);
 
+  /// Generate LLVM Used Data which prevents from optimizing out global
+  /// variables and force presence of global variables in the object file
+  LogicalResult createLLVMUsed();
+
   /// Process access_group LLVM Metadata operations and create LLVM
   /// metadata nodes.
   LogicalResult createAccessGroupMetadata();

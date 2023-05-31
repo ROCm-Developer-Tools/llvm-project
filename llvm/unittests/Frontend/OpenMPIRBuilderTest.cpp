@@ -5101,9 +5101,9 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
 
   TargetRegionEntryInfo EntryInfo("func", 42, 4711, 17);
   OpenMPIRBuilder::LocationDescription OmpLoc({Builder.saveIP(), DL});
-  Builder.restoreIP(OMPBuilder.createTarget(OmpLoc, Builder.saveIP(),
-                                            Builder.saveIP(), EntryInfo, -1, -1,
-                                            Inputs, BodyGenCB));
+  Builder.restoreIP(OMPBuilder.createTarget(
+      OmpLoc, Builder.saveIP(), Builder.saveIP(), EntryInfo, -1, -1, Inputs,
+      BodyGenCB, /* IsSPMD */ false));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
 
@@ -5151,9 +5151,9 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
                                    F->getEntryBlock().getFirstInsertionPt());
   TargetRegionEntryInfo EntryInfo("parent", /*DeviceID=*/1, /*FileID=*/2,
                                   /*Line=*/3, /*Count=*/0);
-  Builder.restoreIP(
-      OMPBuilder.createTarget(Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
-                              /*NumThreads=*/-1, CapturedArgs, BodyGenCB));
+  Builder.restoreIP(OMPBuilder.createTarget(
+      Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
+      /*NumThreads=*/-1, CapturedArgs, BodyGenCB, /*IsSPMD*/ false));
   Builder.CreateRetVoid();
   OMPBuilder.finalize();
 

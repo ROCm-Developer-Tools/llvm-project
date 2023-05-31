@@ -4277,7 +4277,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
 static Function *
 createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                        StringRef FuncName, SmallVectorImpl<Value *> &Inputs,
-                       OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
+                       OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
+                       bool Mode) {
   SmallVector<Type *> ParameterTypes;
   for (auto &Arg : Inputs)
     ParameterTypes.push_back(Arg->getType());
@@ -4287,6 +4288,11 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   auto Func = Function::Create(FuncType, GlobalValue::InternalLinkage, FuncName,
                                Builder.GetInsertBlock()->getModule());
 
+  if (OMPBuilder.Config.isEmbedded()) {
+    auto ExecModeVal = OpenMPIRBuilder::createExecModeProperty(
+        FuncName, Mode, OMPBuilder.M, Builder.getContext());
+    OMPBuilder.LLVMCompilerUsed.push_back(ExecModeVal);
+  }
   // Save insert point.
   auto OldInsertPoint = Builder.saveIP();
 
@@ -4325,18 +4331,17 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   return Func;
 }
 
-static void
-emitTargetOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
-                           TargetRegionEntryInfo &EntryInfo,
-                           Function *&OutlinedFn, Constant *&OutlinedFnID,
-                           int32_t NumTeams, int32_t NumThreads,
-                           SmallVectorImpl<Value *> &Inputs,
-                           OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
+static void emitTargetOutlinedFunction(
+    OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
+    TargetRegionEntryInfo &EntryInfo, Function *&OutlinedFn,
+    Constant *&OutlinedFnID, int32_t NumTeams, int32_t NumThreads,
+    SmallVectorImpl<Value *> &Inputs,
+    OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc, bool Mode) {
 
   OpenMPIRBuilder::FunctionGenCallback &&GenerateOutlinedFunction =
-      [&OMPBuilder, &Builder, &Inputs, &CBFunc](StringRef EntryFnName) {
+      [&OMPBuilder, &Builder, &Inputs, &CBFunc, &Mode](StringRef EntryFnName) {
         return createOutlinedFunction(OMPBuilder, Builder, EntryFnName, Inputs,
-                                      CBFunc);
+                                      CBFunc, Mode);
       };
 
   OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction,
@@ -4436,7 +4441,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
     const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy AllocaIP,
     OpenMPIRBuilder::InsertPointTy CodeGenIP, TargetRegionEntryInfo &EntryInfo,
     int32_t NumTeams, int32_t NumThreads, SmallVectorImpl<Value *> &Args,
-    TargetBodyGenCallbackTy CBFunc) {
+    TargetBodyGenCallbackTy CBFunc, bool IsSPMD) {
   if (!updateToLocation(Loc))
     return InsertPointTy();
 
@@ -4446,7 +4451,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
   Constant *OutlinedFnID;
 
   emitTargetOutlinedFunction(*this, Builder, EntryInfo, OutlinedFn,
-                             OutlinedFnID, NumTeams, NumThreads, Args, CBFunc);
+                             OutlinedFnID, NumTeams, NumThreads, Args, CBFunc,
+                             IsSPMD);
   if (!Config.isEmbedded())
     emitTargetCall(*this, Builder, AllocaIP, OutlinedFn, OutlinedFnID, NumTeams,
                    NumThreads, Args);
@@ -5712,6 +5718,18 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
       llvm_unreachable("Unsupported entry kind.");
     }
   }
+}
+
+GlobalVariable *OpenMPIRBuilder::createExecModeProperty(
+    StringRef Name, bool Mode, llvm::Module &M, llvm::LLVMContext &Context) {
+  auto Int8Ty = llvm::Type::getInt8Ty(Context);
+  auto *GVMode = new llvm::GlobalVariable(
+      M, Int8Ty, /*isConstant=*/true, llvm::GlobalValue::WeakAnyLinkage,
+      llvm::ConstantInt::get(Int8Ty, Mode ? OMP_TGT_EXEC_MODE_SPMD
+                                          : OMP_TGT_EXEC_MODE_GENERIC),
+      llvm::Twine(Name, "_exec_mode"));
+  GVMode->setVisibility(llvm::GlobalVariable::ProtectedVisibility);
+  return GVMode;
 }
 
 void TargetRegionEntryInfo::getTargetRegionEntryFnName(

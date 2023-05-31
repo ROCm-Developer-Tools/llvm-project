@@ -1648,9 +1648,11 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
     findAllocaInsertPoint(builder, moduleTranslation);
 
+  // TODO: Add support for SPMD kernels
+  bool isSPMDMode = false;
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
       ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
-      defaultValThreads, inputs, bodyCB));
+      defaultValThreads, inputs, bodyCB, isSPMDMode));
 
   return bodyGenStatus;
 }
