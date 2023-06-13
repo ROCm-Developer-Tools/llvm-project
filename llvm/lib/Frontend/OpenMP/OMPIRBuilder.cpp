@@ -329,6 +329,24 @@ BasicBlock *llvm::splitBBWithSuffix(IRBuilderBase &Builder, bool CreateBranch,
   return splitBB(Builder, CreateBranch, Old->getName() + Suffix);
 }
 
+SmallVector<Value *>
+TargetKernelArgs::getKernelArgsVector(IRBuilderBase &Builder) {
+  Value *Version = Builder.getInt32(/* Version */ 2);
+  Value *PointerNum = Builder.getInt32(NumTargetItems);
+  auto Int32Ty = Type::getInt32Ty(Builder.getContext());
+  Value *ZeroArray = Constant::getNullValue(ArrayType::get(Int32Ty, 3));
+  Value *Flags = Builder.getInt64(HasNoWait);
+
+  Value *NumTeams3D = Builder.CreateInsertValue(ZeroArray, NumTeams, {0});
+  Value *NumThreads3D = Builder.CreateInsertValue(ZeroArray, NumThreads, {0});
+
+  return SmallVector<Value *>{Version,       PointerNum,   BasePointersArray,
+                              PointersArray, SizesArray,   MapTypesArray,
+                              MapNamesArray, MappersArray, NumIterations,
+                              Flags,         NumTeams3D,   NumThreads3D,
+                              DynCGGroupMem};
+}
+
 void OpenMPIRBuilder::addAttributes(omp::RuntimeFunction FnID, Function &Fn) {
   LLVMContext &Ctx = Fn.getContext();
   Triple T(M.getTargetTriple());
@@ -875,6 +893,66 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::emitTargetKernel(
       getOrCreateRuntimeFunction(M, OMPRTL___tgt_target_kernel),
       OffloadingArgs);
 
+  return Builder.saveIP();
+}
+
+OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::emitKernelLaunch(
+    const LocationDescription &Loc, Function *OutlinedFn, Value *OutlinedFnID,
+    EmitFallbackCallbackTy emitTargetCallFallbackCB, TargetKernelArgs &Args,
+    Value *DeviceID, Value *RTLoc, InsertPointTy AllocaIP) {
+
+  if (!updateToLocation(Loc))
+    return Loc.IP;
+
+  Builder.restoreIP(Loc.IP);
+  // On top of the arrays that were filled up, the target offloading call
+  // takes as arguments the device id as well as the host pointer. The host
+  // pointer is used by the runtime library to identify the current target
+  // region, so it only has to be unique and not necessarily point to
+  // anything. It could be the pointer to the outlined function that
+  // implements the target region, but we aren't using that so that the
+  // compiler doesn't need to keep that, and could therefore inline the host
+  // function if proven worthwhile during optimization.
+
+  // From this point on, we need to have an ID of the target region defined.
+  assert(OutlinedFnID && "Invalid outlined function ID!");
+  (void)OutlinedFnID;
+
+  // Return value of the runtime offloading call.
+  Value *Return;
+
+  // Arguments for the target kernel.
+  SmallVector<Value *> ArgsVector(Args.getKernelArgsVector(Builder));
+
+  // The target region is an outlined function launched by the runtime
+  // via calls to __tgt_target_kernel().
+  //
+  // Note that on the host and CPU targets, the runtime implementation of
+  // these calls simply call the outlined function without forking threads.
+  // The outlined functions themselves have runtime calls to
+  // __kmpc_fork_teams() and __kmpc_fork() for this purpose, codegen'd by
+  // the compiler in emitTeamsCall() and emitParallelCall().
+  //
+  // In contrast, on the NVPTX target, the implementation of
+  // __tgt_target_teams() launches a GPU kernel with the requested number
+  // of teams and threads so no additional calls to the runtime are required.
+  // Check the error code and execute the host version if required.
+  Builder.restoreIP(emitTargetKernel(Builder, AllocaIP, Return, RTLoc, DeviceID,
+                                     Args.NumTeams, Args.NumThreads,
+                                     OutlinedFnID, ArgsVector));
+
+  BasicBlock *OffloadFailedBlock =
+      BasicBlock::Create(Builder.getContext(), "omp_offload.failed");
+  BasicBlock *OffloadContBlock =
+      BasicBlock::Create(Builder.getContext(), "omp_offload.cont");
+  Value *Failed = Builder.CreateIsNotNull(Return);
+  Builder.CreateCondBr(Failed, OffloadFailedBlock, OffloadContBlock);
+
+  auto CurFn = Builder.GetInsertBlock()->getParent();
+  EmitBlock(OffloadFailedBlock, CurFn);
+  Builder.restoreIP(emitTargetCallFallbackCB(Builder.saveIP()));
+  EmitBranch(OffloadContBlock);
+  EmitBlock(OffloadContBlock, CurFn, /*IsFinished=*/true);
   return Builder.saveIP();
 }
 
@@ -4077,89 +4155,204 @@ Constant *OpenMPIRBuilder::registerTargetRegionFunction(
 }
 
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
-    const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy CodeGenIP,
-    SmallVectorImpl<uint64_t> &MapTypeFlags,
-    SmallVectorImpl<Constant *> &MapNames, struct MapperAllocas &MapperAllocas,
-    bool IsBegin, int64_t DeviceID, Value *IfCond,
-    BodyGenCallbackTy ProcessMapOpCB, BodyGenCallbackTy BodyGenCB) {
+    const LocationDescription &Loc, InsertPointTy AllocaIP,
+    InsertPointTy CodeGenIP, Value *DeviceID, Value *IfCond,
+    TargetDataInfo &Info, GenMapInfoCallbackTy GenMapInfoCB,
+    omp::RuntimeFunction *MapperFunc,
+    function_ref<InsertPointTy(InsertPointTy CodeGenIP, int BodyGenType)>
+        BodyGenCB) {
   if (!updateToLocation(Loc))
     return InsertPointTy();
 
   Builder.restoreIP(CodeGenIP);
+  bool IsStandAlone = !BodyGenCB;
 
-  // LLVM utilities like blocks with terminators.
-  // The UI acts as a resume point for code insertion after the BodyGen
-  auto *UI = Builder.CreateUnreachable();
-  if (IfCond) {
-    auto *ThenTI =
-        SplitBlockAndInsertIfThen(IfCond, UI, /* Unreachable */ false);
-    ThenTI->getParent()->setName("omp_if.then");
-    Builder.SetInsertPoint(ThenTI);
-  } else {
-    Builder.SetInsertPoint(UI);
-  }
+  // Generate the code for the opening of the data environment. Capture all the
+  // arguments of the runtime call by reference because they are used in the
+  // closing of the region.
+  auto BeginThenGen = [&](InsertPointTy UnusedIP, InsertPointTy CodeGenIP) {
+    emitOffloadingArrays(AllocaIP, Builder.saveIP(),
+                         GenMapInfoCB(Builder.saveIP()), Info,
+                         /*IsNonContiguous=*/true);
 
-  ProcessMapOpCB(Builder.saveIP(), Builder.saveIP());
+    TargetDataRTArgs RTArgs;
+    emitOffloadingArraysArgument(Builder, RTArgs, Info);
 
-  uint32_t SrcLocStrSize;
-  Constant *SrcLocStr = getOrCreateSrcLocStr(Loc, SrcLocStrSize);
-  Value *srcLocInfo = getOrCreateIdent(SrcLocStr, SrcLocStrSize);
+    // Emit the number of elements in the offloading arrays.
+    llvm::Value *PointerNum = Builder.getInt32(Info.NumberOfPtrs);
 
-  GlobalVariable *MapTypesGV =
-      createOffloadMaptypes(MapTypeFlags, ".offload_maptypes");
-  Value *MapTypesArg = Builder.CreateConstInBoundsGEP2_32(
-      ArrayType::get(Builder.getInt64Ty(), MapTypeFlags.size()), MapTypesGV,
-      /*Idx0=*/0, /*Idx1=*/0);
+    // Source location for the ident struct
+    uint32_t SrcLocStrSize;
+    Constant *SrcLocStr = getOrCreateSrcLocStr(Loc, SrcLocStrSize);
+    Value *srcLocInfo = getOrCreateIdent(SrcLocStr, SrcLocStrSize);
 
-  GlobalVariable *MapNamesGV =
-      createOffloadMapnames(MapNames, ".offload_mapnames");
-  Value *MapNamesArg = Builder.CreateConstInBoundsGEP2_32(
-      ArrayType::get(Builder.getInt8PtrTy(), MapNames.size()), MapNamesGV,
-      /*Idx0=*/0, /*Idx1=*/0);
+    llvm::Value *OffloadingArgs[] = {
+        srcLocInfo,           DeviceID,
+        PointerNum,           RTArgs.BasePointersArray,
+        RTArgs.PointersArray, RTArgs.SizesArray,
+        RTArgs.MapTypesArray, RTArgs.MapNamesArray,
+        RTArgs.MappersArray};
 
-  Function *beginMapperFunc =
-      getOrCreateRuntimeFunctionPtr(omp::OMPRTL___tgt_target_data_begin_mapper);
-  Function *endMapperFunc =
-      getOrCreateRuntimeFunctionPtr(omp::OMPRTL___tgt_target_data_end_mapper);
+    if (IsStandAlone) {
+      Builder.CreateCall(getOrCreateRuntimeFunctionPtr(*MapperFunc),
+                         OffloadingArgs);
+    } else {
+      Function *beginMapperFunc = getOrCreateRuntimeFunctionPtr(
+          omp::OMPRTL___tgt_target_data_begin_mapper);
+
+      Builder.CreateCall(beginMapperFunc, OffloadingArgs);
+
+      // If device pointer privatization is required, emit the body of the
+      // region here. It will have to be duplicated: with and without
+      // privatization.
+      Builder.restoreIP(BodyGenCB(Builder.saveIP(), 1));
+    }
+  };
+
+  // If we need device pointer privatization, we need to emit the body of the
+  // region with no privatization in the 'else' branch of the conditional.
+  // Otherwise, we don't have to do anything.
+  auto BeginElseGen = [&](InsertPointTy UnusedIP, InsertPointTy CodeGenIP) {
+    Builder.restoreIP(BodyGenCB(Builder.saveIP(), 2));
+  };
+
+  // Generate code for the closing of the data region.
+  auto EndThenGen = [&](InsertPointTy UnusedIP, InsertPointTy CodeGenIP) {
+    TargetDataRTArgs RTArgs;
+    emitOffloadingArraysArgument(Builder, RTArgs, Info, /*EmitDebug=*/false,
+                                 /*ForEndCall=*/true);
+
+    // Emit the number of elements in the offloading arrays.
+    llvm::Value *PointerNum = Builder.getInt32(Info.NumberOfPtrs);
+
+    // Source location for the ident struct
+    uint32_t SrcLocStrSize;
+    Constant *SrcLocStr = getOrCreateSrcLocStr(Loc, SrcLocStrSize);
+    Value *srcLocInfo = getOrCreateIdent(SrcLocStr, SrcLocStrSize);
+
+    llvm::Value *OffloadingArgs[] = {
+        srcLocInfo,           DeviceID,
+        PointerNum,           RTArgs.BasePointersArray,
+        RTArgs.PointersArray, RTArgs.SizesArray,
+        RTArgs.MapTypesArray, RTArgs.MapNamesArray,
+        RTArgs.MappersArray};
+    Function *endMapperFunc =
+        getOrCreateRuntimeFunctionPtr(omp::OMPRTL___tgt_target_data_end_mapper);
+
+    Builder.CreateCall(endMapperFunc, OffloadingArgs);
+  };
+
+  // We don't have to do anything to close the region if the if clause evaluates
+  // to false.
+  auto EndElseGen = [&](InsertPointTy UnusedIP, InsertPointTy CodeGenIP) {};
 
   if (BodyGenCB) {
-    // Create call to start the data region.
-    emitMapperCall(Builder.saveIP(), beginMapperFunc, srcLocInfo, MapTypesArg,
-                   MapNamesArg, MapperAllocas, DeviceID, MapTypeFlags.size());
+    if (IfCond) {
+      emitIfClause(IfCond, BeginThenGen, BeginElseGen);
+    } else {
+      BeginThenGen(AllocaIP, Builder.saveIP());
+    }
 
-    BodyGenCB(Builder.saveIP(), Builder.saveIP());
+    // If we don't require privatization of device pointers, we emit the body in
+    // between the runtime calls. This avoids duplicating the body code.
+    Builder.restoreIP(BodyGenCB(Builder.saveIP(), 3));
 
-    Builder.SetInsertPoint(UI->getParent());
-    // Create call to end the data region.
-    emitMapperCall(Builder.saveIP(), endMapperFunc, srcLocInfo, MapTypesArg,
-                   MapNamesArg, MapperAllocas, DeviceID, MapTypeFlags.size());
+    if (IfCond) {
+      emitIfClause(IfCond, EndThenGen, EndElseGen);
+    } else {
+      EndThenGen(AllocaIP, Builder.saveIP());
+    }
   } else {
-    emitMapperCall(Builder.saveIP(), IsBegin ? beginMapperFunc : endMapperFunc,
-                   srcLocInfo, MapTypesArg, MapNamesArg, MapperAllocas,
-                   DeviceID, MapTypeFlags.size());
+    if (IfCond) {
+      emitIfClause(IfCond, BeginThenGen, EndElseGen);
+    } else {
+      BeginThenGen(AllocaIP, Builder.saveIP());
+    }
   }
 
-  // Update the insertion point and remove the terminator we introduced.
-  Builder.SetInsertPoint(UI->getParent());
-  if (IfCond)
-    UI->getParent()->setName("omp_if.end");
-  UI->eraseFromParent();
   return Builder.saveIP();
+}
+
+static Value *castInput(IRBuilderBase &Builder, unsigned AddrSpace,
+                        Value *Input, Argument &Arg) {
+  assert(Input->getType()->isPointerTy() &&
+         "Only handling pointer parameters for now");
+  auto Addr =
+      Builder.CreateAlloca(Type::getInt64Ty(Builder.getContext()), AddrSpace);
+  auto AddrAscast =
+      Builder.CreatePointerBitCastOrAddrSpaceCast(Addr, Input->getType());
+  Builder.CreateStore(&Arg, AddrAscast);
+  auto CastAddr =
+    Builder.CreateLoad(Type::getInt32Ty(Builder.getContext())->getPointerTo(), AddrAscast);
+
+  return CastAddr;
+}
+
+static void emitUsed(StringRef Name, std::vector<llvm::WeakTrackingVH> &List,
+                     Type *Int8PtrTy, Module &M) {
+  if (List.empty())
+    return;
+
+  // Convert List to what ConstantArray needs.
+  SmallVector<Constant *, 8> UsedArray;
+  UsedArray.resize(List.size());
+  for (unsigned i = 0, e = List.size(); i != e; ++i) {
+    UsedArray[i] = ConstantExpr::getPointerBitCastOrAddrSpaceCast(
+        cast<Constant>(&*List[i]), Int8PtrTy);
+  }
+
+  if (UsedArray.empty())
+    return;
+  ArrayType *ATy = ArrayType::get(Int8PtrTy, UsedArray.size());
+
+  auto *GV =
+      new GlobalVariable(M, ATy, false, llvm::GlobalValue::AppendingLinkage,
+                         llvm::ConstantArray::get(ATy, UsedArray), Name);
+
+  GV->setSection("llvm.metadata");
+}
+
+static void
+emitExecutionMode(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
+                  StringRef FunctionName, bool Mode,
+                  std::vector<llvm::WeakTrackingVH> &LLVMCompilerUsed) {
+  auto Int8Ty = Type::getInt8Ty(Builder.getContext());
+  auto *GVMode = new llvm::GlobalVariable(
+      OMPBuilder.M, Int8Ty, /*isConstant=*/true,
+      llvm::GlobalValue::WeakAnyLinkage,
+      llvm::ConstantInt::get(Int8Ty, Mode ? OMP_TGT_EXEC_MODE_SPMD
+                                          : OMP_TGT_EXEC_MODE_GENERIC),
+      Twine(FunctionName, "_exec_mode"));
+  GVMode->setVisibility(llvm::GlobalVariable::ProtectedVisibility);
+  LLVMCompilerUsed.emplace_back(GVMode);
 }
 
 static Function *
 createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                        StringRef FuncName, SmallVectorImpl<Value *> &Inputs,
-                       OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
+                       OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
+                       OpenMPIRBuilder::InsertPointTy AllocaIP) {
   SmallVector<Type *> ParameterTypes;
-  for (auto &Arg : Inputs)
-    ParameterTypes.push_back(Arg->getType());
+  if (OMPBuilder.Config.isEmbedded()) {
+    // All parameters are passed as i64
+    ParameterTypes.assign(Inputs.size(),
+                          Type::getInt64Ty(Builder.getContext()));
+  } else {
+    for (auto &Arg : Inputs)
+      ParameterTypes.push_back(Arg->getType());
+  }
 
   auto FuncType = FunctionType::get(Builder.getVoidTy(), ParameterTypes,
                                     /*isVarArg*/ false);
   auto Func = Function::Create(FuncType, GlobalValue::InternalLinkage, FuncName,
                                Builder.GetInsertBlock()->getModule());
 
+  if (OMPBuilder.Config.isEmbedded()) {
+    std::vector<llvm::WeakTrackingVH> LLVMCompilerUsed;
+    emitExecutionMode(OMPBuilder, Builder, FuncName, false, LLVMCompilerUsed);
+    Type *Int8PtrTy = Type::getInt8Ty(Builder.getContext())->getPointerTo();
+    emitUsed("llvm.compiler.used", LLVMCompilerUsed, Int8PtrTy, OMPBuilder.M);
+  }
   // Save insert point.
   auto OldInsertPoint = Builder.saveIP();
 
@@ -4180,16 +4373,22 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   // Insert return instruction.
   Builder.CreateRetVoid();
 
+  Builder.SetInsertPoint(&Func->getEntryBlock(),
+                         Func->getEntryBlock().getFirstNonPHIOrDbgOrAlloca());
+
   // Rewrite uses of input valus to parameters.
   for (auto InArg : zip(Inputs, Func->args())) {
     Value *Input = std::get<0>(InArg);
     Argument &Arg = std::get<1>(InArg);
-
+    Value *CastInput = OMPBuilder.Config.isEmbedded() ?
+      castInput(Builder, OMPBuilder.M.getDataLayout().getAllocaAddrSpace(),
+                Input, Arg) : &Arg;
     // Collect all the instructions
+    assert(CastInput->getType()->isPointerTy() && "Not Pointer Type");
     for (User *User : make_early_inc_range(Input->users()))
       if (auto Instr = dyn_cast<Instruction>(User))
         if (Instr->getFunction() == Func)
-          Instr->replaceUsesOfWith(Input, &Arg);
+          Instr->replaceUsesOfWith(Input, CastInput);
   }
 
   // Restore insert point.
@@ -4201,42 +4400,101 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
 static void
 emitTargetOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                            TargetRegionEntryInfo &EntryInfo,
-                           Function *&OutlinedFn, int32_t NumTeams,
-                           int32_t NumThreads, SmallVectorImpl<Value *> &Inputs,
-                           OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
+                           Function *&OutlinedFn, Constant *&OutlinedFnID,
+                           int32_t NumTeams, int32_t NumThreads,
+                           SmallVectorImpl<Value *> &Inputs,
+                           OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
+                           OpenMPIRBuilder::InsertPointTy AllocaIP) {
 
   OpenMPIRBuilder::FunctionGenCallback &&GenerateOutlinedFunction =
-      [&OMPBuilder, &Builder, &Inputs, &CBFunc](StringRef EntryFnName) {
+      [&OMPBuilder, &Builder, &Inputs, &CBFunc,
+       &AllocaIP](StringRef EntryFnName) {
         return createOutlinedFunction(OMPBuilder, Builder, EntryFnName, Inputs,
-                                      CBFunc);
+                                      CBFunc, AllocaIP);
       };
 
-  Constant *OutlinedFnID;
   OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction,
                                       NumTeams, NumThreads, true, OutlinedFn,
                                       OutlinedFnID);
 }
 
-static void emitTargetCall(IRBuilderBase &Builder, Function *OutlinedFn,
-                           SmallVectorImpl<Value *> &Args) {
-  // TODO: Add kernel launch call
-  Builder.CreateCall(OutlinedFn, Args);
+static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
+                           OpenMPIRBuilder::InsertPointTy AllocaIP,
+                           Function *OutlinedFn, Constant *OutlinedFnID,
+                           int32_t NumTeams, int32_t NumThreads,
+                           SmallVectorImpl<Value *> &Args,
+                           OpenMPIRBuilder::GenMapInfoCallbackTy GenMapInfoCB) {
+
+  // Call emitOffloadingArrays
+  llvm::OpenMPIRBuilder::TargetDataInfo Info(
+      /*RequiresDevicePointerInfo=*/false,
+      /*SeparateBeginEndCalls=*/true);
+
+  auto MapInfo = GenMapInfoCB(Builder.saveIP());
+  OMPBuilder.emitOffloadingArrays(AllocaIP, Builder.saveIP(), MapInfo, Info,
+                                  /*IsNonContiguous=*/true);
+
+  // 3. Call emitOffloadingArraysArgument
+  OpenMPIRBuilder::TargetDataRTArgs RTArgs;
+  OMPBuilder.emitOffloadingArraysArgument(Builder, RTArgs, Info);
+
+  // 4. Call emitKernelLaunch
+  llvm::Value *BasePointersArray = RTArgs.BasePointersArray;
+  llvm::Value *PointersArray = RTArgs.PointersArray;
+  llvm::Value *SizesArray = RTArgs.SizesArray;
+  llvm::Value *MappersArray = RTArgs.MappersArray;
+  llvm::Value *MapTypesArray = RTArgs.MapTypesArray;
+  llvm::Value *MapNamesArray = RTArgs.MapNamesArray;
+  auto &&emitTargetCallFallbackCB =
+      [&](OpenMPIRBuilder::InsertPointTy IP) -> OpenMPIRBuilder::InsertPointTy {
+    Builder.restoreIP(IP);
+    Builder.CreateCall(OutlinedFn, Args);
+    return Builder.saveIP();
+  };
+
+  unsigned NumTargetItems = MapInfo.BasePointers.size();
+  llvm::Value *DeviceID = Builder.getInt64(OMP_DEVICEID_UNDEF);
+  llvm::Value *NumTeamsVal = Builder.getInt32(NumTeams);
+  llvm::Value *NumThreadsVal = Builder.getInt32(NumThreads);
+  uint32_t SrcLocStrSize;
+  llvm::Constant *SrcLocStr =
+      OMPBuilder.getOrCreateDefaultSrcLocStr(SrcLocStrSize);
+  llvm::Value *RTLoc = OMPBuilder.getOrCreateIdent(SrcLocStr, SrcLocStrSize,
+                                                   llvm::omp::IdentFlag(0), 0);
+  llvm::Value *NumIterations = Builder.getInt64(0);
+  llvm::Value *DynCGGroupMem = Builder.getInt32(0);
+
+  bool HasNoWait = false;
+  TargetKernelArgs KArgs(NumTargetItems, BasePointersArray, PointersArray,
+                         SizesArray, MapTypesArray, MapNamesArray, MappersArray,
+                         NumIterations, NumTeamsVal, NumThreadsVal,
+                         DynCGGroupMem, HasNoWait);
+
+  Builder.restoreIP(OMPBuilder.emitKernelLaunch(
+      Builder, OutlinedFn, OutlinedFnID, emitTargetCallFallbackCB, KArgs,
+      DeviceID, RTLoc, AllocaIP));
 }
 
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
-    const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy CodeGenIP,
-    TargetRegionEntryInfo &EntryInfo, int32_t NumTeams, int32_t NumThreads,
-    SmallVectorImpl<Value *> &Args, TargetBodyGenCallbackTy CBFunc) {
+    const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy AllocaIP,
+    OpenMPIRBuilder::InsertPointTy CodeGenIP, TargetRegionEntryInfo &EntryInfo,
+    int32_t NumTeams, int32_t NumThreads, SmallVectorImpl<Value *> &Args,
+    GenMapInfoCallbackTy GenMapInfoCB, TargetBodyGenCallbackTy CBFunc) {
   if (!updateToLocation(Loc))
     return InsertPointTy();
 
   Builder.restoreIP(CodeGenIP);
 
   Function *OutlinedFn;
-  emitTargetOutlinedFunction(*this, Builder, EntryInfo, OutlinedFn, NumTeams,
-                             NumThreads, Args, CBFunc);
+  Constant *OutlinedFnID;
+
+  emitTargetOutlinedFunction(*this, Builder, EntryInfo, OutlinedFn,
+                             OutlinedFnID, NumTeams, NumThreads, Args, CBFunc,
+                             AllocaIP);
   if (!Config.isEmbedded())
-    emitTargetCall(Builder, OutlinedFn, Args);
+    emitTargetCall(*this, Builder, AllocaIP, OutlinedFn, OutlinedFnID, NumTeams,
+                   NumThreads, Args, GenMapInfoCB);
+
   return Builder.saveIP();
 }
 
@@ -4415,6 +4673,335 @@ void OpenMPIRBuilder::emitOffloadingArraysArgument(IRBuilderBase &Builder,
   else
     RTArgs.MappersArray =
         Builder.CreatePointerCast(Info.RTArgs.MappersArray, VoidPtrPtrTy);
+}
+
+void OpenMPIRBuilder::emitNonContiguousDescriptor(InsertPointTy AllocaIP,
+                                                  InsertPointTy CodeGenIP,
+                                                  MapInfosTy &CombinedInfo,
+                                                  TargetDataInfo &Info) {
+  MapInfosTy::StructNonContiguousInfo &NonContigInfo =
+      CombinedInfo.NonContigInfo;
+
+  // Build an array of struct descriptor_dim and then assign it to
+  // offload_args.
+  //
+  // struct descriptor_dim {
+  //  uint64_t offset;
+  //  uint64_t count;
+  //  uint64_t stride
+  // };
+  Type *Int64Ty = Builder.getInt64Ty();
+  StructType *DimTy = StructType::create(
+      M.getContext(), ArrayRef<Type *>({Int64Ty, Int64Ty, Int64Ty}),
+      "struct.descriptor_dim");
+
+  enum { OffsetFD = 0, CountFD, StrideFD };
+  // We need two index variable here since the size of "Dims" is the same as
+  // the size of Components, however, the size of offset, count, and stride is
+  // equal to the size of base declaration that is non-contiguous.
+  for (unsigned I = 0, L = 0, E = NonContigInfo.Dims.size(); I < E; ++I) {
+    // Skip emitting ir if dimension size is 1 since it cannot be
+    // non-contiguous.
+    if (NonContigInfo.Dims[I] == 1)
+      continue;
+    Builder.restoreIP(AllocaIP);
+    ArrayType *ArrayTy = ArrayType::get(DimTy, NonContigInfo.Dims[I]);
+    AllocaInst *DimsAddr =
+        Builder.CreateAlloca(ArrayTy, /* ArraySize = */ nullptr, "dims");
+    Builder.restoreIP(CodeGenIP);
+    for (unsigned II = 0, EE = NonContigInfo.Dims[I]; II < EE; ++II) {
+      unsigned RevIdx = EE - II - 1;
+      Value *DimsLVal = Builder.CreateInBoundsGEP(
+          DimsAddr->getAllocatedType(), DimsAddr,
+          {Builder.getInt64(0), Builder.getInt64(II)});
+      // Offset
+      Value *OffsetLVal = Builder.CreateStructGEP(DimTy, DimsLVal, OffsetFD);
+      Builder.CreateAlignedStore(
+          NonContigInfo.Offsets[L][RevIdx], OffsetLVal,
+          M.getDataLayout().getPrefTypeAlign(OffsetLVal->getType()));
+      // Count
+      Value *CountLVal = Builder.CreateStructGEP(DimTy, DimsLVal, CountFD);
+      Builder.CreateAlignedStore(
+          NonContigInfo.Counts[L][RevIdx], CountLVal,
+          M.getDataLayout().getPrefTypeAlign(CountLVal->getType()));
+      // Stride
+      Value *StrideLVal = Builder.CreateStructGEP(DimTy, DimsLVal, StrideFD);
+      Builder.CreateAlignedStore(
+          NonContigInfo.Strides[L][RevIdx], StrideLVal,
+          M.getDataLayout().getPrefTypeAlign(CountLVal->getType()));
+    }
+    // args[I] = &dims
+    Builder.restoreIP(CodeGenIP);
+    Value *DAddr = Builder.CreatePointerBitCastOrAddrSpaceCast(
+        DimsAddr, Builder.getInt8PtrTy());
+    Value *P = Builder.CreateConstInBoundsGEP2_32(
+        ArrayType::get(Builder.getInt8PtrTy(), Info.NumberOfPtrs),
+        Info.RTArgs.PointersArray, 0, I);
+    Builder.CreateAlignedStore(
+        DAddr, P, M.getDataLayout().getPrefTypeAlign(Builder.getInt8PtrTy()));
+    ++L;
+  }
+}
+
+void OpenMPIRBuilder::emitOffloadingArrays(
+    InsertPointTy AllocaIP, InsertPointTy CodeGenIP, MapInfosTy &CombinedInfo,
+    TargetDataInfo &Info, bool IsNonContiguous,
+    function_ref<void(unsigned int, Value *, Value *)> DeviceAddrCB,
+    function_ref<Value *(unsigned int)> CustomMapperCB) {
+
+  // Reset the array information.
+  Info.clearArrayInfo();
+  Info.NumberOfPtrs = CombinedInfo.BasePointers.size();
+
+  if (Info.NumberOfPtrs) {
+    Builder.restoreIP(AllocaIP);
+    // Detect if we have any capture size requiring runtime evaluation of the
+    // size so that a constant array could be eventually used.
+    ArrayType *PointerArrayType =
+        ArrayType::get(Builder.getInt8PtrTy(), Info.NumberOfPtrs);
+
+    Info.RTArgs.BasePointersArray = Builder.CreateAlloca(
+        PointerArrayType, /* ArraySize = */ nullptr, ".offload_baseptrs");
+
+    Info.RTArgs.PointersArray = Builder.CreateAlloca(
+        PointerArrayType, /* ArraySize = */ nullptr, ".offload_ptrs");
+    AllocaInst *MappersArray = Builder.CreateAlloca(
+        PointerArrayType, /* ArraySize = */ nullptr, ".offload_mappers");
+    Info.RTArgs.MappersArray = MappersArray;
+
+    // If we don't have any VLA types or other types that require runtime
+    // evaluation, we can use a constant array for the map sizes, otherwise we
+    // need to fill up the arrays as we do for the pointers.
+    Type *Int64Ty = Builder.getInt64Ty();
+    SmallVector<Constant *> ConstSizes(
+        CombinedInfo.Sizes.size(), ConstantInt::get(Builder.getInt64Ty(), 0));
+    SmallBitVector RuntimeSizes(CombinedInfo.Sizes.size());
+    for (unsigned I = 0, E = CombinedInfo.Sizes.size(); I < E; ++I) {
+      if (auto *CI = dyn_cast<Constant>(CombinedInfo.Sizes[I])) {
+        if (!isa<ConstantExpr>(CI) && !isa<GlobalValue>(CI)) {
+          if (IsNonContiguous &&
+              static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
+                  CombinedInfo.Types[I] &
+                  OpenMPOffloadMappingFlags::OMP_MAP_NON_CONTIG))
+            ConstSizes[I] = ConstantInt::get(
+                Builder.getInt64Ty(), CombinedInfo.NonContigInfo.Dims[I]);
+          else
+            ConstSizes[I] = CI;
+          continue;
+        }
+      }
+      RuntimeSizes.set(I);
+    }
+
+    if (RuntimeSizes.all()) {
+      ArrayType *SizeArrayType = ArrayType::get(Int64Ty, Info.NumberOfPtrs);
+      Info.RTArgs.SizesArray = Builder.CreateAlloca(
+          SizeArrayType, /* ArraySize = */ nullptr, ".offload_sizes");
+      Builder.restoreIP(CodeGenIP);
+    } else {
+      auto *SizesArrayInit = ConstantArray::get(
+          ArrayType::get(Int64Ty, ConstSizes.size()), ConstSizes);
+      std::string Name = createPlatformSpecificName({"offload_sizes"});
+      auto *SizesArrayGbl =
+          new GlobalVariable(M, SizesArrayInit->getType(), /*isConstant=*/true,
+                             GlobalValue::PrivateLinkage, SizesArrayInit, Name);
+      SizesArrayGbl->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+
+      if (RuntimeSizes.any()) {
+        unsigned IndexSize = M.getDataLayout().getIndexSizeInBits(0);
+        Align OffloadSizeAlign =
+            M.getDataLayout().getABIIntegerTypeAlignment(64);
+        ArrayType *SizeArrayType = ArrayType::get(Int64Ty, Info.NumberOfPtrs);
+        AllocaInst *Buffer = Builder.CreateAlloca(
+            SizeArrayType, /* ArraySize = */ nullptr, ".offload_sizes");
+        Buffer->setAlignment(OffloadSizeAlign);
+        Builder.restoreIP(CodeGenIP);
+        Value *GblConstPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
+            SizesArrayGbl, Int64Ty->getPointerTo());
+        Builder.CreateMemCpy(
+            Buffer, M.getDataLayout().getPrefTypeAlign(Buffer->getType()),
+            GblConstPtr, OffloadSizeAlign,
+            Builder.getIntN(
+                IndexSize,
+                Buffer->getAllocationSize(M.getDataLayout())->getFixedValue()));
+
+        Info.RTArgs.SizesArray = Buffer;
+      } else {
+        Info.RTArgs.SizesArray = SizesArrayGbl;
+      }
+      Builder.restoreIP(CodeGenIP);
+    }
+
+    // The map types are always constant so we don't need to generate code to
+    // fill arrays. Instead, we create an array constant.
+    SmallVector<uint64_t, 4> Mapping;
+    for (auto mapFlag : CombinedInfo.Types)
+      Mapping.push_back(
+          static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
+              mapFlag));
+    std::string MaptypesName = createPlatformSpecificName({"offload_maptypes"});
+    auto *MapTypesArrayGbl = createOffloadMaptypes(Mapping, MaptypesName);
+    Info.RTArgs.MapTypesArray = MapTypesArrayGbl;
+
+    // The information types are only built if provided.
+    if (!CombinedInfo.Names.empty()) {
+      std::string MapnamesName =
+          createPlatformSpecificName({"offload_mapnames"});
+      auto *MapNamesArrayGbl =
+          createOffloadMapnames(CombinedInfo.Names, MapnamesName);
+      Info.RTArgs.MapNamesArray = MapNamesArrayGbl;
+    }
+
+    // If there's a present map type modifier, it must not be applied to the end
+    // of a region, so generate a separate map type array in that case.
+    if (Info.separateBeginEndCalls()) {
+      bool EndMapTypesDiffer = false;
+      for (uint64_t &Type : Mapping) {
+        if (Type &
+            static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
+                OpenMPOffloadMappingFlags::OMP_MAP_PRESENT)) {
+          Type &=
+              ~static_cast<std::underlying_type_t<OpenMPOffloadMappingFlags>>(
+                  OpenMPOffloadMappingFlags::OMP_MAP_PRESENT);
+          EndMapTypesDiffer = true;
+        }
+      }
+      if (EndMapTypesDiffer) {
+        MapTypesArrayGbl = createOffloadMaptypes(Mapping, MaptypesName);
+        Info.RTArgs.MapTypesArrayEnd = MapTypesArrayGbl;
+      }
+    }
+
+    for (unsigned I = 0; I < Info.NumberOfPtrs; ++I) {
+      Value *BPVal = CombinedInfo.BasePointers[I];
+      Value *BP = Builder.CreateConstInBoundsGEP2_32(
+          ArrayType::get(Builder.getInt8PtrTy(), Info.NumberOfPtrs),
+          Info.RTArgs.BasePointersArray, 0, I);
+      BP = Builder.CreatePointerBitCastOrAddrSpaceCast(
+          BP, BPVal->getType()->getPointerTo(/*AddrSpace=*/0));
+      Builder.CreateAlignedStore(
+          BPVal, BP,
+          M.getDataLayout().getPrefTypeAlign(Builder.getInt8PtrTy()));
+
+      if (Info.requiresDevicePointerInfo()) {
+        assert(DeviceAddrCB);
+        DeviceAddrCB(I, BP, BPVal);
+      }
+
+      Value *PVal = CombinedInfo.Pointers[I];
+      Value *P = Builder.CreateConstInBoundsGEP2_32(
+          ArrayType::get(Builder.getInt8PtrTy(), Info.NumberOfPtrs),
+          Info.RTArgs.PointersArray, 0, I);
+      P = Builder.CreatePointerBitCastOrAddrSpaceCast(
+          P, PVal->getType()->getPointerTo(/*AddrSpace=*/0));
+      // TODO: Check alignment correct.
+      Builder.CreateAlignedStore(
+          PVal, P, M.getDataLayout().getPrefTypeAlign(Builder.getInt8PtrTy()));
+
+      if (RuntimeSizes.test(I)) {
+        Value *S = Builder.CreateConstInBoundsGEP2_32(
+            ArrayType::get(Int64Ty, Info.NumberOfPtrs), Info.RTArgs.SizesArray,
+            /*Idx0=*/0,
+            /*Idx1=*/I);
+        Builder.CreateAlignedStore(
+            Builder.CreateIntCast(CombinedInfo.Sizes[I], Int64Ty,
+                                  /*isSigned=*/true),
+            S, M.getDataLayout().getPrefTypeAlign(Builder.getInt8PtrTy()));
+      }
+      // Fill up the mapper array.
+      unsigned IndexSize = M.getDataLayout().getIndexSizeInBits(0);
+      Value *MFunc = ConstantPointerNull::get(Builder.getInt8PtrTy());
+      if (CustomMapperCB)
+        if (Value *CustomMFunc = CustomMapperCB(I))
+          MFunc =
+              Builder.CreatePointerCast(CustomMFunc, Builder.getInt8PtrTy());
+      Value *MAddr = Builder.CreateInBoundsGEP(
+          MappersArray->getAllocatedType(), MappersArray,
+          {Builder.getIntN(IndexSize, 0), Builder.getIntN(IndexSize, I)});
+      Builder.CreateAlignedStore(
+          MFunc, MAddr, M.getDataLayout().getPrefTypeAlign(MAddr->getType()));
+    }
+  }
+
+  if (!IsNonContiguous || CombinedInfo.NonContigInfo.Offsets.empty() ||
+      Info.NumberOfPtrs == 0)
+    return;
+  emitNonContiguousDescriptor(AllocaIP, CodeGenIP, CombinedInfo, Info);
+}
+
+void OpenMPIRBuilder::EmitBranch(BasicBlock *Target) {
+  // Emit a branch from the current block to the target one if this
+  // was a real block.  If this was just a fall-through block after a
+  // terminator, don't emit it.
+  BasicBlock *CurBB = Builder.GetInsertBlock();
+
+  if (!CurBB || CurBB->getTerminator()) {
+    // If there is no insert point or the previous block is already
+    // terminated, don't touch it.
+  } else {
+    // Otherwise, create a fall-through branch.
+    Builder.CreateBr(Target);
+  }
+
+  Builder.ClearInsertionPoint();
+}
+
+void OpenMPIRBuilder::EmitBlock(BasicBlock *BB, Function *CurFn,
+                                bool IsFinished) {
+  BasicBlock *CurBB = Builder.GetInsertBlock();
+
+  // Fall out of the current block (if necessary).
+  EmitBranch(BB);
+
+  if (IsFinished && BB->use_empty()) {
+    delete BB;
+    return;
+  }
+
+  // Place the block after the current block, if possible, or else at
+  // the end of the function.
+  if (CurBB && CurBB->getParent())
+    CurFn->insert(std::next(CurBB->getIterator()), BB);
+  else
+    CurFn->insert(CurFn->end(), BB);
+  Builder.SetInsertPoint(BB);
+}
+
+void OpenMPIRBuilder::emitIfClause(Value *Cond, BodyGenCallbackTy ThenGen,
+                                   BodyGenCallbackTy ElseGen) {
+  // If the condition constant folds and can be elided, try to avoid emitting
+  // the condition and the dead arm of the if/else.
+  if (isa<ConstantInt>(Cond)) {
+    bool CondConstant =
+        cast<ConstantInt>(Cond)->getUniqueInteger().getSExtValue();
+    if (CondConstant)
+      ThenGen(Builder.saveIP(), Builder.saveIP());
+    else
+      ElseGen(Builder.saveIP(), Builder.saveIP());
+    return;
+  }
+
+  Function *CurFn = Builder.GetInsertBlock()->getParent();
+
+  // Otherwise, the condition did not fold, or we couldn't elide it.  Just
+  // emit the conditional branch.
+  BasicBlock *ThenBlock = BasicBlock::Create(M.getContext(), "omp_if.then");
+  BasicBlock *ElseBlock = BasicBlock::Create(M.getContext(), "omp_if.else");
+  BasicBlock *ContBlock = BasicBlock::Create(M.getContext(), "omp_if.end");
+  Builder.CreateCondBr(Cond, ThenBlock, ElseBlock);
+
+  // Emit the 'then' code.
+  EmitBlock(ThenBlock, CurFn);
+  ThenGen(Builder.saveIP(), Builder.saveIP());
+  EmitBranch(ContBlock);
+  // Emit the 'else' code if present.
+  // There is no need to emit line number for unconditional branch.
+  EmitBlock(ElseBlock, CurFn);
+  ElseGen(Builder.saveIP(), Builder.saveIP());
+  // There is no need to emit line number for unconditional branch.
+  EmitBranch(ContBlock);
+  // Emit the continuation block for code after the if.
+  EmitBlock(ContBlock, CurFn, /*IsFinished=*/true);
 }
 
 bool OpenMPIRBuilder::checkAndEmitFlushAfterAtomic(
@@ -4999,7 +5586,9 @@ void OpenMPIRBuilder::OutlineInfo::collectBlocks(
 void OpenMPIRBuilder::createOffloadEntry(Constant *ID, Constant *Addr,
                                          uint64_t Size, int32_t Flags,
                                          GlobalValue::LinkageTypes) {
-  if (!Config.isTargetCodegen()) {
+  // TODO Original check was 'if (!Config.isTargetCodegen())', which fails to
+  // produce nvvm.annotations for the device
+  if (!Config.isEmbedded()) {
     emitOffloadingEntry(ID, Addr->getName(), Size, Flags);
     return;
   }

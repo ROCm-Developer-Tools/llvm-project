@@ -1459,27 +1459,6 @@ LogicalResult CancellationPointOp::verify() {
   return success();
 }
 
-//===----------------------------------------------------------------------===//
-// OpenMPDialect helper functions
-//===----------------------------------------------------------------------===//
-
-void OpenMPDialect::setDeclareTarget(Operation *func, StringRef deviceType) {
-  func->setAttr("omp.declare_target_type",
-                mlir::StringAttr::get(func->getContext(), deviceType));
-}
-
-bool OpenMPDialect::isDeclareTarget(Operation *func) {
-  return func->hasAttr("omp.declare_target_type");
-}
-
-StringRef OpenMPDialect::getDeclareTargetDeviceType(Operation *func) {
-  if (mlir::Attribute declTar = func->getAttr("omp.declare_target_type")) {
-    if (declTar.isa<mlir::StringAttr>())
-      return declTar.cast<mlir::StringAttr>().getValue();
-  }
-  return {};
-}
-
 #define GET_ATTRDEF_CLASSES
 #include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.cpp.inc"
 

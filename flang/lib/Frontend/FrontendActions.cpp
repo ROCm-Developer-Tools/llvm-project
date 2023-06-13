@@ -276,7 +276,10 @@ bool CodeGenAction::beginSourceFileAction() {
 
   // Fetch module from lb, so we can set
   mlirModule = std::make_unique<mlir::ModuleOp>(lb.getModule());
-
+  llvm::StringRef mainFileName =
+      ci.getInvocation().getFrontendOpts().mainFileName;
+  if (!mainFileName.empty())
+    mlirModule->setName(ci.getInvocation().getFrontendOpts().mainFileName);
   if (!setUpTargetMachine())
     return false;
 
@@ -302,12 +305,6 @@ bool CodeGenAction::beginSourceFileAction() {
                        mlir::OpPassManager::Nesting::Implicit);
   pm.enableVerifier(/*verifyPasses=*/true);
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
-
-  // Add OpenMP-related passes
-  if (ci.getInvocation().getFrontendOpts().features.IsEnabled(
-          Fortran::common::LanguageFeature::OpenMP)) {
-    pm.addPass(fir::createCaptureImplicitlyDeclareTargetPass());
-  }
 
   if (mlir::failed(pm.run(*mlirModule))) {
     unsigned diagID = ci.getDiagnostics().getCustomDiagID(

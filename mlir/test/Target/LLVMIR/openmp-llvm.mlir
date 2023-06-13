@@ -2543,3 +2543,75 @@ module attributes {omp.flags = #omp.flags<debug_kind = 0, assume_teams_oversubsc
 // CHECK: @__omp_rtl_assume_no_thread_state = weak_odr hidden constant i32 1
 // CHECK: @__omp_rtl_assume_no_nested_parallelism = weak_odr hidden constant i32 0
 module attributes {omp.flags = #omp.flags<assume_teams_oversubscription = true, assume_no_thread_state = true>} {}
+
+// -----
+
+// CHECK:     define void @any
+// CHECK:     define void @nohost
+// CHECK-NOT: define void @host
+// CHECK-NOT: define void @no_declare_target
+module attributes {omp.is_device = #omp.isdevice<is_device = true>} {
+  llvm.func @any() -> ()
+      attributes {
+        omp.declare_target =
+          #omp.declaretarget<device_type = (any), capture_clause = (to)>
+      } {
+    llvm.return
+  }
+  llvm.func @nohost() -> ()
+      attributes {
+        omp.declare_target =
+          #omp.declaretarget<device_type = (nohost), capture_clause = (to)>
+      } {
+    llvm.call @any() : () -> ()
+    llvm.return
+  }
+  llvm.func @host() -> ()
+      attributes {
+        omp.declare_target =
+          #omp.declaretarget<device_type = (host), capture_clause = (to)>
+      } {
+    llvm.call @any() : () -> ()
+    llvm.return
+  }
+  llvm.func @no_declare_target() -> () {
+    llvm.call @host() : () -> ()
+    llvm.return
+  }
+}
+
+// -----
+
+// CHECK:     define void @any
+// CHECK-NOT: define void @nohost
+// CHECK:     define void @host
+// CHECK:     define void @no_declare_target
+module attributes {omp.is_device = #omp.isdevice<is_device = false>} {
+  llvm.func @any() -> ()
+      attributes {
+        omp.declare_target =
+          #omp.declaretarget<device_type = (any), capture_clause = (to)>
+      } {
+    llvm.return
+  }
+  llvm.func @nohost() -> ()
+      attributes {
+          omp.declare_target =
+            #omp.declaretarget<device_type = (nohost), capture_clause = (to)>
+      } {
+    llvm.call @any() : () -> ()
+    llvm.return
+  }
+  llvm.func @host() -> ()
+      attributes {
+        omp.declare_target =
+          #omp.declaretarget<device_type = (host), capture_clause = (to)>
+      } {
+    llvm.call @any() : () -> ()
+    llvm.return
+  }
+  llvm.func @no_declare_target() -> () {
+    llvm.call @host() : () -> ()
+    llvm.return
+  }
+}

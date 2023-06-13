@@ -405,6 +405,35 @@ private:
   OffloadEntriesDeviceGlobalVarTy OffloadEntriesDeviceGlobalVar;
 };
 
+struct TargetKernelArgs {
+  unsigned NumTargetItems;
+  Value *BasePointersArray;
+  Value *PointersArray;
+  Value *SizesArray;
+  Value *MapTypesArray;
+  Value *MapNamesArray;
+  Value *MappersArray;
+  Value *NumIterations;
+  Value *NumTeams;
+  Value *NumThreads;
+  Value *DynCGGroupMem;
+  bool HasNoWait;
+
+  SmallVector<Value *> getKernelArgsVector(IRBuilderBase &Builder);
+
+  TargetKernelArgs(unsigned NumTargetItems, Value *BasePointersArray,
+                   Value *PointersArray, Value *SizesArray,
+                   Value *MapTypesArray, Value *MapNamesArray,
+                   Value *MappersArray, Value *NumIterations, Value *NumTeams,
+                   Value *NumThreads, Value *DynCGGroupMem, bool HasNoWait)
+      : NumTargetItems(NumTargetItems), BasePointersArray(BasePointersArray),
+        PointersArray(PointersArray), SizesArray(SizesArray),
+        MapTypesArray(MapTypesArray), MapNamesArray(MapNamesArray),
+        MappersArray(MappersArray), NumIterations(NumIterations),
+        NumTeams(NumTeams), NumThreads(NumThreads),
+        DynCGGroupMem(DynCGGroupMem), HasNoWait(HasNoWait) {}
+};
+
 /// An interface to create LLVM-IR for OpenMP directives.
 ///
 /// Each OpenMP directive has a corresponding public generator method.
@@ -1254,6 +1283,24 @@ public:
                                  Value *NumThreads, Value *HostPtr,
                                  ArrayRef<Value *> KernelArgs);
 
+  using EmitFallbackCallbackTy = function_ref<InsertPointTy(InsertPointTy)>;
+
+  /// Generate a target region entry call and host fallback call.
+  ///
+  /// \param Loc The location at which the request originated and is fulfilled.
+  /// \param OutlinedFn The outlined kernel function.
+  /// \param OutlinedFnID The ooulined function ID.
+  /// \param emitTargetCallFallbackCB Call back function to generate host
+  ///        fallback code.
+  /// \param Args Data structure holding information about the kernel arguments.
+  /// \param DeviceID Identifier for the device via the 'device' clause.
+  /// \param RTLoc Source location identifier
+  /// \param AllocaIP The insertion point to be used for alloca instructions.
+  InsertPointTy emitKernelLaunch(
+      const LocationDescription &Loc, Function *OutlinedFn, Value *OutlinedFnID,
+      EmitFallbackCallbackTy emitTargetCallFallbackCB, TargetKernelArgs &Args,
+      Value *DeviceID, Value *RTLoc, InsertPointTy AllocaIP);
+
   /// Generate a barrier runtime call.
   ///
   /// \param Loc The location at which the request originated and is fulfilled.
@@ -1355,6 +1402,25 @@ public:
   /// Computes the size of type in bytes.
   Value *getSizeInBytes(Value *BasePtr);
 
+  // Emit a branch from the current block to the target one if this
+  // was a real block.  If this was just a fall-through block after a
+  // terminator, don't emit it.
+  void EmitBranch(BasicBlock *Target);
+
+  // Create a new Block and place the block after the current block, if
+  // possible, or else at the end of the function.
+  void EmitBlock(BasicBlock *BB, Function *CurFn, bool IsFinished = false);
+
+  /// Emits code for OpenMP 'if' clause using specified \a BodyGenCallbackTy
+  /// Here is the logic:
+  /// if (Cond) {
+  ///   ThenGen();
+  /// } else {
+  ///   ElseGen();
+  /// }
+  void emitIfClause(Value *Cond, BodyGenCallbackTy ThenGen,
+                    BodyGenCallbackTy ElseGen);
+
   /// Create the global variable holding the offload mappings information.
   GlobalVariable *createOffloadMaptypes(SmallVectorImpl<uint64_t> &Mappings,
                                         std::string VarName);
@@ -1368,6 +1434,7 @@ public:
     AllocaInst *ArgsBase = nullptr;
     AllocaInst *Args = nullptr;
     AllocaInst *ArgSizes = nullptr;
+    AllocaInst *Mappers = nullptr;
   };
 
   /// Create the allocas instruction used in call to mapper functions.
@@ -1503,6 +1570,21 @@ public:
                                     OpenMPIRBuilder::TargetDataInfo &Info,
                                     bool EmitDebug = false,
                                     bool ForEndCall = false);
+
+  /// Emit an array of struct descriptors to be assigned to the offload args.
+  void emitNonContiguousDescriptor(InsertPointTy AllocaIP,
+                                   InsertPointTy CodeGenIP,
+                                   MapInfosTy &CombinedInfo,
+                                   TargetDataInfo &Info);
+
+  /// Emit the arrays used to pass the captures and map information to the
+  /// offloading runtime library. If there is no map or capture information,
+  /// return nullptr by reference.
+  void emitOffloadingArrays(
+      InsertPointTy AllocaIP, InsertPointTy CodeGenIP, MapInfosTy &CombinedInfo,
+      TargetDataInfo &Info, bool IsNonContiguous = false,
+      function_ref<void(unsigned int, Value *, Value *)> DeviceAddrCB = nullptr,
+      function_ref<Value *(unsigned int)> CustomMapperCB = nullptr);
 
   /// Creates offloading entry for the provided entry ID \a ID, address \a
   /// Addr, size \a Size, and flags \a Flags.
@@ -1850,28 +1932,29 @@ public:
                                          StringRef EntryFnIDName,
                                          int32_t NumTeams, int32_t NumThreads);
 
+  using GenMapInfoCallbackTy =
+      function_ref<MapInfosTy &(InsertPointTy CodeGenIP)>;
+
   /// Generator for '#omp target data'
   ///
   /// \param Loc The location where the target data construct was encountered.
+  /// \param AllocaIP The insertion points to be used for alloca instructions.
   /// \param CodeGenIP The insertion point at which the target directive code
   /// should be placed.
-  /// \param MapTypeFlags BitVector storing the mapType flags for the
-  /// mapOperands.
-  /// \param MapNames Names for the mapOperands.
-  /// \param MapperAllocas Pointers to the AllocInsts for the map clause.
   /// \param IsBegin If true then emits begin mapper call otherwise emits
   /// end mapper call.
   /// \param DeviceID Stores the DeviceID from the device clause.
   /// \param IfCond Value which corresponds to the if clause condition.
-  /// \param ProcessMapOpCB Callback that generates code for the map clause.
-  /// \param BodyGenCB Callback that will generate the region code.
+  /// \param Info Stores all information realted to the Target Data directive.
+  /// \param GenMapInfoCB Callback that populates the MapInfos and returns.
+  /// \param BodyGenCB Optional Callback to generate the region code.
   OpenMPIRBuilder::InsertPointTy createTargetData(
-      const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy CodeGenIP,
-      SmallVectorImpl<uint64_t> &MapTypeFlags,
-      SmallVectorImpl<Constant *> &MapNames,
-      struct MapperAllocas &MapperAllocas, bool IsBegin, int64_t DeviceID,
-      Value *IfCond, BodyGenCallbackTy ProcessMapOpCB,
-      BodyGenCallbackTy BodyGenCB = {});
+      const LocationDescription &Loc, InsertPointTy AllocaIP,
+      InsertPointTy CodeGenIP, Value *DeviceID, Value *IfCond,
+      TargetDataInfo &Info, GenMapInfoCallbackTy GenMapInfoCB,
+      omp::RuntimeFunction *MapperFunc = nullptr,
+      function_ref<InsertPointTy(InsertPointTy CodeGenIP, int BodyGenType)>
+          BodyGenCB = nullptr);
 
   using TargetBodyGenCallbackTy = function_ref<InsertPointTy(
       InsertPointTy AllocaIP, InsertPointTy CodeGenIP)>;
@@ -1888,10 +1971,12 @@ public:
   /// as arguments to the outlined function.
   /// \param BodyGenCB Callback that will generate the region code.
   InsertPointTy createTarget(const LocationDescription &Loc,
+                             OpenMPIRBuilder::InsertPointTy AllocaIP,
                              OpenMPIRBuilder::InsertPointTy CodeGenIP,
                              TargetRegionEntryInfo &EntryInfo, int32_t NumTeams,
                              int32_t NumThreads,
                              SmallVectorImpl<Value *> &Inputs,
+                             GenMapInfoCallbackTy GenMapInfoCB,
                              TargetBodyGenCallbackTy BodyGenCB);
 
   /// Declarations for LLVM-IR types (simple, array, function and structure) are

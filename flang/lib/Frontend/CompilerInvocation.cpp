@@ -927,6 +927,9 @@ bool CompilerInvocation::createFromArgs(
   res.frontendOpts.mlirArgs =
       args.getAllArgValues(clang::driver::options::OPT_mmlir);
 
+  res.frontendOpts.mainFileName = std::string(
+      args.getLastArgValue(clang::driver::options::OPT_main_file_name));
+
   success &= parseFloatingPointArgs(res, args, diags);
 
   return success;

@@ -626,6 +626,32 @@ After the completion of the Name Resolution phase,
 all the data-sharing or data-mapping attributes marked for the `Symbols`
 may be used later in the Semantics Analysis and in the Code Generation.
 
+## Declare Target & Target Region Implicit Function Capture Analysis
+
+The OpenMP specification states that all functions and subroutines called
+from a _declare target_ function/subroutine or _target region_ are to
+be treated as if they are marked as _declare target_ with a _to_ clause.
+
+The OpenMP specifications current wording (emphasis on current) gives
+wiggle room for this to be done later in the compilation pipeline (e.g.
+the MLIR -> LLVM IR phase). However, this means filtering out functions
+from modules they do not belong in requires significant extra work on the
+compilers behalf and less strict semantic rules can be applied to these
+implicit target functions. So, in this case we have opted to perform this
+implicit capture as a semantic analysis pass (_ImplicitDeclareTargetCapture_),
+which marks all functions and subroutines (and their callees) that are called
+within _target_ and _declare target_ functions as _declare _target_
+themselves by materializing the function or subroutines name in the original
+declare target's clause list.
+
+This pass occurs after name and scope resolution, primarily so that all name
+and symbol information is available for access and use and all functions are
+now resolved as functions (i.e. no misinterpretation as an array).
+
+The semantic analysis pass has yet to be extended to support implicit
+capture for target regions, however, this is an intended extension for
+the future.
+
 ## Module File Extensions for OpenMP
 
 After the successful compilation of modules and submodules

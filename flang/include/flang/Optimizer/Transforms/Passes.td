@@ -286,13 +286,6 @@ def PolymorphicOpConversion : Pass<"fir-polymorphic-op", "::mlir::func::FuncOp">
   ];
 }
 
-def CaptureImplicitlyDeclareTargetPass
-    : Pass<"capture-implicitly-declare-target", "mlir::ModuleOp"> {
-  let summary = "Marks all functions referenced by a declare target function as declare target";
-  let constructor = "::fir::createCaptureImplicitlyDeclareTargetPass()";
-  let dependentDialects = ["mlir::omp::OpenMPDialect"];
-}
-
 def LoopVersioning : Pass<"loop-versioning", "mlir::func::FuncOp"> {
   let summary = "Loop Versioning";
   let description = [{
