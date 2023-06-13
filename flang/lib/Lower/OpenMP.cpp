@@ -796,9 +796,38 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
         TODO(location, "OMPD_target_data MapOperand BoxType");
   };
 
+  // Ref pointers are used rather than direct access when we
+    // map a declare target link variable or declare target to
+    // with USM mode.
+  auto requiresReference = [&firOpBuilder](const mlir::Value &mapOp) {
+    auto *op = mapOp.getDefiningOp();
+    if (auto addrOp = dyn_cast<fir::AddrOfOp>(op)) {
+      op = firOpBuilder.getModule().lookupSymbol(addrOp.getSymbol());
+    }
+
+    // TODO: Add To+USM mode case when we have some method of
+    // enabling USM in the frontend and getting this information
+    if (auto declareTargetGlobal =
+            llvm::dyn_cast<mlir::omp::DeclareTargetInterface>(op)) {
+      if (declareTargetGlobal.isDeclareTarget() &&
+            ((declareTargetGlobal.getDeclareTargetCaptureClause() ==
+              mlir::omp::DeclareTargetCaptureClause::link) /*||
+             (declareTargetGlobal.getDeclareTargetCaptureClause() ==
+                  mlir::omp::DeclareTargetCaptureClause::to &&
+                hasRequiresUnifiedSharedMemory)*/)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+  
   auto addMapClause = [&](const auto &mapClause, mlir::Location &location) {
     const auto &oMapType =
         std::get<std::optional<Fortran::parser::OmpMapType>>(mapClause->v.t);
+    auto mapType = std::get<Fortran::parser::OmpMapType::Type>(
+        std::get<std::optional<Fortran::parser::OmpMapType>>(mapClause->v.t)
+            ->t);
     llvm::omp::OpenMPOffloadMappingFlags mapTypeBits =
         llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_NONE;
     // If the map type is specified, then process it else Tofrom is the default.
@@ -837,12 +866,6 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
 
     // TODO: Add support MapTypeModifiers close, mapper, present, iterator
 
-    mlir::IntegerAttr mapTypeAttr = firOpBuilder.getIntegerAttr(
-        firOpBuilder.getI64Type(),
-        static_cast<
-            std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
-            mapTypeBits));
-
     llvm::SmallVector<mlir::Value> mapOperand;
     /// Check for unsupported map operand types.
     for (const Fortran::parser::OmpObject &ompObject :
@@ -858,6 +881,24 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
 
     for (mlir::Value mapOp : mapOperand) {
       checkType(mapOp.getLoc(), mapOp.getType());
+      
+      llvm::omp::OpenMPOffloadMappingFlags perValMapTypeBit = mapTypeBits;
+      
+      // TODO: Clang special cases this for several other cases (member
+      // references as one example), see getMapTypeBits inside of
+      // generateInfoForComponentList in Clang's CGOpenMPRuntime for
+      // reference. We only support the declare target link variation
+      // at the moment.
+      if (requiresReference(mapOp))
+        perValMapTypeBit |=
+            llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
+
+      mlir::IntegerAttr mapTypeAttr = firOpBuilder.getIntegerAttr(
+          firOpBuilder.getI64Type(),
+          static_cast<
+              std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
+              perValMapTypeBit));
+      
       mapOperands.push_back(mapOp);
       mapTypes.push_back(mapTypeAttr);
     }

@@ -1500,7 +1500,8 @@ static void processMapOp(llvm::IRBuilderBase &builder,
     combinedInfo.Pointers.emplace_back(mapOpValue);
     combinedInfo.Names.emplace_back(
         mlir::LLVM::createMappingInformation(mapOp.getLoc(), *ompBuilder));
-    combinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(18));
+    combinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(
+        mapTypes[index].dyn_cast<mlir::IntegerAttr>().getInt()));
     combinedInfo.Sizes.emplace_back(
         builder.getInt64(getSizeInBytes(DL, mapOp.getType())));
     index++;
