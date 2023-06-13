@@ -4098,7 +4098,6 @@ Constant *OpenMPIRBuilder::createOutlinedFunctionID(Function *OutlinedFn,
     assert(OutlinedFn && "The outlined function must exist if embedded");
     return ConstantExpr::getBitCast(OutlinedFn, Builder.getInt8PtrTy());
   }
- llvm::errs() << "2 \n";
   return new GlobalVariable(
       M, Builder.getInt8Ty(), /*isConstant=*/true, GlobalValue::WeakAnyLinkage,
       Constant::getNullValue(Builder.getInt8Ty()), EntryFnIDName);
@@ -4294,6 +4293,10 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
 
 static Value *castInput(IRBuilderBase &Builder, unsigned AddrSpace,
                         Value *Input, Argument &Arg) {
+
+  if (!Input->getType()->isPointerTy()) {
+    return Input;
+  }
   // assert(Input->getType()->isPointerTy() &&
   //        "Only handling pointer parameters for now");
   auto Addr =
@@ -4359,11 +4362,9 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
     for (auto &Arg : Inputs)
       ParameterTypes.push_back(Arg->getType());
   }
-  llvm::errs() << "2 \n";
 
   auto FuncType = FunctionType::get(Builder.getVoidTy(), ParameterTypes,
                                     /*isVarArg*/ false);
-  llvm::errs() << "3 \n";
   auto Func = Function::Create(FuncType, GlobalValue::InternalLinkage, FuncName,
                                Builder.GetInsertBlock()->getModule());
 
@@ -4379,22 +4380,26 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   // Generate the region into the function.
   BasicBlock *EntryBB = BasicBlock::Create(Builder.getContext(), "entry", Func);
   Builder.SetInsertPoint(EntryBB);
-llvm::errs() << "5 \n";
+
   // Insert target init call in the device compilation pass.
   if (OMPBuilder.Config.isTargetDevice())
     Builder.restoreIP(OMPBuilder.createTargetInit(Builder, /*IsSPMD*/ false));
 
   Builder.restoreIP(CBFunc(Builder.saveIP(), Builder.saveIP()));
-llvm::errs() << "6 \n";
+
   // Insert target deinit call in the device compilation pass.
   if (OMPBuilder.Config.isTargetDevice())
     OMPBuilder.createTargetDeinit(Builder, /*IsSPMD*/ false);
-llvm::errs() << "7 \n";
+
   // Insert return instruction.
   Builder.CreateRetVoid();
 
   Builder.SetInsertPoint(&Func->getEntryBlock(),
                          Func->getEntryBlock().getFirstNonPHIOrDbgOrAlloca());
+
+  llvm::errs() << "is embedded?" << OMPBuilder.Config.isEmbedded() << "\n";
+  llvm::errs() << "inputs Size: " << Inputs.size() << "\n";
+  // llvm::errs() << "Func Args Size: " << F << "\n";
 
   // Rewrite uses of input valus to parameters.
   for (auto InArg : zip(Inputs, Func->args())) {
@@ -4407,7 +4412,6 @@ llvm::errs() << "7 \n";
                         OMPBuilder.M.getDataLayout().getAllocaAddrSpace(),
                         Input, Arg)
             : &Arg;
-
     // Collect all the instructions
     // assert(CastInput->getType()->isPointerTy() && "Not Pointer Type");
     for (User *User : make_early_inc_range(Input->users()))

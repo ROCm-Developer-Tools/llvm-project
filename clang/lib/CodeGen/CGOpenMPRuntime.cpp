@@ -7587,6 +7587,7 @@ private:
               }
             }
             assert(Size && "Failed to determine structure size");
+          llvm::errs() << "assign combined info 1 \n";
             CombinedInfo.Exprs.emplace_back(MapDecl, MapExpr);
             CombinedInfo.BasePointers.push_back(BP.getPointer());
             CombinedInfo.DevicePtrDecls.push_back(nullptr);
@@ -7600,6 +7601,7 @@ private:
                                                                       : 1);
             LB = CGF.Builder.CreateConstGEP(ComponentLB, 1);
           }
+          llvm::errs() << "assign combined info 2 \n";
           CombinedInfo.Exprs.emplace_back(MapDecl, MapExpr);
           CombinedInfo.BasePointers.push_back(BP.getPointer());
           CombinedInfo.DevicePtrDecls.push_back(nullptr);
@@ -7619,6 +7621,7 @@ private:
         llvm::Value *Size = getExprTypeSize(I->getAssociatedExpression());
         if (!IsMemberPointerOrAddr ||
             (Next == CE && MapType != OMPC_MAP_unknown)) {
+                    llvm::errs() << "assign combined info 3 \n";
           CombinedInfo.Exprs.emplace_back(MapDecl, MapExpr);
           CombinedInfo.BasePointers.push_back(BP.getPointer());
           CombinedInfo.DevicePtrDecls.push_back(nullptr);
