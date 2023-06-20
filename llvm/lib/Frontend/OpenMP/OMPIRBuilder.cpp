@@ -4291,23 +4291,56 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
   return Builder.saveIP();
 }
 
-static Value *castInput(IRBuilderBase &Builder, unsigned AddrSpace,
-                        Value *Input, Argument &Arg) {
+static Value *
+castInput(IRBuilderBase &Builder, unsigned AddrSpace, Value *Input,
+          Argument &Arg,
+          OffloadEntriesInfoManager::OMPTargetVarCaptureKind Capture) {
+  //   if (I->capturesVariable()) { // by ref
+  //   llvm::errs() << "RD 1 \n";
+  //   const VarDecl *Var = I->getCapturedVar();
+  //   QualType VarTy = Var->getType();
+  //   Address ArgAddr = ArgLVal.getAddress(CGF);
+  //   if (ArgLVal.getType()->isLValueReferenceType()) {
+  //     ArgAddr = CGF.EmitLoadOfReference(ArgLVal);
+  //   } else if (!VarTy->isVariablyModifiedType() || !VarTy->isPointerType()) {
+  //     assert(ArgLVal.getType()->isPointerType());
+  //     ArgAddr = CGF.EmitLoadOfPointer(
+  //         ArgAddr, ArgLVal.getType()->castAs<PointerType>());
+  //   }
+  //   if (!FO.RegisterCastedArgsOnly) {
+  //     LocalAddrs.insert(
+  //         {Args[Cnt], {Var, ArgAddr.withAlignment(Ctx.getDeclAlign(Var))}});
+  //   }
+  // } else if (I->capturesVariableByCopy()) { // by copy
+  //   llvm::errs() << "RD 2 \n";
+  //   assert(!FD->getType()->isAnyPointerType() &&
+  //          "Not expecting a captured pointer.");
+  //   const VarDecl *Var = I->getCapturedVar();
+  //   LocalAddrs.insert({Args[Cnt],
+  //                      {Var, FO.UIntPtrCastRequired
+  //                                ? castValueFromUintptr(
+  //                                      CGF, I->getLocation(), FD->getType(),
+  //                                      Args[Cnt]->getName(), ArgLVal)
+  //                                : ArgLVal.getAddress(CGF)}});
+  // }
 
   if (!Input->getType()->isPointerTy()) {
     return Input;
   }
-  // assert(Input->getType()->isPointerTy() &&
-  //        "Only handling pointer parameters for now");
+
   auto Addr =
       Builder.CreateAlloca(Type::getInt64Ty(Builder.getContext()), AddrSpace);
   auto AddrAscast =
       Builder.CreatePointerBitCastOrAddrSpaceCast(Addr, Input->getType());
   Builder.CreateStore(&Arg, AddrAscast);
-  auto CastAddr = Builder.CreateLoad(
-      Type::getInt32Ty(Builder.getContext())->getPointerTo(), AddrAscast);
 
-  return CastAddr;
+  // TODO: fix below code to look a little more like the commented out code
+  if (Capture != OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+                     OMPTargetVarCaptureByRef)
+    return AddrAscast;
+
+  return Builder.CreateLoad(
+      Type::getInt32Ty(Builder.getContext())->getPointerTo(), AddrAscast);
 }
 
 static void emitUsed(StringRef Name, std::vector<llvm::WeakTrackingVH> &List,
@@ -4349,10 +4382,13 @@ emitExecutionMode(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   LLVMCompilerUsed.emplace_back(GVMode);
 }
 
-static Function *
-createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
-                       StringRef FuncName, SmallVectorImpl<Value *> &Inputs,
-                       OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc) {
+static Function *createOutlinedFunction(
+    OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder, StringRef FuncName,
+    SmallVectorImpl<Value *> &Inputs,
+    SmallVectorImpl<OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+        &InputsCaptureKind,
+    OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
+    OpenMPIRBuilder::InsertPointTy AllocaIP) {
   SmallVector<Type *> ParameterTypes;
   if (OMPBuilder.Config.isTargetDevice()) {
     // All parameters are passed as i64
@@ -4402,15 +4438,17 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   // llvm::errs() << "Func Args Size: " << F << "\n";
 
   // Rewrite uses of input valus to parameters.
-  for (auto InArg : zip(Inputs, Func->args())) {
+  for (auto InArg : zip(Inputs, Func->args(), InputsCaptureKind)) {
     Value *Input = std::get<0>(InArg);
     Argument &Arg = std::get<1>(InArg);
-
+    OffloadEntriesInfoManager::OMPTargetVarCaptureKind Capture =
+        std::get<2>(InArg);
+    
     Value *CastInput =
         OMPBuilder.Config.isTargetDevice()
             ? castInput(Builder,
                         OMPBuilder.M.getDataLayout().getAllocaAddrSpace(),
-                        Input, Arg)
+                        Input, Arg, Capture)
             : &Arg;
     // Collect all the instructions
     // assert(CastInput->getType()->isPointerTy() && "Not Pointer Type");
@@ -4426,20 +4464,21 @@ createOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   return Func;
 }
 
-static void
-emitTargetOutlinedFunction(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
-                           TargetRegionEntryInfo &EntryInfo,
-                           Function *&OutlinedFn, Constant *&OutlinedFnID,
-                           int32_t NumTeams, int32_t NumThreads,
-                           SmallVectorImpl<Value *> &Inputs,
-                           OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
-                           OpenMPIRBuilder::InsertPointTy AllocaIP) {
+static void emitTargetOutlinedFunction(
+    OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
+    TargetRegionEntryInfo &EntryInfo, Function *&OutlinedFn,
+    Constant *&OutlinedFnID, int32_t NumTeams, int32_t NumThreads,
+    SmallVectorImpl<Value *> &Inputs,
+    SmallVectorImpl<OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+        &InputsCaptureKind,
+    OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
+    OpenMPIRBuilder::InsertPointTy AllocaIP) {
 
   OpenMPIRBuilder::FunctionGenCallback &&GenerateOutlinedFunction =
-      [&OMPBuilder, &Builder, &Inputs, &CBFunc,
+      [&OMPBuilder, &Builder, &Inputs, &InputsCaptureKind, &CBFunc,
        &AllocaIP](StringRef EntryFnName) {
         return createOutlinedFunction(OMPBuilder, Builder, EntryFnName, Inputs,
-                                      CBFunc);
+                                      InputsCaptureKind, CBFunc, AllocaIP);
       };
 
   OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction,
@@ -4500,6 +4539,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
     const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy AllocaIP,
     OpenMPIRBuilder::InsertPointTy CodeGenIP, TargetRegionEntryInfo &EntryInfo,
     int32_t NumTeams, int32_t NumThreads, SmallVectorImpl<Value *> &Args,
+    SmallVectorImpl<OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+        &ArgsCaptureKind,
     GenMapInfoCallbackTy GenMapInfoCB, TargetBodyGenCallbackTy CBFunc) {
   if (!updateToLocation(Loc))
     return InsertPointTy();
@@ -4509,8 +4550,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
   Function *OutlinedFn;
   Constant *OutlinedFnID;
   emitTargetOutlinedFunction(*this, Builder, EntryInfo, OutlinedFn,
-                             OutlinedFnID, NumTeams, NumThreads, Args, CBFunc,
-                             AllocaIP);
+                             OutlinedFnID, NumTeams, NumThreads, Args,
+                             ArgsCaptureKind, CBFunc, AllocaIP);
   if (!Config.isTargetDevice())
     emitTargetCall(*this, Builder, AllocaIP, OutlinedFn, OutlinedFnID, NumTeams,
                    NumThreads, Args, GenMapInfoCB);

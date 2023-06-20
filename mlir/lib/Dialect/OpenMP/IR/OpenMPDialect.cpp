@@ -10,7 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPDialect.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/IR/Attributes.h"
@@ -28,10 +28,10 @@
 #include <cstddef>
 #include <optional>
 
-#include "mlir/Dialect/OpenMP/OpenMPOpsDialect.cpp.inc"
-#include "mlir/Dialect/OpenMP/OpenMPOpsEnums.cpp.inc"
-#include "mlir/Dialect/OpenMP/OpenMPOpsInterfaces.cpp.inc"
-#include "mlir/Dialect/OpenMP/OpenMPTypeInterfaces.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsDialect.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsEnums.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsInterfaces.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPTypeInterfaces.cpp.inc"
 
 using namespace mlir;
 using namespace mlir::omp;
@@ -59,11 +59,11 @@ struct OpenMPDialectFoldInterface : public DialectFoldInterface {
 void OpenMPDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
-#include "mlir/Dialect/OpenMP/OpenMPOps.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOps.cpp.inc"
       >();
   addAttributes<
 #define GET_ATTRDEF_LIST
-#include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsAttributes.cpp.inc"
       >();
 
   addInterface<OpenMPDialectFoldInterface>();
@@ -1509,7 +1509,7 @@ LogicalResult CancellationPointOp::verify() {
 }
 
 #define GET_ATTRDEF_CLASSES
-#include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsAttributes.cpp.inc"
 
 #define GET_OP_CLASSES
-#include "mlir/Dialect/OpenMP/OpenMPOps.cpp.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOps.cpp.inc"

@@ -34,6 +34,7 @@
 #include "flang/Semantics/unparse-with-symbols.h"
 #include "flang/Tools/CrossToolHelpers.h"
 
+#include "mlir/Dialect/OpenMP/Transforms/Passes.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
@@ -317,6 +318,13 @@ bool CodeGenAction::beginSourceFileAction() {
   }
 
   pm.enableVerifier(/*verifyPasses=*/true);
+
+  // Add OpenMP-related passes
+  if (ci.getInvocation().getFrontendOpts().features.IsEnabled(
+          Fortran::common::LanguageFeature::OpenMP)) {
+    pm.addPass(mlir::omp::createTargetOpMapCapturePass());
+  }
+
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
 
   if (mlir::failed(pm.run(*mlirModule))) {

@@ -7018,6 +7018,7 @@ private:
       OpenMPMapClauseKind MapType, ArrayRef<OpenMPMapModifierKind> MapModifiers,
       ArrayRef<OpenMPMotionModifierKind> MotionModifiers, bool IsImplicit,
       bool AddPtrFlag, bool AddIsTargetParamFlag, bool IsNonContiguous) const {
+    llvm::errs() << "I call getMapTypeBits \n";
     OpenMPOffloadMappingFlags Bits =
         IsImplicit ? OpenMPOffloadMappingFlags::OMP_MAP_IMPLICIT
                    : OpenMPOffloadMappingFlags::OMP_MAP_NONE;
@@ -7033,6 +7034,7 @@ private:
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_TO;
       break;
     case OMPC_MAP_from:
+      llvm::errs() << "from? \n";
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_FROM;
       break;
     case OMPC_MAP_tofrom:
@@ -7045,10 +7047,16 @@ private:
     case OMPC_MAP_unknown:
       llvm_unreachable("Unexpected map type!");
     }
-    if (AddPtrFlag)
+    if (AddPtrFlag) {
+      llvm::errs() << "PtrFlag? \n";
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
-    if (AddIsTargetParamFlag)
+    }
+    if (AddIsTargetParamFlag) {
+      llvm::errs() << "is target param \n";
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
+    }
+
+    llvm::errs() << "before map modifier: " << (int)Bits << "\n";
     if (llvm::is_contained(MapModifiers, OMPC_MAP_MODIFIER_always))
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_ALWAYS;
     if (llvm::is_contained(MapModifiers, OMPC_MAP_MODIFIER_close))
@@ -7058,8 +7066,12 @@ private:
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_PRESENT;
     if (llvm::is_contained(MapModifiers, OMPC_MAP_MODIFIER_ompx_hold))
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD;
-    if (IsNonContiguous)
+
+    llvm::errs() << "after map modifier: " << (int)Bits << "\n";
+    if (IsNonContiguous) {
+      llvm::errs() << "Is non contig \n";
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_NON_CONTIG;
+    }
     return Bits;
   }
 
@@ -7621,7 +7633,6 @@ private:
         llvm::Value *Size = getExprTypeSize(I->getAssociatedExpression());
         if (!IsMemberPointerOrAddr ||
             (Next == CE && MapType != OMPC_MAP_unknown)) {
-                    llvm::errs() << "assign combined info 3 \n";
           CombinedInfo.Exprs.emplace_back(MapDecl, MapExpr);
           CombinedInfo.BasePointers.push_back(BP.getPointer());
           CombinedInfo.DevicePtrDecls.push_back(nullptr);
@@ -7645,18 +7656,23 @@ private:
               !IsExpressionFirstInfo || RequiresReference ||
                   FirstPointerInComplexData || IsMemberReference,
               IsCaptureFirstInfo && !RequiresReference, IsNonContiguous);
+          llvm::errs() << "I getMapTypeBits \n";
 
+          llvm::errs() << "The Flag value: " << (std::uint32_t)Flags << "\n";
           if (!IsExpressionFirstInfo || IsMemberReference) {
             // If we have a PTR_AND_OBJ pair where the OBJ is a pointer as well,
             // then we reset the TO/FROM/ALWAYS/DELETE/CLOSE flags.
-            if (IsPointer || (IsMemberReference && Next != CE))
+            if (IsPointer || (IsMemberReference && Next != CE)) {
+              llvm::errs() << "I do big bit shift \n";
               Flags &= ~(OpenMPOffloadMappingFlags::OMP_MAP_TO |
                          OpenMPOffloadMappingFlags::OMP_MAP_FROM |
                          OpenMPOffloadMappingFlags::OMP_MAP_ALWAYS |
                          OpenMPOffloadMappingFlags::OMP_MAP_DELETE |
                          OpenMPOffloadMappingFlags::OMP_MAP_CLOSE);
+            }
 
             if (ShouldBeMemberOf) {
+              llvm::errs() << "I do member of \n";
               // Set placeholder value MEMBER_OF=FFFF to indicate that the flag
               // should be later updated with the correct value of MEMBER_OF.
               Flags |= OpenMPOffloadMappingFlags::OMP_MAP_MEMBER_OF;
@@ -7665,7 +7681,7 @@ private:
               ShouldBeMemberOf = false;
             }
           }
-
+llvm::errs() << "Asigned Combined Info 3  \n";
           CombinedInfo.Types.push_back(Flags);
         }
 
@@ -8135,6 +8151,7 @@ private:
           UseDeviceDataCombinedInfo.Pointers.push_back(Ptr);
           UseDeviceDataCombinedInfo.Sizes.push_back(
               llvm::Constant::getNullValue(CGF.Int64Ty));
+              llvm::errs() << "Asigned Combined Info 6 \n";
           UseDeviceDataCombinedInfo.Types.push_back(
               OpenMPOffloadMappingFlags::OMP_MAP_RETURN_PARAM);
           UseDeviceDataCombinedInfo.Mappers.push_back(nullptr);
@@ -8286,6 +8303,7 @@ private:
           unsigned CurrentBasePointersIdx = CurInfo.BasePointers.size();
           CurInfo.NonContigInfo.IsNonContiguous =
               L.Components.back().isNonContiguous();
+          llvm::errs() << "3 \n";
           generateInfoForComponentList(
               L.MapType, L.MapModifiers, L.MotionModifiers, L.Components,
               CurInfo, PartialStruct, /*IsFirstComponentList=*/false,
@@ -8327,6 +8345,7 @@ private:
             // Entry is RETURN_PARAM. Also, set the placeholder value
             // MEMBER_OF=FFFF so that the entry is later updated with the
             // correct value of MEMBER_OF.
+            llvm::errs() << "Asigned Combined Info 7 \n";
             CurInfo.Types.push_back(
                 OpenMPOffloadMappingFlags::OMP_MAP_RETURN_PARAM |
                 OpenMPOffloadMappingFlags::OMP_MAP_MEMBER_OF);
@@ -8337,6 +8356,7 @@ private:
             // Entry is PTR_AND_OBJ and RETURN_PARAM. Also, set the
             // placeholder value MEMBER_OF=FFFF so that the entry is later
             // updated with the correct value of MEMBER_OF.
+            llvm::errs() << "Asigned Combined Info 8 \n";
             CurInfo.Types.push_back(
                 OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ |
                 OpenMPOffloadMappingFlags::OMP_MAP_RETURN_PARAM |
@@ -8479,6 +8499,7 @@ public:
     }
     CombinedInfo.Mappers.push_back(nullptr);
     // Map type is always TARGET_PARAM, if generate info for captures.
+    llvm::errs() << "Asigned Combined Info 9 \n";
     CombinedInfo.Types.push_back(
         NotTargetParams ? OpenMPOffloadMappingFlags::OMP_MAP_NONE
                         : OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM);
@@ -8570,6 +8591,7 @@ public:
       CombinedInfo.Sizes.push_back(
           CGF.Builder.CreateIntCast(CGF.getTypeSize(CGF.getContext().VoidPtrTy),
                                     CGF.Int64Ty, /*isSigned=*/true));
+      llvm::errs() << "Asigned Combined Info 10 \n";
       CombinedInfo.Types.push_back(
           OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ |
           OpenMPOffloadMappingFlags::OMP_MAP_LITERAL |
@@ -8610,6 +8632,7 @@ public:
         CombinedInfo.Pointers.push_back(VarRVal.getScalarVal());
         CombinedInfo.Sizes.push_back(llvm::ConstantInt::get(CGF.Int64Ty, 0));
       }
+      llvm::errs() << "Asigned Combined Info 11 \n";
       CombinedInfo.Types.push_back(
           OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ |
           OpenMPOffloadMappingFlags::OMP_MAP_LITERAL |
@@ -8672,6 +8695,7 @@ public:
     // pass the pointer by value. If it is a reference to a declaration, we just
     // pass its value.
     if (VD && (DevPointersMap.count(VD) || HasDevAddrsMap.count(VD))) {
+      llvm::errs() << "1 \n";
       CombinedInfo.Exprs.push_back(VD);
       CombinedInfo.BasePointers.emplace_back(Arg);
       CombinedInfo.DevicePtrDecls.emplace_back(VD);
@@ -8680,6 +8704,7 @@ public:
       CombinedInfo.Sizes.push_back(CGF.Builder.CreateIntCast(
           CGF.getTypeSize(CGF.getContext().VoidPtrTy), CGF.Int64Ty,
           /*isSigned=*/true));
+          llvm::errs() << "Asigned Combined Info 12 \n";
       CombinedInfo.Types.push_back(
           OpenMPOffloadMappingFlags::OMP_MAP_LITERAL |
           OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM);
@@ -8879,6 +8904,7 @@ public:
           L;
       ArrayRef<OMPClauseMappableExprCommon::MappableExprComponentListRef>
           OverlappedComponents = Pair.getSecond();
+          llvm::errs() << "1 \n";
       generateInfoForComponentList(
           MapType, MapModifiers, std::nullopt, Components, CombinedInfo,
           PartialStruct, IsFirstComponentList, IsImplicit, Mapper,
@@ -8896,11 +8922,14 @@ public:
       std::tie(Components, MapType, MapModifiers, IsImplicit, Mapper, VarRef) =
           L;
       auto It = OverlappedData.find(&L);
-      if (It == OverlappedData.end())
+      if (It == OverlappedData.end()) {
+        llvm::errs() << "2 \n";
         generateInfoForComponentList(MapType, MapModifiers, std::nullopt,
                                      Components, CombinedInfo, PartialStruct,
                                      IsFirstComponentList, IsImplicit, Mapper,
                                      /*ForDeviceAddr=*/false, VD, VarRef);
+
+        }
       IsFirstComponentList = false;
     }
   }
@@ -8923,6 +8952,7 @@ public:
           CGF.Builder.CreateIntCast(CGF.getTypeSize(PtrTy->getPointeeType()),
                                     CGF.Int64Ty, /*isSigned=*/true));
       // Default map type.
+      llvm::errs() << "Asigned Combined Info 13 \n";
       CombinedInfo.Types.push_back(OpenMPOffloadMappingFlags::OMP_MAP_TO |
                                    OpenMPOffloadMappingFlags::OMP_MAP_FROM);
     } else if (CI.capturesVariableByCopy()) {
@@ -8935,6 +8965,7 @@ public:
       if (!RI.getType()->isAnyPointerType()) {
         // We have to signal to the runtime captures passed by value that are
         // not pointers.
+        llvm::errs() << "Asigned Combined Info 14 \n";
         CombinedInfo.Types.push_back(
             OpenMPOffloadMappingFlags::OMP_MAP_LITERAL);
         CombinedInfo.Sizes.push_back(CGF.Builder.CreateIntCast(
@@ -8957,6 +8988,7 @@ public:
       // The default map type for a scalar/complex type is 'to' because by
       // default the value doesn't have to be retrieved. For an aggregate
       // type, the default is 'tofrom'.
+      llvm::errs() << "Asigned Combined Info 15 \n";
       CombinedInfo.Types.push_back(getMapModifiersForPrivateClauses(CI));
       const VarDecl *VD = CI.getCapturedVar();
       auto I = FirstPrivateDecls.find(VD);
@@ -9688,6 +9720,7 @@ static void emitTargetCallKernelLaunch(
       CurInfo.Pointers.push_back(*CV);
       CurInfo.Sizes.push_back(CGF.Builder.CreateIntCast(
           CGF.getTypeSize(RI->getType()), CGF.Int64Ty, /*isSigned=*/true));
+      llvm::errs() << "Asigned Combined Info 4 \n";
       // Copy to the device as an argument. No need to retrieve it.
       CurInfo.Types.push_back(OpenMPOffloadMappingFlags::OMP_MAP_LITERAL |
                               OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM |

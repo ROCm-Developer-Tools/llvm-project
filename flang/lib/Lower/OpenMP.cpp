@@ -22,7 +22,7 @@
 #include "flang/Optimizer/Builder/Todo.h"
 #include "flang/Parser/parse-tree.h"
 #include "flang/Semantics/tools.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPDialect.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
 
 using namespace mlir;
@@ -889,9 +889,21 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
       // generateInfoForComponentList in Clang's CGOpenMPRuntime for
       // reference. We only support the declare target link variation
       // at the moment.
-      if (requiresReference(mapOp))
+      bool requiresRef = requiresReference(mapOp);
+      if (requiresRef)
         perValMapTypeBit |=
             llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
+
+      // TODO: Handle cases with overlapping elements, captures and composite
+      // types as generateInfoForCapture in Clang does, which makes subsequent
+      // elements by-pass the target_param flag. This may need to be done
+      // inside of the TargetOpMapCapture pass as we have information about
+      // the captures there, but unfortunately not here. The pass may be
+      // better named as TargetOpMapResolution.
+      bool isCaptureFirstInfo = true;
+      if (isCaptureFirstInfo && !requiresRef)
+        perValMapTypeBit |=
+            llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
 
       mlir::IntegerAttr mapTypeAttr = firOpBuilder.getIntegerAttr(
           firOpBuilder.getI64Type(),

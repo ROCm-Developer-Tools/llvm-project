@@ -21,16 +21,16 @@
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
-#include "mlir/Dialect/OpenMP/OpenMPOpsDialect.h.inc"
-#include "mlir/Dialect/OpenMP/OpenMPOpsEnums.h.inc"
-#include "mlir/Dialect/OpenMP/OpenMPTypeInterfaces.h.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsDialect.h.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsEnums.h.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPTypeInterfaces.h.inc"
 
 #define GET_ATTRDEF_CLASSES
-#include "mlir/Dialect/OpenMP/OpenMPOpsAttributes.h.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsAttributes.h.inc"
 
-#include "mlir/Dialect/OpenMP/OpenMPInterfaces.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPInterfaces.h"
 
 #define GET_OP_CLASSES
-#include "mlir/Dialect/OpenMP/OpenMPOps.h.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOps.h.inc"
 
 #endif // MLIR_DIALECT_OPENMP_OPENMPDIALECT_H_

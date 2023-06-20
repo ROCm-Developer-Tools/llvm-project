@@ -21,7 +21,7 @@
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
-#include "mlir/Dialect/OpenMP/OpenMPOpsInterfaces.h.inc"
+#include "mlir/Dialect/OpenMP/IR/OpenMPOpsInterfaces.h.inc"
 
 namespace mlir::omp {
 // You can override defaults here or implement more complex implementations of

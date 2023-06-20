@@ -5128,6 +5128,18 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
   Inputs.push_back(BPtr);
   Inputs.push_back(CPtr);
 
+  SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+      InputCaptureKinds;
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+
   llvm::OpenMPIRBuilder::MapInfosTy CombinedInfos;
   auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
       -> llvm::OpenMPIRBuilder::MapInfosTy & {
@@ -5140,7 +5152,7 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
 
   Builder.restoreIP(OMPBuilder.createTarget(OmpLoc, Builder.saveIP(),
                                             Builder.saveIP(), EntryInfo, -1, -1,
-                                            Inputs, GenMapInfoCB, BodyGenCB));
+                                            Inputs, InputCaptureKinds, GenMapInfoCB, BodyGenCB));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
 
@@ -5176,6 +5188,15 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
       Constant::getIntegerValue(Type::getInt32Ty(Ctx), APInt(32, 0)),
       Constant::getNullValue(Type::getInt32PtrTy(Ctx))};
 
+  SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+      InputCaptureKinds;
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  InputCaptureKinds.push_back(
+      llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+          OMPTargetVarCaptureByRef);
+  
   llvm::OpenMPIRBuilder::MapInfosTy CombinedInfos;
   auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
       -> llvm::OpenMPIRBuilder::MapInfosTy & {
@@ -5195,11 +5216,10 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
                                    F->getEntryBlock().getFirstInsertionPt());
   TargetRegionEntryInfo EntryInfo("parent", /*DeviceID=*/1, /*FileID=*/2,
                                   /*Line=*/3, /*Count=*/0);
-
-  Builder.restoreIP(OMPBuilder.createTarget(
-      Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
-      /*NumThreads=*/-1, CapturedArgs, GenMapInfoCB, BodyGenCB));
-
+  Builder.restoreIP(
+      OMPBuilder.createTarget(Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
+                              /*NumThreads=*/-1, CapturedArgs,
+                              InputCaptureKinds, GenMapInfoCB, BodyGenCB));
   Builder.CreateRetVoid();
   OMPBuilder.finalize();
 

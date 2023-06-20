@@ -20,8 +20,8 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
-include "mlir/Dialect/OpenMP/OpenMPOpsInterfaces.td"
-include "mlir/Dialect/OpenMP/OpenMPTypeInterfaces.td"
+include "mlir/Dialect/OpenMP/IR/OpenMPOpsInterfaces.td"
+include "mlir/Dialect/OpenMP/IR/OpenMPTypeInterfaces.td"
 
 def OpenMP_Dialect : Dialect {
   let name = "omp";
@@ -32,7 +32,7 @@ def OpenMP_Dialect : Dialect {
 }
 
 // OmpCommon requires definition of OpenACC_Dialect.
-include "mlir/Dialect/OpenMP/OmpCommon.td"
+include "mlir/Dialect/OpenMP/IR/OmpCommon.td"
 
 //===----------------------------------------------------------------------===//
 //  OpenMP Attributes

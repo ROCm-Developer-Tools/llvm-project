@@ -16,7 +16,7 @@
 #include "flang/Frontend/LangOptions.h"
 #include <cstdint>
 
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 
 struct OffloadModuleOpts {
