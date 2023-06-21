@@ -1722,13 +1722,30 @@ static bool targetOpSupported(Operation &opInst) {
   return true;
 }
 
+static void
+handleDeclareTargetMapVar(llvm::SmallVector<Value> &mapOperands,
+                          LLVM::ModuleTranslation &moduleTranslation,
+                          llvm::IRBuilderBase &builder) {
+  for (const auto &mapOp : mapOperands) {
+    llvm::Value *mapOpValue = moduleTranslation.lookupValue(mapOp);
+    if (auto *declareTarget =
+            getRefPtrIfDeclareTarget(mapOp, moduleTranslation)) {
+      for (auto *user : mapOpValue->users()) {
+        if (auto *insn = dyn_cast<llvm::Instruction>(user)) {
+          auto *load = builder.CreateLoad(
+              moduleTranslation.convertType(mapOp.getType()), declareTarget);
+          load->moveBefore(insn);
+          user->replaceUsesOfWith(mapOpValue, load);
+        }
+      }
+    }
+  }
+}
+
 // This is a variation on Clang's GenerateOpenMPCapturedVars, which
 // generates different operation (e.g. load/store) combinations for
 // arguments to the kernel, based on map capture kinds which are then
 // utilised in the combinedInfo in place of the original Map value.
-// TODO/FIXME: Can I incorporate the declare target stuff into this (primarily
-// the processMapOp code, but also the new stuff added to convertDeclareTarget
-// as well) here?
 static void createAlteredByCaptureMap(
     DenseMap<Value, llvm::Value *> &remappedOperands,
     llvm::SmallVector<Value> &mapOperands,
@@ -1799,8 +1816,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   if (!targetOpSupported(opInst))
     return failure();
-
-  // moduleTranslation.getLLVMModule()->dump();
 
   auto targetOp = cast<omp::TargetOp>(opInst);
   auto &targetRegion = targetOp.getRegion();
@@ -1929,6 +1944,16 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
       defaultValThreads, inputs, inputsCaptureKind, genMapInfoCB, bodyCB));
 
+  // llvm::errs() << "Before Manip \n";
+  // moduleTranslation.getLLVMModule()->dump();
+  // llvm::errs() << "\n\n\n\n";
+  if (moduleTranslation.getOpenMPBuilder()->Config.isEmbedded())
+    handleDeclareTargetMapVar(mapOperands, moduleTranslation, builder);
+
+  // llvm::errs() << "After Manip \n";
+  // moduleTranslation.getLLVMModule()->dump();
+  // llvm::errs() << "\n\n\n\n";
+
   return bodyGenStatus;
 }
 
@@ -2000,7 +2025,7 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
           (attribute.getCaptureClause().getValue() !=
                mlir::omp::DeclareTargetCaptureClause::to ||
            ompBuilder->Config.hasRequiresUnifiedSharedMemory())) {
-        llvm::Constant *newVar = ompBuilder->getAddrOfDeclareTargetVar(
+        ompBuilder->getAddrOfDeclareTargetVar(
             captureClause, deviceClause, isDeclaration, isExternallyVisible,
             ompBuilder->getTargetEntryUniqueInfo(filename, line), mangledName,
             generatedRefs, false, targetTriple, gVal->getType(), nullptr,
@@ -2014,41 +2039,6 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
           llvmVal->removeFromParent();
           llvmVal->dropAllReferences();
         }
-
-        llvm::StringRef oldName = gOp.getSymName();
-        gOp.setSymName(newVar->getName());
-
-        // FIXME/TODO: Perhaps this should only apply to TargetOp regions
-        // and not the entire module, even if we discard the rest it could
-        // cause unneccesary verification issues
-        op->getParentOfType<mlir::ModuleOp>()->walk(
-            [&](LLVM::AddressOfOp AddrOp) {
-              if (AddrOp.getGlobalName() == oldName) {
-                AddrOp.setGlobalName(newVar->getName());
-                // FIXME: is there a way to get rid of this global mapping that
-                // requires a new altered function?
-                moduleTranslation.mapGlobal(gOp,
-                                            cast<llvm::GlobalValue>(newVar));
-
-                // The operation users iterator appears to end early when
-                // a user is altered, this works around that
-                llvm::SmallVector<Operation *> useVec;
-                for (auto *user : AddrOp->getUsers())
-                  useVec.push_back(user);
-                
-                for (auto *user : useVec) {
-                  // We do not wish to rewrite map arguments that refer to
-                  // the AddrOp.
-                  if (!mlir::isa<mlir::omp::TargetOp>(user)) {
-                    mlir::OpBuilder mlirBuilder(user);
-                    auto loadOp = mlirBuilder.create<LLVM::LoadOp>(
-                        AddrOp->getLoc(), AddrOp.getType(), AddrOp,
-                        /*default align*/ 4);
-                    user->replaceUsesOfWith(AddrOp, loadOp);
-                  }
-                }
-              }
-            });
       }
     }
   }
