@@ -2025,49 +2025,26 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
             [&](LLVM::AddressOfOp AddrOp) {
               if (AddrOp.getGlobalName() == oldName) {
                 AddrOp.setGlobalName(newVar->getName());
+                // FIXME: is there a way to get rid of this global mapping that
+                // requires a new altered function?
                 moduleTranslation.mapGlobal(gOp,
                                             cast<llvm::GlobalValue>(newVar));
 
                 // The operation users iterator appears to end early when
-                // a user is altered, this works around thats
+                // a user is altered, this works around that
                 llvm::SmallVector<Operation *> useVec;
                 for (auto *user : AddrOp->getUsers())
                   useVec.push_back(user);
-
-                // TODO/FIXME: Is there a better way to do this, having to
-                // special case a load on every single case could become
-                // rather substantial amounts of code... replaceUseWith..
-                // or some other generic way?
+                
                 for (auto *user : useVec) {
-                  if (LLVM::StoreOp store = dyn_cast<LLVM::StoreOp>(user)) {
-                    mlir::OpBuilder mlirBuilder(store);
-                    unsigned int align = 4;
-                    if (store.getAlignment().has_value())
-                      store.getAlignment().value();
-
+                  // We do not wish to rewrite map arguments that refer to
+                  // the AddrOp.
+                  if (!mlir::isa<mlir::omp::TargetOp>(user)) {
+                    mlir::OpBuilder mlirBuilder(user);
                     auto loadOp = mlirBuilder.create<LLVM::LoadOp>(
-                        store->getLoc(), store.getAddr().getType(),
-                        store.getAddr(), align);
-                    // NOTE: MAY NEED THE CAVEAT OF A BITCAST/ASCAST for
-                    // arrays/diff types and differing address spaces.
-                    store.getAddrMutable().assign(loadOp.getRes());
-                  } else if (LLVM::GEPOp gepOp = dyn_cast<LLVM::GEPOp>(user)) {
-                    mlir::OpBuilder mlirBuilder(gepOp);
-
-                    auto loadOp = mlirBuilder.create<LLVM::LoadOp>(
-                        gepOp->getLoc(), gepOp.getBase().getType(),
-                        gepOp.getBase(),
-                        /*arbitrary align for the moment seen in Clang IR*/
-                        16);
-
-                    gepOp.getBaseMutable().assign(loadOp.getRes());
-                  } else if (LLVM::LoadOp load = dyn_cast<LLVM::LoadOp>(user)) {
-                    mlir::OpBuilder mlirBuilder(load);
-                    auto loadOp = mlirBuilder.create<LLVM::LoadOp>(
-                        load->getLoc(), load.getAddr().getType(),
-                        load.getAddr(), /*arbitrary align for the moment*/
-                        4);
-                    load.getAddrMutable().assign(loadOp.getRes());
+                        AddrOp->getLoc(), AddrOp.getType(), AddrOp,
+                        /*default align*/ 4);
+                    user->replaceUsesOfWith(AddrOp, loadOp);
                   }
                 }
               }
