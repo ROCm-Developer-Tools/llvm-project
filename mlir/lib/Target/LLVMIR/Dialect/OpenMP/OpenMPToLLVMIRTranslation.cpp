@@ -1730,7 +1730,14 @@ handleDeclareTargetMapVar(llvm::SmallVector<Value> &mapOperands,
     llvm::Value *mapOpValue = moduleTranslation.lookupValue(mapOp);
     if (auto *declareTarget =
             getRefPtrIfDeclareTarget(mapOp, moduleTranslation)) {
-      for (auto *user : mapOpValue->users()) {
+      // The users iterator will get invalidated if we modify an element,
+      // so we populate this vector of uses to alter each user on an individual
+      // basis to emit it's own load (rather than one load for all).
+      llvm::SmallVector<llvm::User *> userVec;
+      for (llvm::User *user : mapOpValue->users())
+        userVec.push_back(user);
+
+      for (auto *user : userVec) {
         if (auto *insn = dyn_cast<llvm::Instruction>(user)) {
           auto *load = builder.CreateLoad(
               moduleTranslation.convertType(mapOp.getType()), declareTarget);
