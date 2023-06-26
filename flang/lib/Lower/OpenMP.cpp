@@ -1527,7 +1527,8 @@ static void genOMP(Fortran::lower::AbstractConverter &converter,
       std::get<Fortran::parser::OmpLoopDirective>(
           std::get<Fortran::parser::OmpBeginLoopDirective>(loopConstruct.t).t)
           .v;
-  if (llvm::omp::OMPD_parallel_do == ompDirective) {
+  if (llvm::omp::OMPD_parallel_do == ompDirective ||
+      llvm::omp::OMPD_target_teams_distribute_parallel_do == ompDirective) {
     createCombinedParallelOp<Fortran::parser::OmpBeginLoopDirective>(
         converter, eval,
         std::get<Fortran::parser::OmpBeginLoopDirective>(loopConstruct.t));
@@ -1719,6 +1720,22 @@ static void genOMP(Fortran::lower::AbstractConverter &converter,
     createBodyOfOp<omp::SimdLoopOp>(simdLoopOp, converter, currentLocation,
                                     eval, &loopOpClauseList, iv);
     return;
+  }
+
+  if (llvm::omp::OMPD_target_teams_distribute_parallel_do == ompDirective) {
+    // TODO Should probably create something like the following:
+    // omp.target {
+    //   omp.teams {
+    //     omp.distribute {
+    //       omp.parallel { [already generated]
+    //         omp.wsloop { [already generated]
+    //           ...
+    //         }
+    //       }
+    //     }
+    //   }
+    // }
+    TODO(currentLocation, "target teams distribute parallel do");
   }
 
   // FIXME: Add support for following clauses:
