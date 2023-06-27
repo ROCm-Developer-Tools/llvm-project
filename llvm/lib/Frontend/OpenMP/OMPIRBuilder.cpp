@@ -2269,6 +2269,17 @@ OpenMPIRBuilder::applyStaticWorkshareLoop(DebugLoc DL, CanonicalLoopInfo *CLI,
   Value *PUpperBound = Builder.CreateAlloca(IVTy, nullptr, "p.upperbound");
   Value *PStride = Builder.CreateAlloca(IVTy, nullptr, "p.stride");
 
+  // Cast address spaces of loop variables to default, so that the static init
+  // runtime call can succeed.
+  if (M.getDataLayout().getAllocaAddrSpace() != 0) {
+    Type *I32PtrType = PointerType::get(I32Type, 0);
+    Type *IVPtrType = PointerType::get(IVTy, 0);
+    PLastIter = Builder.CreateAddrSpaceCast(PLastIter, I32PtrType);
+    PLowerBound = Builder.CreateAddrSpaceCast(PLowerBound, IVPtrType);
+    PUpperBound = Builder.CreateAddrSpaceCast(PLowerBound, IVPtrType);
+    PStride = Builder.CreateAddrSpaceCast(PStride, IVPtrType);
+  }
+
   // At the end of the preheader, prepare for calling the "init" function by
   // storing the current loop bounds into the allocated space. A canonical loop
   // always iterates from 0 to trip-count with step 1. Note that "init" expects

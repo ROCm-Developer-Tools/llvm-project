@@ -91,6 +91,9 @@ private:
 
     nextIt = it;
     if (++nextIt != block.end()) {
+      // FIXME This fails to find the 'do' loop if the 'distribute' construct
+      // is specified separately from 'parallel do' or, generally, any time
+      // the are multiple loop constructs associated to the same loop
       if (auto *doCons{GetConstructIf<parser::DoConstruct>(*nextIt)}) {
         if (doCons->GetLoopControl()) {
           // move DoConstruct
