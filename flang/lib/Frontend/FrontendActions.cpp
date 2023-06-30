@@ -276,10 +276,7 @@ bool CodeGenAction::beginSourceFileAction() {
 
   // Fetch module from lb, so we can set
   mlirModule = std::make_unique<mlir::ModuleOp>(lb.getModule());
-  llvm::StringRef mainFileName =
-      ci.getInvocation().getFrontendOpts().mainFileName;
-  if (!mainFileName.empty())
-    mlirModule->setName(ci.getInvocation().getFrontendOpts().mainFileName);
+
   if (!setUpTargetMachine())
     return false;
 

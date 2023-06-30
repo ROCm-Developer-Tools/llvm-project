@@ -296,8 +296,6 @@ struct FrontendOptions {
   /// \return The input kind for the extension, or Language::Unknown if the
   /// extension is not recognized.
   static InputKind getInputKindForExtension(llvm::StringRef extension);
-
-  std::string mainFileName;
 };
 } // namespace Fortran::frontend
 
