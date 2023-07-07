@@ -4418,29 +4418,11 @@ static Function *createOutlinedFunction(
   assert(Inputs.size() == InputsCaptureKind.size() &&
          "Must have the same number of CaptureKind's as Inputs");
   SmallVector<Type *> ParameterTypes;
-<<<<<<< HEAD
-  for (auto Arg : zip(Inputs, InputsCaptureKind)) {
-    Type *InType = std::get<0>(Arg)->getType();
-    InType->dump();
-    if (PointerType *PT = dyn_cast<PointerType>(InType)) {
-      // TODO: Add support for OpaquePointer's, perhaps raise this
-      // out of the function and have callers generate the types.
-      if (!PT->isOpaquePointerTy()) {
-        InType = PT->getNonOpaquePointerElementType();
-      }
-    }
-
-    // We can pass ByCopy values using i64's, it appears ByCopy values
-    // currently need to fit inside of an i64 due to some runtime
-    // limitations
-    if (OMPBuilder.Config.isTargetDevice() &&
-=======
   for (auto Arg : zip(InputTypes, InputsCaptureKind)) {
     // We can pass ByCopy values using i64's, it appears ByCopy values
     // currently need to fit inside of an i64 due to some runtime
     // limitations. We only do this if it is not a pointer.
-    if (OMPBuilder.Config.isEmbedded() &&
->>>>>>> Some minor refactoring and fixes, main thing is allowing of types to be passed down to help create the kernel
+    if (OMPBuilder.Config.isTargetDevice() &&
         std::get<1>(Arg) ==
             llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureByCopy &&
         !std::get<0>(Arg)->isPointerTy())
