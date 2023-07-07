@@ -771,6 +771,9 @@ static void printMapClause(OpAsmPrinter &p, Operation *op,
     assert(llvm::isa<mlir::IntegerAttr>(mapTypeOp));
     mapTypeBits = llvm::cast<mlir::IntegerAttr>(mapTypeOp).getInt();
 
+    assert(llvm::isa<mlir::omp::VariableCaptureKindAttr>(map_capture_types[i]));
+    auto mapCapKind = llvm::cast<mlir::omp::VariableCaptureKindAttr>(map_capture_types[i]);
+
     bool always = bitAnd(mapTypeBits,
                          llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_ALWAYS);
     bool close = bitAnd(mapTypeBits,
@@ -785,8 +788,18 @@ static void printMapClause(OpAsmPrinter &p, Operation *op,
     bool del = bitAnd(mapTypeBits,
                       llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_DELETE);
 
-    std::string typeModStr, typeStr;
-    llvm::raw_string_ostream typeMod(typeModStr), type(typeStr);
+    std::string typeModStr, typeCapKindStr, typeStr;
+    llvm::raw_string_ostream typeMod(typeModStr), typeCapKind(typeCapKindStr),
+        type(typeStr);
+
+    if (mapCapKind.getValue() == mlir::omp::VariableCaptureKind::ByRef)
+      typeCapKind << "ByRef, ";
+    if (mapCapKind.getValue() == mlir::omp::VariableCaptureKind::ByCopy)
+      typeCapKind << "ByCopy, ";
+    if (mapCapKind.getValue() == mlir::omp::VariableCaptureKind::VLAType)
+      typeCapKind << "VLAType, ";
+    if (mapCapKind.getValue() == mlir::omp::VariableCaptureKind::This)
+      typeCapKind << "This, ";
 
     if (always)
       typeMod << "always, ";
@@ -804,7 +817,7 @@ static void printMapClause(OpAsmPrinter &p, Operation *op,
     if (type.str().empty())
       type << (isa<ExitDataOp>(op) ? "release" : "alloc");
 
-    p << '(' << typeMod.str() << mapCapType << ", " << type.str() << " -> "
+    p << '(' << typeMod.str() << typeCapKind.str() << type.str() << " -> "
       << mapOp << " : " << mapOp.getType() << ')';
     if (i + 1 < e)
       p << ", ";
