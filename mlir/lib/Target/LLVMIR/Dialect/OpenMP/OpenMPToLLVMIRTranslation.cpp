@@ -1960,7 +1960,8 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
       ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
-      defaultValThreads, inputs, inputTypes, inputsCaptureKind, genMapInfoCB, bodyCB));
+      defaultValThreads, inputs, inputTypes, inputsCaptureKind, genMapInfoCB,
+      bodyCB));
 
   if (moduleTranslation.getOpenMPBuilder()->Config.isEmbedded())
     handleDeclareTargetMapVar(mapOperands, moduleTranslation, builder);
