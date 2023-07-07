@@ -1000,10 +1000,32 @@ def FlushOp : OpenMP_Op<"flush"> {
   }];
 }
 
+
 //===---------------------------------------------------------------------===//
 // 2.14.2 target data Construct
 //===---------------------------------------------------------------------===//
 
+def CaptureThis : I32EnumAttrCase<"This", 0>;
+def CaptureByRef : I32EnumAttrCase<"ByRef", 1>;
+def CaptureByCopy : I32EnumAttrCase<"ByCopy", 2>;
+def CaptureVLAType : I32EnumAttrCase<"VLAType", 3>;
+
+def VariableCaptureKind : I32EnumAttr<
+    "VariableCaptureKind",
+    "variable capture kind",
+    [CaptureThis, CaptureByRef, CaptureByCopy, CaptureVLAType]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::omp";
+}
+
+def VariableCaptureKindAttr : EnumAttr<OpenMP_Dialect, VariableCaptureKind,
+                                       "variable_capture_kind"> {
+  let assemblyFormat = "`(` $value `)`";
+}
+
+def VariableCaptureKindArrayAttr 
+  : TypedArrayAttrBase<VariableCaptureKindAttr, "variable_capture_kind array attr">;
+  
 def Target_DataOp: OpenMP_Op<"target_data", [AttrSizedOperandSegments]>{
   let summary = "target data construct";
   let description = [{
@@ -1041,14 +1063,15 @@ def Target_DataOp: OpenMP_Op<"target_data", [AttrSizedOperandSegments]>{
                        Variadic<OpenMP_PointerLikeType>:$use_device_ptr,
                        Variadic<OpenMP_PointerLikeType>:$use_device_addr,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
-                       I64ArrayAttr:$map_types);
+                       I64ArrayAttr:$map_types,
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
 
   let regions = (region AnyRegion:$region);
 
   let assemblyFormat = [{
     oilist(`if` `(` $if_expr `:` type($if_expr) `)`
     | `device` `(` $device `:` type($device) `)`)
-    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types) `)`
+    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
     oilist(`use_device_ptr` `(` $use_device_ptr `:` type($use_device_ptr) `)`
     | `use_device_addr` `(` $use_device_addr `:` type($use_device_addr) `)`)
     $region attr-dict
@@ -1091,13 +1114,14 @@ def Target_EnterDataOp: OpenMP_Op<"target_enter_data",
                        Optional<AnyInteger>:$device,
                        UnitAttr:$nowait,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
-                       I64ArrayAttr:$map_types);
+                       I64ArrayAttr:$map_types,
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
 
   let assemblyFormat = [{
     oilist(`if` `(` $if_expr `:` type($if_expr) `)`
     | `device` `(` $device `:` type($device) `)`
     | `nowait` $nowait)
-    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types) `)`
+    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
     attr-dict
    }];
 
@@ -1138,13 +1162,14 @@ def Target_ExitDataOp: OpenMP_Op<"target_exit_data",
                        Optional<AnyInteger>:$device,
                        UnitAttr:$nowait,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
-                       I64ArrayAttr:$map_types);
+                       I64ArrayAttr:$map_types,
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
 
   let assemblyFormat = [{
     oilist(`if` `(` $if_expr `:` type($if_expr) `)`
     | `device` `(` $device `:` type($device) `)`
     | `nowait` $nowait)
-    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types) `)`
+    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
     attr-dict
    }];
 
@@ -1182,7 +1207,8 @@ def TargetOp : OpenMP_Op<"target",[AttrSizedOperandSegments]> {
                        Optional<AnyInteger>:$thread_limit,
                        UnitAttr:$nowait,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
-                       OptionalAttr<I64ArrayAttr>:$map_types);
+                       OptionalAttr<I64ArrayAttr>:$map_types,
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
 
   let regions = (region AnyRegion:$region);
 
@@ -1191,7 +1217,7 @@ def TargetOp : OpenMP_Op<"target",[AttrSizedOperandSegments]> {
     | `device` `(` $device `:` type($device) `)`
     | `thread_limit` `(` $thread_limit `:` type($thread_limit) `)`
     | `nowait` $nowait
-    | `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types) `)`
+    | `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
     ) $region attr-dict
   }];
 

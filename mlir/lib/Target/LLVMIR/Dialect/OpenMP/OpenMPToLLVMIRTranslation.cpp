@@ -1774,18 +1774,26 @@ static void createAlteredByCaptureMap(
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
         OMPTargetVarCaptureByRef:
       // default capture case, do nothing for the moment,
-      // perhaps more complex logic required in the future.
+      // perhaps more complex logic required in the future
+      // as we extend for more complex types, clang invokes EmitLValue,
+      // which has specialised logic for special Clang types such as user
+      // defines, so it is possible we will have to extend this for
+      // structures or other complex types.
       break;
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
         OMPTargetVarCaptureByCopy: {
-      llvm::Value *newV = builder.CreateLoad(
-          moduleTranslation.convertType(mapOp.getType()), mapOpValue);
+      // We care about the pointee type, not the pointer, however, in certain
+      // cases it may just return a pointer or null which is acceptable
+      llvm::Type *type = moduleTranslation.convertType(mapOp.getType());
+      if (auto pointerType =
+              llvm::dyn_cast<mlir::omp::PointerLikeType>(mapOp.getType())) {
+        if (auto eleType = pointerType.getElementType())
+          type = moduleTranslation.convertType(eleType);
+      }
 
-      // NOTE: There may be a better way to detect if something is a pointer
-      // type, as at the moment this will not trigger if it is certain integer
-      // types, which means the binary works but it's inconsistent with Clang
-      // and has slightly different semantics than it should
-      if (!moduleTranslation.convertType(mapOp.getType())->isPointerTy()) {
+      llvm::Value *newV = builder.CreateLoad(type, mapOpValue);
+
+      if (!type->isPointerTy()) {
         auto curInsert = builder.saveIP();
         builder.restoreIP(findAllocaInsertPoint(builder, moduleTranslation));
         auto *memTempAlloc =
@@ -1795,8 +1803,8 @@ static void createAlteredByCaptureMap(
         // TODO: Insert an align & scalar convert as Clang does, if
         // neccessary.
 
-        auto *vStore = builder.CreateStore(newV, memTempAlloc);
-        newV = builder.CreateLoad(builder.getInt8PtrTy(), vStore);
+        builder.CreateStore(newV, memTempAlloc);
+        newV = builder.CreateLoad(builder.getInt8PtrTy(), memTempAlloc);
       }
 
       remappedOperands[mapOp] = newV;
@@ -1827,11 +1835,10 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   auto targetOp = cast<omp::TargetOp>(opInst);
   auto &targetRegion = targetOp.getRegion();
 
-  llvm::SetVector<Value> operandSet;
-  getUsedValuesDefinedAbove(targetRegion, operandSet);
-
   SmallVector<Value> mapOperands = targetOp.getMapOperands();
+
   ArrayAttr mapTypes = targetOp.getMapTypes().value_or(ArrayAttr{});
+  ArrayAttr mapCaptures = targetOp.getMapCaptureTypes().value_or(ArrayAttr{});
 
   LogicalResult bodyGenStatus = success();
 
@@ -1846,6 +1853,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   };
 
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
+
   StringRef parentName = opInst.getParentOfType<LLVM::LLVMFuncOp>().getName();
 
   // Override parent name if early outlining function
@@ -1866,65 +1874,62 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
 
-  auto getKernelArguments = [&](const SmallVector<Value> &mapOps) {
-    llvm::SmallVector<llvm::Value *> inputs;
-    for (const auto &mapOp : mapOps) {
-      // skip over if it is a declare target, it will be mapped by the runtime
-      // as a pointer rather than an argument
-      if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation))
-        continue;
-      inputs.push_back(moduleTranslation.lookupValue(mapOp));
-    }
-    return inputs;
-  };
+  auto getKernelInfo =
+      [&](const SmallVector<Value> &mapOps, const ArrayAttr &mapCaptures,
+          llvm::SmallVector<llvm::Value *> &inputs,
+          llvm::SmallVector<llvm::Type *> &inputTypes,
+          SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
+              &inputCaptures) {
+        int index = 0;
+        for (const auto &mapOp : mapOps) {
+          // skip over if it is a declare target, it will be mapped by the
+          // runtime as a pointer rather than an argument
+          if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation))
+            continue;
 
-  // FIXME: Need a better way of defining capture kind, this currently
-  // just assumes implicit captures are capture by copy and map values are
-  // capture by-ref (and does not even begin to consider the other two
-  // capture types). Not strictly true, but all arguments are i64 at the
-  // moment, so it is difficult to discern without additional information
-  // tied to each map value and passed down from the frontend. Not
-  // impossible, but difficult as we can't tell what's an implicit capture
-  // in the frontend, only later after the bodies generation.
-  // TODO: Can possibly integrate this or better logic into generateCapturedVars
-  auto getKernelArgumentKinds = [&](const SmallVector<Value> &mapOps,
-                                    ArrayAttr mapTypes) {
-    SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
-        captureKinds{};
-    int index = 0;
-    for (const auto &mapOp : mapOps) {
-      // skip over if it is a declare target, it will be mapped by the
-      // runtime as a pointer rather than an argument
-      if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation)) {
-        index++;
-        continue;
-      }
+          llvm::Type *type = moduleTranslation.convertType(mapOp.getType());
+          if (auto pointerType =
+                  llvm::dyn_cast<mlir::omp::PointerLikeType>(mapOp.getType())) {
+            if (auto eleType = pointerType.getElementType())
+              type = moduleTranslation.convertType(eleType);
+          }
 
-      auto flagBits = llvm::omp::OpenMPOffloadMappingFlags(
-          mapTypes[index].dyn_cast<mlir::IntegerAttr>().getInt());
-      if (static_cast<
-              std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
-              flagBits &
-              llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_IMPLICIT)) {
-        captureKinds.push_back(
-            llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
-                OMPTargetVarCaptureByCopy);
-      } else {
-        captureKinds.push_back(
-            llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
-                OMPTargetVarCaptureByRef);
-      }
+          inputTypes.push_back(type);
+          inputs.push_back(moduleTranslation.lookupValue(mapOp));
 
-      index++;
-    }
+          auto mapCap = mapCaptures[index]
+                            .dyn_cast<mlir::omp::VariableCaptureKindAttr>()
+                            .getValue();
 
-    return captureKinds;
-  };
+          if (mapCap == mlir::omp::VariableCaptureKind::ByCopy) {
+            inputCaptures.push_back(
+                llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+                    OMPTargetVarCaptureByCopy);
+          } else if (mapCap == mlir::omp::VariableCaptureKind::ByRef) {
+            inputCaptures.push_back(
+                llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+                    OMPTargetVarCaptureByRef);
+          } else if (mapCap == mlir::omp::VariableCaptureKind::VLAType) {
+            inputCaptures.push_back(
+                llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+                    OMPTargetVarCaptureVLAType);
+          } else if (mapCap == mlir::omp::VariableCaptureKind::This) {
+            inputCaptures.push_back(
+                llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+                    OMPTargetVarCaptureThis);
+          }
 
-  // Collect the default/implicit input arguments.
-  llvm::SmallVector<llvm::Value *> inputs = getKernelArguments(mapOperands);
+          index++;
+        }
+      };
+
+  // Collect the kernel info we need from the arguments.
+  llvm::SmallVector<llvm::Value *> inputs;
+  llvm::SmallVector<llvm::Type *> inputTypes;
   SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
-      inputsCaptureKind = getKernelArgumentKinds(mapOperands, mapTypes);
+      inputsCaptureKind;
+  getKernelInfo(mapOperands, mapCaptures, inputs, inputTypes,
+                inputsCaptureKind);
 
   // We wish to modify some of the methods in which kernel arguments are
   // passed based on their capture type by the target region, this can
@@ -1951,15 +1956,8 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
       defaultValThreads, inputs, inputsCaptureKind, genMapInfoCB, bodyCB));
 
-  // llvm::errs() << "Before Manip \n";
-  // moduleTranslation.getLLVMModule()->dump();
-  // llvm::errs() << "\n\n\n\n";
   if (moduleTranslation.getOpenMPBuilder()->Config.isEmbedded())
     handleDeclareTargetMapVar(mapOperands, moduleTranslation, builder);
-
-  // llvm::errs() << "After Manip \n";
-  // moduleTranslation.getLLVMModule()->dump();
-  // llvm::errs() << "\n\n\n\n";
 
   return bodyGenStatus;
 }

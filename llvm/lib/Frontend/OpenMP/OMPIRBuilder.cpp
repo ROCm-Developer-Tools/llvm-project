@@ -4291,56 +4291,78 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetData(
   return Builder.saveIP();
 }
 
-static Value *
-castInput(IRBuilderBase &Builder, unsigned AddrSpace, Value *Input,
-          Argument &Arg,
-          OffloadEntriesInfoManager::OMPTargetVarCaptureKind Capture) {
-  //   if (I->capturesVariable()) { // by ref
-  //   llvm::errs() << "RD 1 \n";
-  //   const VarDecl *Var = I->getCapturedVar();
-  //   QualType VarTy = Var->getType();
-  //   Address ArgAddr = ArgLVal.getAddress(CGF);
-  //   if (ArgLVal.getType()->isLValueReferenceType()) {
-  //     ArgAddr = CGF.EmitLoadOfReference(ArgLVal);
-  //   } else if (!VarTy->isVariablyModifiedType() || !VarTy->isPointerType()) {
-  //     assert(ArgLVal.getType()->isPointerType());
-  //     ArgAddr = CGF.EmitLoadOfPointer(
-  //         ArgAddr, ArgLVal.getType()->castAs<PointerType>());
-  //   }
-  //   if (!FO.RegisterCastedArgsOnly) {
-  //     LocalAddrs.insert(
-  //         {Args[Cnt], {Var, ArgAddr.withAlignment(Ctx.getDeclAlign(Var))}});
-  //   }
-  // } else if (I->capturesVariableByCopy()) { // by copy
-  //   llvm::errs() << "RD 2 \n";
-  //   assert(!FD->getType()->isAnyPointerType() &&
-  //          "Not expecting a captured pointer.");
-  //   const VarDecl *Var = I->getCapturedVar();
-  //   LocalAddrs.insert({Args[Cnt],
-  //                      {Var, FO.UIntPtrCastRequired
-  //                                ? castValueFromUintptr(
-  //                                      CGF, I->getLocation(), FD->getType(),
-  //                                      Args[Cnt]->getName(), ArgLVal)
-  //                                : ArgLVal.getAddress(CGF)}});
-  // }
+// This currently implements a very light version of Clang's
+// EmitParmDecl's handling of direct argument handling as well
+// as a portion of the load generation based on capture types
+// found at the end of emitOutlinedFunctionPrologue in Clang.
+// The indirect path handling of EmitParmDecl's may be required for
+// future work.
+static Value *getArgAccessFromCapture(
+    IRBuilderBase &Builder, OpenMPIRBuilder &OMPBuilder, Value *Input,
+    Argument &Arg, OffloadEntriesInfoManager::OMPTargetVarCaptureKind Capture) {
+  // Clang has an AS mapping for this for multiple programming models and
+  // architectures, we may need something similar if this is too simple
+  unsigned int AllocaAS = OMPBuilder.M.getDataLayout().getAllocaAddrSpace();
+  unsigned int DefaultAS =
+      OMPBuilder.M.getDataLayout().getProgramAddressSpace();
 
-  if (!Input->getType()->isPointerTy()) {
-    return Input;
+  // Create the alloca for the argument the current point.
+  // NOTE: We may need to extend this to create it at the alloca insert point
+  // when no input arg is present, similar to Clang, however, this is a
+  // non-factor the way we currently generate these allocas.
+  llvm::Value *V = Builder.CreateAlloca(Arg.getType(), AllocaAS);
+
+  if (AllocaAS != DefaultAS) {
+    V = Builder.CreatePointerBitCastOrAddrSpaceCast(
+        V, Arg.getType()->getPointerTo(DefaultAS));
   }
 
-  auto Addr =
-      Builder.CreateAlloca(Type::getInt64Ty(Builder.getContext()), AddrSpace);
-  auto AddrAscast =
-      Builder.CreatePointerBitCastOrAddrSpaceCast(Addr, Input->getType());
-  Builder.CreateStore(&Arg, AddrAscast);
+  Builder.CreateStore(&Arg, V);
 
-  // TODO: fix below code to look a little more like the commented out code
-  if (Capture != OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
-                     OMPTargetVarCaptureByRef)
-    return AddrAscast;
+  switch (Capture) {
+  case OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+      OMPTargetVarCaptureByCopy: {
+    // A lot of cases for ByCopy are just simply a return of V.
+    // In certain cases where the Src Pointer Type and Dst
+    // Pointer Type are not the same (note, pointer type, not pointee)
+    // or if they're the same and an option in clang is switched on to
+    // emit implicit casts a call to Clang's EmitScalarConversion will
+    // evoke casts. To handle these scalar casts, we will likely require
+    // passing in the original llvm type to have more information or
+    // lift this function higher than this stage of the
+    // lowering, as at this stage they're mostly pointer values.
+    if (Input->getType()->isPointerTy())
+      return V;
 
-  return Builder.CreateLoad(
-      Type::getInt32Ty(Builder.getContext())->getPointerTo(), AddrAscast);
+    // If Src == Dst
+    if (Input->getType() == Arg.getType())
+
+      assert(false && "Currently unsupported OMPTargetVarCaptureByCopy Type");
+    break;
+  }
+  case OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+      OMPTargetVarCaptureByRef: {
+    // Clang special cases this load call based on if it's an
+    // LValue Ref or not, however, we have no concept of LValues at this stage
+    // of the lowering and both paths resolve to a CreateAlignedLoad call.
+    V = Builder.CreateAlignedLoad(
+        V->getType(), V,
+        OMPBuilder.M.getDataLayout().getPrefTypeAlign(V->getType()));
+    break;
+  }
+  case OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+      OMPTargetVarCaptureThis:
+  case OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+      OMPTargetVarCaptureVLAType:
+    assert(false && "Currently unsupported capture kind");
+    break;
+  case OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
+      OMPTargetVarCaptureNone:
+    assert(false && "Captured variable requires a capture kind");
+    break;
+  }
+
+  return V;
 }
 
 static void emitUsed(StringRef Name, std::vector<llvm::WeakTrackingVH> &List,
@@ -4389,14 +4411,30 @@ static Function *createOutlinedFunction(
         &InputsCaptureKind,
     OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
     OpenMPIRBuilder::InsertPointTy AllocaIP) {
+  assert(Inputs.size() == InputsCaptureKind.size() &&
+         "Must have the same number of CaptureKind's as Inputs");
   SmallVector<Type *> ParameterTypes;
-  if (OMPBuilder.Config.isTargetDevice()) {
-    // All parameters are passed as i64
-    ParameterTypes.assign(Inputs.size(),
-                          Type::getInt64Ty(Builder.getContext()));
-  } else {
-    for (auto &Arg : Inputs)
-      ParameterTypes.push_back(Arg->getType());
+  for (auto Arg : zip(Inputs, InputsCaptureKind)) {
+    Type *InType = std::get<0>(Arg)->getType();
+    InType->dump();
+    if (PointerType *PT = dyn_cast<PointerType>(InType)) {
+      // TODO: Add support for OpaquePointer's, perhaps raise this
+      // out of the function and have callers generate the types.
+      if (!PT->isOpaquePointerTy()) {
+        InType = PT->getNonOpaquePointerElementType();
+      }
+    }
+
+    // We can pass ByCopy values using i64's, it appears ByCopy values
+    // currently need to fit inside of an i64 due to some runtime
+    // limitations
+    if (OMPBuilder.Config.isTargetDevice() &&
+        std::get<1>(Arg) ==
+            llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureByCopy &&
+        !InType->isPointerTy())
+      ParameterTypes.push_back(Type::getInt64Ty(Builder.getContext()));
+    else
+      ParameterTypes.push_back(std::get<0>(Arg)->getType());
   }
 
   auto FuncType = FunctionType::get(Builder.getVoidTy(), ParameterTypes,
@@ -4433,10 +4471,6 @@ static Function *createOutlinedFunction(
   Builder.SetInsertPoint(&Func->getEntryBlock(),
                          Func->getEntryBlock().getFirstNonPHIOrDbgOrAlloca());
 
-  llvm::errs() << "is embedded?" << OMPBuilder.Config.isEmbedded() << "\n";
-  llvm::errs() << "inputs Size: " << Inputs.size() << "\n";
-  // llvm::errs() << "Func Args Size: " << F << "\n";
-
   // Rewrite uses of input valus to parameters.
   for (auto InArg : zip(Inputs, Func->args(), InputsCaptureKind)) {
     Value *Input = std::get<0>(InArg);
@@ -4446,12 +4480,10 @@ static Function *createOutlinedFunction(
     
     Value *CastInput =
         OMPBuilder.Config.isTargetDevice()
-            ? castInput(Builder,
-                        OMPBuilder.M.getDataLayout().getAllocaAddrSpace(),
-                        Input, Arg, Capture)
+            ? getArgAccessFromCapture(Builder, OMPBuilder, Input, Arg, Capture)
             : &Arg;
+
     // Collect all the instructions
-    // assert(CastInput->getType()->isPointerTy() && "Not Pointer Type");
     for (User *User : make_early_inc_range(Input->users()))
       if (auto Instr = dyn_cast<Instruction>(User))
         if (Instr->getFunction() == Func)

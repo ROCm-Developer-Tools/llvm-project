@@ -46,10 +46,14 @@ struct TargetOpMapCapturePass
         llvm::SmallVector<mlir::Attribute> newMapTypesAttr(tarOp.getMapTypesAttr().begin(),
                                                         tarOp.getMapTypesAttr().end());
 
+        llvm::SmallVector<mlir::Attribute> newMapCapturesAttr(
+            tarOp.getMapCaptureTypesAttr().begin(),
+            tarOp.getMapCaptureTypesAttr().end());
+
         // NOTE: Ponter-case, unused currently as it is a WIP.
-        llvm::omp::OpenMPOffloadMappingFlags captureByThis =
-            llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TO |
-            llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_FROM;
+        // llvm::omp::OpenMPOffloadMappingFlags captureByThis =
+        //     llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TO |
+        //     llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_FROM;
 
         llvm::omp::OpenMPOffloadMappingFlags literalCapture =
             llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_LITERAL;
@@ -76,10 +80,20 @@ struct TargetOpMapCapturePass
                 static_cast<std::underlying_type_t<
                     llvm::omp::OpenMPOffloadMappingFlags>>(
                     mapTypeBits)));
+
+            // TODO: placeholder, this implicit capture likely has to be moved
+            // further up into the PFT -> MLIR lowering to get access to more 
+            // information to decide what is ByThis/ByVal etc. 
+            newMapCapturesAttr.push_back(
+                mlir::omp::VariableCaptureKindAttr::get(
+                    module.getContext(),
+                    mlir::omp::VariableCaptureKind::ByCopy));
         }
 
         tarOp.getMapOperandsMutable().append(usedButNotCaptured);
-        tarOp.setMapTypesAttr(ArrayAttr::get(module.getContext(), newMapTypesAttr));
+        tarOp.setMapTypesAttr(
+            ArrayAttr::get(module.getContext(), newMapTypesAttr));
+        tarOp.setMapCaptureTypesAttr(ArrayAttr::get(module.getContext(), newMapCapturesAttr));
     });
   }
 };

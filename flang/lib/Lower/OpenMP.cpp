@@ -768,6 +768,138 @@ static void createBodyOfTargetOp(
     }
     argIndex++;
   }
+  
+// genObjectList in OpenACC may be of some interest for breaking down types
+//
+/// \param [in]  isVariableUsedInMapClause - is the variable used in a map
+/// clause (explicitly mapped)
+/// \param [in]  isVariableAssociatedWithSection - is the variable related to
+///     an array subscript operator, an OpenMP array section or shaping
+///     expression or otherwise dereferenced
+mlir::omp::VariableCaptureKind
+isCapturedByRef(Fortran::lower::AbstractConverter &converter,
+                Fortran::semantics::Symbol *capturedSym,
+                llvm::omp::Directive capturedByDirective,
+                bool isVariableUsedInMapClause = true,
+                bool isVariableAssociatedWithSection = false,
+                bool forceCaptureByReferenceInTarget = false) {
+  // NOTE: Table taken from Clang's isOpenMPCapturedByRef which this function is
+  // loosely based on, Fortran is likely to have some different caveats to add.
+  //
+  // This table summarizes how a given variable should be passed to the device
+  // given its type and the clauses where it appears. This table is based on
+  // the description in OpenMP 4.5 [2.10.4, target Construct] and
+  // OpenMP 4.5 [2.15.5, Data-mapping Attribute Rules and Clauses].
+  //
+  // =========================================================================
+  // | type |  defaultmap   | pvt | first | is_device_ptr |    map   | res.  |
+  // |      |(tofrom:scalar)|     |  pvt  |               |has_dv_adr|       |
+  // =========================================================================
+  // | scl  |               |     |       |       -       |          | bycopy|
+  // | scl  |               |  -  |   x   |       -       |     -    | bycopy|
+  // | scl  |               |  x  |   -   |       -       |     -    | null  |
+  // | scl  |       x       |     |       |       -       |          | byref |
+  // | scl  |       x       |  -  |   x   |       -       |     -    | bycopy|
+  // | scl  |       x       |  x  |   -   |       -       |     -    | null  |
+  // | scl  |               |  -  |   -   |       -       |     x    | byref |
+  // | scl  |       x       |  -  |   -   |       -       |     x    | byref |
+  //
+  // | agg  |      n.a.     |     |       |       -       |          | byref |
+  // | agg  |      n.a.     |  -  |   x   |       -       |     -    | byref |
+  // | agg  |      n.a.     |  x  |   -   |       -       |     -    | null  |
+  // | agg  |      n.a.     |  -  |   -   |       -       |     x    | byref |
+  // | agg  |      n.a.     |  -  |   -   |       -       |    x[]   | byref |
+  //
+  // | ptr  |      n.a.     |     |       |       -       |          | bycopy|
+  // | ptr  |      n.a.     |  -  |   x   |       -       |     -    | bycopy|
+  // | ptr  |      n.a.     |  x  |   -   |       -       |     -    | null  |
+  // | ptr  |      n.a.     |  -  |   -   |       -       |     x    | byref |
+  // | ptr  |      n.a.     |  -  |   -   |       -       |    x[]   | bycopy|
+  // | ptr  |      n.a.     |  -  |   -   |       x       |          | bycopy|
+  // | ptr  |      n.a.     |  -  |   -   |       x       |     x    | bycopy|
+  // | ptr  |      n.a.     |  -  |   -   |       x       |    x[]   | bycopy|
+  // =========================================================================
+  // Legend:
+  //  scl - scalar
+  //  ptr - pointer
+  //  agg - aggregate
+  //  x - applies
+  //  - - invalid in this combination
+  //  [] - mapped with an array section
+  //  byref - should be mapped by reference
+  //  byval - should be mapped by value
+  //  null - initialize a local variable to null on the device
+  //
+  // Observations:
+  //  - All scalar declarations that show up in a map clause have to be passed
+  //    by reference, because they may have been mapped in the enclosing data
+  //    environment.
+  //  - If the scalar value does not fit the size of uintptr, it has to be
+  //    passed by reference, regardless the result in the table above.
+  //  - For pointers mapped by value that have either an implicit map or an
+  //    array section, the runtime library may pass the NULL value to the
+  //    device instead of the value passed to it by the compiler.
+  bool isByRef = true;
+  auto symValue = converter.getSymbolAddress(*capturedSym);
+  mlir::Type type = symValue.getType();
+
+  if (auto refType = type.dyn_cast<fir::ReferenceType>())
+    type = refType.getElementType();
+  
+  auto isScalarType = [&](mlir::Type type) {    
+    if (type.isa<fir::IntegerType>() || type.isa<fir::CharacterType>() ||
+        type.isa<fir::LogicalType>() || type.isa<fir::ComplexType>() ||
+        type.isa<fir::RealType>())
+      return true;
+    return false;
+  };
+
+  if (isVariableUsedInMapClause) {
+    isByRef = !(Fortran::semantics::IsAllocatableOrPointer(*capturedSym) &&
+                isVariableAssociatedWithSection);
+  } else {
+    // TODO: Implement additional ||'s for:
+    //    isDefaultmapCapturedByRef - which detects if a default map has been
+    //    specified and if it indicates capture by ref
+    //    hasExplicitDSA - check that the variable is not specified within a
+    //    reduction clause
+    isByRef = (forceCaptureByReferenceInTarget &&
+               !Fortran::semantics::IsAllocatableOrPointer(*capturedSym)) ||
+               !isScalarType(type);
+  }
+
+  // TODO: Implement additional checks for data sharing attributes on the
+  // variable, can be found in originating Clang function
+  // isOpenMPCapturedByRef. The current check is a little anemic in
+  // comaprison to the original, this requires the abiltiy to introspect
+  // if a variable is also in a firstprivate, defaultmap, reduction or
+  // device_ptr. The DataSharingProcessor class in this file may be of
+  // interest for implementing these checks, as we will need to inevitably
+  // check multiple levels of nested regions.
+  if (isByRef && isScalarType(type)) {
+    isByRef =
+        (isVariableUsedInMapClause &&
+         capturedByDirective == llvm::omp::Directive::OMPD_target);
+  }
+
+  // When passing data by copy, we need to make sure it fits the uintptr size
+  // and alignment, because the runtime library only deals with uintptr types.
+  // If it does not fit the uintptr size, we need to pass the data by
+  // reference instead.
+  // NOTE: The datalayout may not be perfectly accurate at the moment, but this
+  // appears to be the best size information we have at this level
+  if (!isByRef && isScalarType(type)) {
+    mlir::DataLayout dl = mlir::DataLayout(symValue.getDefiningOp()->getParentOfType<ModuleOp>());
+    if (dl.getTypeSize(type) >
+            dl.getTypeSize(converter.getFirOpBuilder().getIntPtrType()) ||
+        dl.getTypeABIAlignment(type) >
+            dl.getTypeABIAlignment(
+                converter.getFirOpBuilder().getIntPtrType())) {
+      isByRef = true;
+    }
+  }
+  
+  return (isByRef) ? mlir::omp::VariableCaptureKind::ByRef : mlir::omp::VariableCaptureKind::ByCopy;
 }
 
 static void createTargetOp(Fortran::lower::AbstractConverter &converter,
@@ -777,12 +909,12 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
                            Fortran::lower::pft::Evaluation *eval = nullptr) {
   Fortran::lower::StatementContext stmtCtx;
   fir::FirOpBuilder &firOpBuilder = converter.getFirOpBuilder();
-
   mlir::Value ifClauseOperand, deviceOperand, threadLmtOperand;
   mlir::UnitAttr nowaitAttr;
   llvm::SmallVector<mlir::Value> mapOperands, devicePtrOperands,
       deviceAddrOperands;
   llvm::SmallVector<mlir::IntegerAttr> mapTypes;
+  llvm::SmallVector<mlir::omp::VariableCaptureKindAttr> mapCaptureKinds;
   llvm::SmallVector<mlir::Type> useDeviceTypes;
   llvm::SmallVector<mlir::Location> useDeviceLocs;
   SmallVector<const Fortran::semantics::Symbol *> useDeviceSymbols;
@@ -797,8 +929,8 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
   };
 
   // Ref pointers are used rather than direct access when we
-    // map a declare target link variable or declare target to
-    // with USM mode.
+  // map a declare target link variable or declare target to
+  // with USM mode.
   auto requiresReference = [&firOpBuilder](const mlir::Value &mapOp) {
     auto *op = mapOp.getDefiningOp();
     if (auto addrOp = dyn_cast<fir::AddrOfOp>(op)) {
@@ -879,6 +1011,14 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
     genObjectList(std::get<Fortran::parser::OmpObjectList>(mapClause->v.t),
                   converter, mapOperand);
 
+    for (const Fortran::parser::OmpObject &ompObject :
+             std::get<Fortran::parser::OmpObjectList>(mapClause->v.t).v) {
+          mapCaptureKinds.push_back(mlir::omp::VariableCaptureKindAttr::get(
+              firOpBuilder.getContext(),
+              isCapturedByRef(converter, getOmpObjectSymbol(ompObject),
+                              directive)));
+    }
+   
     for (mlir::Value mapOp : mapOperand) {
       checkType(mapOp.getLoc(), mapOp.getType());
       
@@ -978,10 +1118,14 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
   mlir::ArrayAttr mapTypesArrayAttr =
       ArrayAttr::get(firOpBuilder.getContext(), mapTypesAttr);
 
+  mlir::ArrayAttr mapCaptureKindsArr =
+      ArrayAttr::get(firOpBuilder.getContext(),
+                     llvm::SmallVector<mlir::Attribute>{mapCaptureKinds.begin(),
+                                                        mapCaptureKinds.end()});
   if (directive == llvm::omp::Directive::OMPD_target) {
     auto targetOp = firOpBuilder.create<omp::TargetOp>(
         currentLocation, ifClauseOperand, deviceOperand, threadLmtOperand,
-        nowaitAttr, mapOperands, mapTypesArrayAttr);
+        nowaitAttr, mapOperands, mapTypesArrayAttr, mapCaptureKindsArr);
     createBodyOfOp(targetOp, converter, currentLocation, *eval, &opClauseList);
   } else if (directive == llvm::omp::Directive::OMPD_target_data) {
     auto dataOp = firOpBuilder.create<omp::DataOp>(
@@ -990,13 +1134,13 @@ static void createTargetOp(Fortran::lower::AbstractConverter &converter,
     createBodyOfTargetOp(converter, dataOp, useDeviceTypes, useDeviceLocs,
                          useDeviceSymbols, currentLocation);
   } else if (directive == llvm::omp::Directive::OMPD_target_enter_data) {
-    firOpBuilder.create<omp::EnterDataOp>(currentLocation, ifClauseOperand,
-                                          deviceOperand, nowaitAttr,
-                                          mapOperands, mapTypesArrayAttr);
+    firOpBuilder.create<omp::EnterDataOp>(
+        currentLocation, ifClauseOperand, deviceOperand, nowaitAttr,
+        mapOperands, mapTypesArrayAttr, mapCaptureKindsArr);
   } else if (directive == llvm::omp::Directive::OMPD_target_exit_data) {
     firOpBuilder.create<omp::ExitDataOp>(currentLocation, ifClauseOperand,
                                          deviceOperand, nowaitAttr, mapOperands,
-                                         mapTypesArrayAttr);
+                                         mapTypesArrayAttr, mapCaptureKindsArr);
   } else {
     TODO(currentLocation, "OMPD_target directive unknown");
   }

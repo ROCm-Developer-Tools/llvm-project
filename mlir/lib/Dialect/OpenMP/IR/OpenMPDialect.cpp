@@ -661,22 +661,26 @@ static LogicalResult verifySynchronizationHint(Operation *op, uint64_t hint) {
 //===----------------------------------------------------------------------===//
 /// Parses a Map Clause.
 ///
-/// map-clause = `map (` ( `(` `always, `? `close, `? `present, `? ( `to` |
-/// `from` | `delete` ) ` -> ` symbol-ref ` : ` type(symbol-ref) `)` )+ `)`
-/// Eg: map((release -> %1 : !llvm.ptr<array<1024 x i32>>), (always, close, from
-/// -> %2 : !llvm.ptr<array<1024 x i32>>))
+/// map-clause = `map (` ( `(` `always, `? `close, `? `present, `? (`this, ` |
+/// `byref, ` | `bycopy, ` | `vlatype, `) ( `to` | `from` | `delete` ) ` -> `
+/// symbol-ref ` : ` type(symbol-ref) `)` )+ `)`
+/// Eg: map((release -> %1 : !llvm.ptr<array<1024 x i32>>), (always, close,
+/// byref, from) -> %2 : !llvm.ptr<array<1024 x i32>>))
 static ParseResult
 parseMapClause(OpAsmParser &parser,
                SmallVectorImpl<OpAsmParser::UnresolvedOperand> &map_operands,
-               SmallVectorImpl<Type> &map_operand_types, ArrayAttr &map_types) {
+               SmallVectorImpl<Type> &map_operand_types, ArrayAttr &map_types,
+               ArrayAttr &map_capture_types) {
   StringRef mapTypeMod;
   OpAsmParser::UnresolvedOperand arg1;
   Type arg1Type;
   IntegerAttr arg2;
   SmallVector<IntegerAttr> mapTypesVec;
   llvm::omp::OpenMPOffloadMappingFlags mapTypeBits;
+  SmallVector<mlir::omp::VariableCaptureKindAttr> mapCaptureTypes;
+  mlir::omp::VariableCaptureKind captureKind;
 
-  auto parseTypeAndMod = [&]() -> ParseResult {
+  auto parseTypeModAndCapture = [&]() -> ParseResult {
     if (parser.parseKeyword(&mapTypeMod))
       return failure();
 
@@ -696,14 +700,24 @@ parseMapClause(OpAsmParser &parser,
                      llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_FROM;
     if (mapTypeMod == "delete")
       mapTypeBits |= llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_DELETE;
+
+    if (mapTypeMod == "This")
+      captureKind = mlir::omp::VariableCaptureKind::This;
+    if (mapTypeMod == "ByRef")
+      captureKind = mlir::omp::VariableCaptureKind::ByRef;
+    if (mapTypeMod == "ByCopy")
+      captureKind = mlir::omp::VariableCaptureKind::ByCopy;
+    if (mapTypeMod == "VLAType")
+      captureKind = mlir::omp::VariableCaptureKind::VLAType;
+        
     return success();
   };
 
   auto parseMap = [&]() -> ParseResult {
     mapTypeBits = llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_NONE;
-
+    
     if (parser.parseLParen() ||
-        parser.parseCommaSeparatedList(parseTypeAndMod) ||
+        parser.parseCommaSeparatedList(parseTypeModAndCapture) ||
         parser.parseArrow() || parser.parseOperand(arg1) ||
         parser.parseColon() || parser.parseType(arg1Type) ||
         parser.parseRParen())
@@ -716,6 +730,8 @@ parseMapClause(OpAsmParser &parser,
             std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
             mapTypeBits));
     mapTypesVec.push_back(arg2);
+    mapCaptureTypes.push_back(mlir::omp::VariableCaptureKindAttr::get(
+        parser.getContext(), captureKind));
     return success();
   };
 
@@ -724,12 +740,15 @@ parseMapClause(OpAsmParser &parser,
 
   SmallVector<Attribute> mapTypesAttr(mapTypesVec.begin(), mapTypesVec.end());
   map_types = ArrayAttr::get(parser.getContext(), mapTypesAttr);
+  SmallVector<Attribute> mapCaptureTypesAttr(mapCaptureTypes.begin(), mapCaptureTypes.end());
+  map_capture_types = ArrayAttr::get(parser.getContext(), mapCaptureTypesAttr);
   return success();
 }
 
 static void printMapClause(OpAsmPrinter &p, Operation *op,
                            OperandRange map_operands,
-                           TypeRange map_operand_types, ArrayAttr map_types) {
+                           TypeRange map_operand_types, ArrayAttr map_types,
+                           ArrayAttr map_capture_types) {
 
   // Helper function to get bitwise AND of `value` and 'flag'
   auto bitAnd = [](int64_t value,
@@ -741,12 +760,14 @@ static void printMapClause(OpAsmPrinter &p, Operation *op,
   };
 
   assert(map_operands.size() == map_types.size());
-
+  assert(map_operands.size() == map_capture_types.size());
+  
   for (unsigned i = 0, e = map_operands.size(); i < e; i++) {
     int64_t mapTypeBits = 0x00;
     Value mapOp = map_operands[i];
     Attribute mapTypeOp = map_types[i];
-
+    Attribute mapCapType = map_capture_types[i];
+    
     assert(llvm::isa<mlir::IntegerAttr>(mapTypeOp));
     mapTypeBits = llvm::cast<mlir::IntegerAttr>(mapTypeOp).getInt();
 
@@ -783,15 +804,16 @@ static void printMapClause(OpAsmPrinter &p, Operation *op,
     if (type.str().empty())
       type << (isa<ExitDataOp>(op) ? "release" : "alloc");
 
-    p << '(' << typeMod.str() << type.str() << " -> " << mapOp << " : "
-      << mapOp.getType() << ')';
+    p << '(' << typeMod.str() << mapCapType << ", " << type.str() << " -> "
+      << mapOp << " : " << mapOp.getType() << ')';
     if (i + 1 < e)
       p << ", ";
   }
 }
 
 static LogicalResult verifyMapClause(Operation *op, OperandRange map_operands,
-                                     std::optional<ArrayAttr> map_types) {
+                                     std::optional<ArrayAttr> map_types,
+                                     std::optional<ArrayAttr> map_capture_types) {
   // Helper function to get bitwise AND of `value` and 'flag'
   auto bitAnd = [](int64_t value,
                    llvm::omp::OpenMPOffloadMappingFlags flag) -> bool {
@@ -804,6 +826,10 @@ static LogicalResult verifyMapClause(Operation *op, OperandRange map_operands,
     return success();
 
   if (map_operands.size() != map_types->size())
+    return failure();
+
+  // TODO: As support for other ops is added remove the isa check
+  if (isa<TargetOp>(op) && map_operands.size() != map_capture_types->size())
     return failure();
 
   for (const auto &mapTypeOp : *map_types) {
@@ -835,19 +861,19 @@ static LogicalResult verifyMapClause(Operation *op, OperandRange map_operands,
 }
 
 LogicalResult DataOp::verify() {
-  return verifyMapClause(*this, getMapOperands(), getMapTypes());
+  return verifyMapClause(*this, getMapOperands(), getMapTypes(), ArrayAttr());
 }
 
 LogicalResult EnterDataOp::verify() {
-  return verifyMapClause(*this, getMapOperands(), getMapTypes());
+  return verifyMapClause(*this, getMapOperands(), getMapTypes(), ArrayAttr());
 }
 
 LogicalResult ExitDataOp::verify() {
-  return verifyMapClause(*this, getMapOperands(), getMapTypes());
+  return verifyMapClause(*this, getMapOperands(), getMapTypes(), ArrayAttr());
 }
 
 LogicalResult TargetOp::verify() {
-  return verifyMapClause(*this, getMapOperands(), getMapTypes());
+  return verifyMapClause(*this, getMapOperands(), getMapTypes(), getMapCaptureTypes());
 }
 
 //===----------------------------------------------------------------------===//
