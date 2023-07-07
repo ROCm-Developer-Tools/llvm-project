@@ -4098,6 +4098,7 @@ Constant *OpenMPIRBuilder::createOutlinedFunctionID(Function *OutlinedFn,
     assert(OutlinedFn && "The outlined function must exist if embedded");
     return ConstantExpr::getBitCast(OutlinedFn, Builder.getInt8PtrTy());
   }
+
   return new GlobalVariable(
       M, Builder.getInt8Ty(), /*isConstant=*/true, GlobalValue::WeakAnyLinkage,
       Constant::getNullValue(Builder.getInt8Ty()), EntryFnIDName);

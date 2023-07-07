@@ -7047,10 +7047,8 @@ private:
     }
     if (AddPtrFlag)
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
-
     if (AddIsTargetParamFlag)
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
-    
     if (llvm::is_contained(MapModifiers, OMPC_MAP_MODIFIER_always))
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_ALWAYS;
     if (llvm::is_contained(MapModifiers, OMPC_MAP_MODIFIER_close))
@@ -7060,10 +7058,8 @@ private:
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_PRESENT;
     if (llvm::is_contained(MapModifiers, OMPC_MAP_MODIFIER_ompx_hold))
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_OMPX_HOLD;
-
-    if (IsNonContiguous) {
+    if (IsNonContiguous)
       Bits |= OpenMPOffloadMappingFlags::OMP_MAP_NON_CONTIG;
-    }
     return Bits;
   }
 
@@ -7650,13 +7646,12 @@ private:
           if (!IsExpressionFirstInfo || IsMemberReference) {
             // If we have a PTR_AND_OBJ pair where the OBJ is a pointer as well,
             // then we reset the TO/FROM/ALWAYS/DELETE/CLOSE flags.
-            if (IsPointer || (IsMemberReference && Next != CE)) {
+            if (IsPointer || (IsMemberReference && Next != CE))
               Flags &= ~(OpenMPOffloadMappingFlags::OMP_MAP_TO |
                          OpenMPOffloadMappingFlags::OMP_MAP_FROM |
                          OpenMPOffloadMappingFlags::OMP_MAP_ALWAYS |
                          OpenMPOffloadMappingFlags::OMP_MAP_DELETE |
                          OpenMPOffloadMappingFlags::OMP_MAP_CLOSE);
-            }
 
             if (ShouldBeMemberOf) {
               // Set placeholder value MEMBER_OF=FFFF to indicate that the flag
@@ -7667,6 +7662,7 @@ private:
               ShouldBeMemberOf = false;
             }
           }
+
           CombinedInfo.Types.push_back(Flags);
         }
 
@@ -8897,13 +8893,11 @@ public:
       std::tie(Components, MapType, MapModifiers, IsImplicit, Mapper, VarRef) =
           L;
       auto It = OverlappedData.find(&L);
-      if (It == OverlappedData.end()) {
+      if (It == OverlappedData.end())
         generateInfoForComponentList(MapType, MapModifiers, std::nullopt,
                                      Components, CombinedInfo, PartialStruct,
                                      IsFirstComponentList, IsImplicit, Mapper,
                                      /*ForDeviceAddr=*/false, VD, VarRef);
-
-        }
       IsFirstComponentList = false;
     }
   }

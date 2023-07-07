@@ -1846,7 +1846,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   };
 
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-
   StringRef parentName = opInst.getParentOfType<LLVM::LLVMFuncOp>().getName();
 
   // Override parent name if early outlining function

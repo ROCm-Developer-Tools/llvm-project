@@ -770,12 +770,19 @@ static void createBodyOfTargetOp(
   }
   
 // genObjectList in OpenACC may be of some interest for breaking down types
-//
+///  \param [in] converter - the abstract converter for the current invocation
+/// of the lowering process
+/// \param [in]  capturedSym - The symbol of the variable being captured
+/// \param [in]  capturedByDirective - The directive the variable is part of
+/// either by implicit or explicit map
 /// \param [in]  isVariableUsedInMapClause - is the variable used in a map
 /// clause (explicitly mapped)
 /// \param [in]  isVariableAssociatedWithSection - is the variable related to
 ///     an array subscript operator, an OpenMP array section or shaping
 ///     expression or otherwise dereferenced
+/// \param [in]  forceCaptureByReferenceInTarget - will force capture byref
+/// when true in certain cases where bycopy may be possible and byref is an
+/// option
 mlir::omp::VariableCaptureKind
 isCapturedByRef(Fortran::lower::AbstractConverter &converter,
                 Fortran::semantics::Symbol *capturedSym,
