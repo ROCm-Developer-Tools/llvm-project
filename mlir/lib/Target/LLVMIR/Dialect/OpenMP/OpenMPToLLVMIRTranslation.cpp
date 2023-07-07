@@ -1757,6 +1757,7 @@ static void createAlteredByCaptureMap(
     DenseMap<Value, llvm::Value *> &remappedOperands,
     llvm::SmallVector<Value> &mapOperands,
     llvm::SmallVector<llvm::Value *> &inputs,
+    llvm::SmallVector<llvm::Type *> &inputTypes,
     llvm::SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
         &inputsCaptureKind,
     LLVM::ModuleTranslation &moduleTranslation, llvm::IRBuilderBase &builder) {
@@ -1782,15 +1783,7 @@ static void createAlteredByCaptureMap(
       break;
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
         OMPTargetVarCaptureByCopy: {
-      // We care about the pointee type, not the pointer, however, in certain
-      // cases it may just return a pointer or null which is acceptable
-      llvm::Type *type = moduleTranslation.convertType(mapOp.getType());
-      if (auto pointerType =
-              llvm::dyn_cast<mlir::omp::PointerLikeType>(mapOp.getType())) {
-        if (auto eleType = pointerType.getElementType())
-          type = moduleTranslation.convertType(eleType);
-      }
-
+      llvm::Type *type = inputTypes[index];
       llvm::Value *newV = builder.CreateLoad(type, mapOpValue);
 
       if (!type->isPointerTy()) {
@@ -1884,9 +1877,14 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
         for (const auto &mapOp : mapOps) {
           // skip over if it is a declare target, it will be mapped by the
           // runtime as a pointer rather than an argument
-          if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation))
+          if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation)) {
+            index++;
             continue;
+          }
 
+          // We care about the pointee type, not the pointer, however, in
+          // certain cases it may just return a pointer or null which is
+          // acceptable
           llvm::Type *type = moduleTranslation.convertType(mapOp.getType());
           if (auto pointerType =
                   llvm::dyn_cast<mlir::omp::PointerLikeType>(mapOp.getType())) {
@@ -1900,23 +1898,31 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
           auto mapCap = mapCaptures[index]
                             .dyn_cast<mlir::omp::VariableCaptureKindAttr>()
                             .getValue();
-
-          if (mapCap == mlir::omp::VariableCaptureKind::ByCopy) {
+          switch (mapCap) {
+          case mlir::omp::VariableCaptureKind::ByCopy: {
             inputCaptures.push_back(
                 llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
                     OMPTargetVarCaptureByCopy);
-          } else if (mapCap == mlir::omp::VariableCaptureKind::ByRef) {
+            break;
+          }
+          case mlir::omp::VariableCaptureKind::ByRef: {
             inputCaptures.push_back(
                 llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
                     OMPTargetVarCaptureByRef);
-          } else if (mapCap == mlir::omp::VariableCaptureKind::VLAType) {
+            break;
+          }
+          case mlir::omp::VariableCaptureKind::VLAType: {
             inputCaptures.push_back(
                 llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
                     OMPTargetVarCaptureVLAType);
-          } else if (mapCap == mlir::omp::VariableCaptureKind::This) {
+            break;
+          }
+          case mlir::omp::VariableCaptureKind::This: {
             inputCaptures.push_back(
                 llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
                     OMPTargetVarCaptureThis);
+            break;
+          }
           }
 
           index++;
@@ -1939,7 +1945,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   // ModuleTranslation, so we use an intermediate map.
   DenseMap<Value, llvm::Value *> remappedOperands;
   if (!moduleTranslation.getOpenMPBuilder()->Config.isEmbedded())
-    createAlteredByCaptureMap(remappedOperands, mapOperands, inputs,
+    createAlteredByCaptureMap(remappedOperands, mapOperands, inputs, inputTypes,
                               inputsCaptureKind, moduleTranslation, builder);
 
   llvm::OpenMPIRBuilder::MapInfosTy combinedInfos;
@@ -1954,7 +1960,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
       ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
-      defaultValThreads, inputs, inputsCaptureKind, genMapInfoCB, bodyCB));
+      defaultValThreads, inputs, inputTypes, inputsCaptureKind, genMapInfoCB, bodyCB));
 
   if (moduleTranslation.getOpenMPBuilder()->Config.isEmbedded())
     handleDeclareTargetMapVar(mapOperands, moduleTranslation, builder);

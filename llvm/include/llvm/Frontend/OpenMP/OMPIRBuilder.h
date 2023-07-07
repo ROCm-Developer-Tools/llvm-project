@@ -2155,7 +2155,7 @@ public:
       const LocationDescription &Loc, OpenMPIRBuilder::InsertPointTy AllocaIP,
       OpenMPIRBuilder::InsertPointTy CodeGenIP,
       TargetRegionEntryInfo &EntryInfo, int32_t NumTeams, int32_t NumThreads,
-      SmallVectorImpl<Value *> &Inputs,
+      SmallVectorImpl<Value *> &Inputs, SmallVectorImpl<Type *> &ArgTypes,
       SmallVectorImpl<OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
           &InputsCaptureKind,
       GenMapInfoCallbackTy GenMapInfoCB, TargetBodyGenCallbackTy BodyGenCB);
