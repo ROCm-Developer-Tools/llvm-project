@@ -1420,7 +1420,7 @@ getRefPtrIfDeclareTarget(mlir::Value const &value,
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
   // An easier way to do this may just be to keep track of any pointer
   // references and there mapping to their respective operation
-  if (isa<LLVM::AddressOfOp>(value.getDefiningOp())) {
+  if (isa_and_nonnull<LLVM::AddressOfOp>(value.getDefiningOp())) {
     LLVM::AddressOfOp addressOfOp =
         dyn_cast<LLVM::AddressOfOp>(value.getDefiningOp());
     LLVM::GlobalOp gOp = dyn_cast<LLVM::GlobalOp>(
