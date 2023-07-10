@@ -147,7 +147,6 @@ convertOperationImpl(Operation &opInst, llvm::IRBuilderBase &builder,
   if (auto fmf = dyn_cast<FastmathFlagsInterface>(opInst))
     builder.setFastMathFlags(getFastmathFlags(fmf));
 
-// interesting code segment
 #include "mlir/Dialect/LLVMIR/LLVMConversions.inc"
 #include "mlir/Dialect/LLVMIR/LLVMIntrinsicConversions.inc"
 
