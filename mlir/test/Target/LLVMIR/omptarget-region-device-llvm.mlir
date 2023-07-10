@@ -12,7 +12,7 @@ module attributes {omp.is_target_device = true} {
     %7 = llvm.alloca %6 x i32 {bindc_name = "c", in_type = i32, operand_segment_sizes = array<i32: 0, 0>, uniq_name = "_QFomp_target_regionEc"} : (i64) -> !llvm.ptr<i32>
     llvm.store %1, %3 : !llvm.ptr<i32>
     llvm.store %0, %5 : !llvm.ptr<i32>
-    omp.target   {
+    omp.target map((ByRef, tofrom -> %3 : !llvm.ptr<i32>), (ByRef, tofrom -> %5 : !llvm.ptr<i32>), (ByRef, tofrom -> %7 : !llvm.ptr<i32>)) {
       %8 = llvm.load %3 : !llvm.ptr<i32>
       %9 = llvm.load %5 : !llvm.ptr<i32>
       %10 = llvm.add %8, %9  : i32
@@ -25,17 +25,26 @@ module attributes {omp.is_target_device = true} {
 
 // CHECK:      @[[SRC_LOC:.*]] = private unnamed_addr constant [23 x i8] c"{{[^"]*}}", align 1
 // CHECK:      @[[IDENT:.*]] = private unnamed_addr constant %struct.ident_t { i32 0, i32 2, i32 0, i32 22, ptr @[[SRC_LOC]] }, align 8
-// CHECK:      define weak_odr protected void @__omp_offloading_{{[^_]+}}_{{[^_]+}}_omp_target_region__l{{[0-9]+}}(ptr %[[ADDR_A:.*]], ptr %[[ADDR_B:.*]], ptr %[[ADDR_C:.*]])
+// CHECK:      define weak_odr protected void @__omp_offloading_{{[^_]+}}_{{[^_]+}}_omp_target_region__l{{[0-9]+}}(ptr %[[ADDR_A:.*]], ptr %[[ADDR_B:.*]], ptr %[[ADDR_C:.*]]) {
+// CHECK:        %[[ALLOCA_A:.*]] = alloca ptr, align 8
+// CHECK:        store ptr %[[ADDR_A]], ptr %[[ALLOCA_A]], align 8
+// CHECK:        %[[LOAD_A:.*]] = load ptr, ptr %[[ALLOCA_A]], align 8
+// CHECK:        %[[ALLOCA_B:.*]] = alloca ptr, align 8
+// CHECK:        store ptr %[[ADDR_B]], ptr %[[ALLOCA_B]], align 8
+// CHECK:        %[[LOAD_B:.*]] = load ptr, ptr %[[ALLOCA_B]], align 8
+// CHECK:        %[[ALLOCA_C:.*]] = alloca ptr, align 8
+// CHECK:        store ptr %[[ADDR_C]], ptr %[[ALLOCA_C]], align 8
+// CHECK:        %[[LOAD_C:.*]] = load ptr, ptr %[[ALLOCA_C]], align 8
 // CHECK:        %[[INIT:.*]] = call i32 @__kmpc_target_init(ptr @[[IDENT]], i8 1, i1 true)
-// CHECK-NEXT:   %[[CMP:.*]] = icmp eq i32 %3, -1
+// CHECK-NEXT:   %[[CMP:.*]] = icmp eq i32 %{{.*}}, -1
 // CHECK-NEXT:   br i1 %[[CMP]], label %[[LABEL_ENTRY:.*]], label %[[LABEL_EXIT:.*]]
 // CHECK:        [[LABEL_ENTRY]]:
 // CHECK-NEXT:   br label %[[LABEL_TARGET:.*]]
 // CHECK:        [[LABEL_TARGET]]:
-// CHECK:        %[[A:.*]] = load i32, ptr %[[ADDR_A]], align 4
-// CHECK:        %[[B:.*]] = load i32, ptr %[[ADDR_B]], align 4
+// CHECK:        %[[A:.*]] = load i32, ptr %[[LOAD_A]], align 4
+// CHECK:        %[[B:.*]] = load i32, ptr %[[LOAD_B]], align 4
 // CHECK:        %[[C:.*]] = add i32 %[[A]], %[[B]]
-// CHECK:        store i32 %[[C]], ptr %[[ADDR_C]], align 4
+// CHECK:        store i32 %[[C]], ptr %[[LOAD_C]], align 4
 // CHECK:        br label %[[LABEL_DEINIT:.*]]
 // CHECK:        [[LABEL_DEINIT]]:
 // CHECK-NEXT:   call void @__kmpc_target_deinit(ptr @[[IDENT]], i8 1)

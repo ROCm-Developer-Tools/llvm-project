@@ -490,11 +490,11 @@ func.func @omp_target(%if_cond : i1, %device : si32,  %num_threads : i32, %map1:
     }) {nowait, operand_segment_sizes = array<i32: 1,1,1,0>} : ( i1, si32, i32 ) -> ()
 
     // Test with optional map clause.
-    // CHECK: omp.target map((tofrom -> %{{.*}} : memref<?xi32>), (alloc -> %{{.*}} : memref<?xi32>)) {
-    omp.target map((tofrom -> %map1 : memref<?xi32>), (alloc -> %map2 : memref<?xi32>)){}
+    // CHECK: omp.target map((This, tofrom -> %{{.*}} : memref<?xi32>), (This, alloc -> %{{.*}} : memref<?xi32>)) {
+    omp.target map((This, tofrom -> %map1 : memref<?xi32>), (This, alloc -> %map2 : memref<?xi32>)){}
 
-    // CHECK: omp.target map((to -> %{{.*}} : memref<?xi32>), (always, from -> %{{.*}} : memref<?xi32>)) {
-    omp.target map((to -> %map1 : memref<?xi32>), (always, from -> %map2 : memref<?xi32>)){}
+    // CHECK: omp.target map((This, to -> %{{.*}} : memref<?xi32>), (always, This, from -> %{{.*}} : memref<?xi32>)) {
+    omp.target map((This, to -> %map1 : memref<?xi32>), (always, This, from -> %map2 : memref<?xi32>)){}
 
     // CHECK: omp.barrier
     omp.barrier
