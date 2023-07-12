@@ -28,7 +28,6 @@ add_flang_library(FortranSemantics
   data-to-inits.cpp
   definable.cpp
   expression.cpp
-  finalize-omp.cpp
   mod-file.cpp
   pointer-assignment.cpp
   program-tree.cpp

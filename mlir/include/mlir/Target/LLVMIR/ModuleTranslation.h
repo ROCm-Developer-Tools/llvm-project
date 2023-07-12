@@ -345,10 +345,6 @@ private:
 
   /// A cache for the symbol tables constructed during symbols lookup.
   SymbolTableCollection symbolTableCollection;
-
-  /// The set of functions that should be masked out from the output, due to not
-  /// corresponding to the target device being compiled for.
-  llvm::SmallVector<llvm::Function *> maskedFunctions;
 };
 
 namespace detail {

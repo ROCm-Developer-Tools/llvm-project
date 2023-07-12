@@ -23,7 +23,6 @@
 #include "flang/Optimizer/Dialect/Support/KindMapping.h"
 #include "flang/Optimizer/Support/InitFIR.h"
 #include "flang/Optimizer/Support/Utils.h"
-#include "flang/Optimizer/Transforms/Passes.h"
 #include "flang/Parser/dump-parse-tree.h"
 #include "flang/Parser/parsing.h"
 #include "flang/Parser/provenance.h"
@@ -276,10 +275,7 @@ bool CodeGenAction::beginSourceFileAction() {
 
   // Fetch module from lb, so we can set
   mlirModule = std::make_unique<mlir::ModuleOp>(lb.getModule());
-  llvm::StringRef mainFileName =
-      ci.getInvocation().getFrontendOpts().mainFileName;
-  if (!mainFileName.empty())
-    mlirModule->setName(ci.getInvocation().getFrontendOpts().mainFileName);
+
   if (!setUpTargetMachine())
     return false;
 
