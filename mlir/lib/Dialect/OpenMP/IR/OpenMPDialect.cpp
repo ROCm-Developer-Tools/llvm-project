@@ -26,6 +26,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
 #include <cstddef>
+#include <numeric>
 #include <optional>
 
 #include "mlir/Dialect/OpenMP/IR/OpenMPOpsDialect.cpp.inc"
@@ -657,8 +658,23 @@ static LogicalResult verifySynchronizationHint(Operation *op, uint64_t hint) {
 }
 
 //===----------------------------------------------------------------------===//
-// Parser, printer and verifier for Target
+// Builder, Parser, printer and verifier for Target
 //===----------------------------------------------------------------------===//
+
+// void TargetOp::build(OpBuilder &builder, OperationState &result,
+//                      ArrayRef<ValueRange> mapLowerBounds,
+//                      ArrayRef<ValueRange> mapUpperBounds) {
+//   // DenseIntElementsAttr caseValuesAttr;
+//   // if (!caseValues.empty()) {
+//   //   ShapedType caseValueType = VectorType::get(
+//   //       static_cast<int64_t>(caseValues.size()), value.getType());
+//   //   caseValuesAttr = DenseIntElementsAttr::get(caseValueType, caseValues);
+//   // }
+//   // build(builder, result, value, defaultDestination, defaultOperands,
+//   //       caseValuesAttr, caseDestinations, caseOperands);
+// }
+
+
 /// Parses a Map Clause.
 ///
 /// map-clause = `map (` ( `(` `always, `? `close, `? `present, `? (`this, ` |
@@ -670,7 +686,11 @@ static ParseResult
 parseMapClause(OpAsmParser &parser,
                SmallVectorImpl<OpAsmParser::UnresolvedOperand> &map_operands,
                SmallVectorImpl<Type> &map_operand_types, ArrayAttr &map_types,
-               ArrayAttr &map_capture_types) {
+               ArrayAttr &map_capture_types,
+               SmallVectorImpl<SmallVector<OpAsmParser::UnresolvedOperand>> &map_range_lower_bound,
+               SmallVectorImpl<SmallVector<Type>> &map_range_lower_bound_types,
+               SmallVectorImpl<SmallVector<OpAsmParser::UnresolvedOperand>> &map_range_upper_bound,
+               SmallVectorImpl<SmallVector<Type>> &map_range_upper_bound_types) {
   StringRef mapTypeMod;
   OpAsmParser::UnresolvedOperand arg1;
   Type arg1Type;
@@ -748,7 +768,11 @@ parseMapClause(OpAsmParser &parser,
 static void printMapClause(OpAsmPrinter &p, Operation *op,
                            OperandRange map_operands,
                            TypeRange map_operand_types, ArrayAttr map_types,
-                           ArrayAttr map_capture_types) {
+                           ArrayAttr map_capture_types,
+                           OperandRangeRange map_range_lower_bound,
+                           const TypeRangeRange &map_range_lower_bound_types,
+                           OperandRangeRange map_range_upper_bound,
+                           const TypeRangeRange &map_range_upper_bound_types) {
 
   // Helper function to get bitwise AND of `value` and 'flag'
   auto bitAnd = [](int64_t value,

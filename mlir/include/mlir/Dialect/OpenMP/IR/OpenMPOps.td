@@ -1064,14 +1064,18 @@ def Target_DataOp: OpenMP_Op<"target_data", [AttrSizedOperandSegments]>{
                        Variadic<OpenMP_PointerLikeType>:$use_device_addr,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
                        I64ArrayAttr:$map_types,
-                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types,
+                       VariadicOfVariadic<AnyInteger, "map_lower_bound_segment">:$map_range_lower_bound,
+                       DenseI32ArrayAttr:$map_lower_bound_segment,
+                       VariadicOfVariadic<AnyInteger, "map_upper_bound_segment">:$map_range_upper_bound,
+                       DenseI32ArrayAttr:$map_upper_bound_segment);
 
   let regions = (region AnyRegion:$region);
 
   let assemblyFormat = [{
     oilist(`if` `(` $if_expr `:` type($if_expr) `)`
     | `device` `(` $device `:` type($device) `)`)
-    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
+    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types, $map_range_lower_bound, type($map_range_lower_bound), $map_range_upper_bound, type($map_range_upper_bound)) `)`
     oilist(`use_device_ptr` `(` $use_device_ptr `:` type($use_device_ptr) `)`
     | `use_device_addr` `(` $use_device_addr `:` type($use_device_addr) `)`)
     $region attr-dict
@@ -1115,13 +1119,17 @@ def Target_EnterDataOp: OpenMP_Op<"target_enter_data",
                        UnitAttr:$nowait,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
                        I64ArrayAttr:$map_types,
-                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types,
+                       VariadicOfVariadic<AnyInteger, "map_lower_bound_segment">:$map_range_lower_bound,
+                       DenseI32ArrayAttr:$map_lower_bound_segment,
+                       VariadicOfVariadic<AnyInteger, "map_upper_bound_segment">:$map_range_upper_bound,
+                       DenseI32ArrayAttr:$map_upper_bound_segment);
 
   let assemblyFormat = [{
     oilist(`if` `(` $if_expr `:` type($if_expr) `)`
     | `device` `(` $device `:` type($device) `)`
     | `nowait` $nowait)
-    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
+    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types, $map_range_lower_bound, type($map_range_lower_bound), $map_range_upper_bound, type($map_range_upper_bound)) `)`
     attr-dict
    }];
 
@@ -1163,13 +1171,17 @@ def Target_ExitDataOp: OpenMP_Op<"target_exit_data",
                        UnitAttr:$nowait,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
                        I64ArrayAttr:$map_types,
-                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types,
+                       VariadicOfVariadic<AnyInteger, "map_lower_bound_segment">:$map_range_lower_bound,
+                       DenseI32ArrayAttr:$map_lower_bound_segment,
+                       VariadicOfVariadic<AnyInteger, "map_upper_bound_segment">:$map_range_upper_bound,
+                       DenseI32ArrayAttr:$map_upper_bound_segment);
 
   let assemblyFormat = [{
     oilist(`if` `(` $if_expr `:` type($if_expr) `)`
     | `device` `(` $device `:` type($device) `)`
     | `nowait` $nowait)
-    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
+    `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types, $map_range_lower_bound, type($map_range_lower_bound), $map_range_upper_bound, type($map_range_upper_bound)) `)`
     attr-dict
    }];
 
@@ -1208,7 +1220,11 @@ def TargetOp : OpenMP_Op<"target",[AttrSizedOperandSegments]> {
                        UnitAttr:$nowait,
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
                        OptionalAttr<I64ArrayAttr>:$map_types,
-                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types);
+                       OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types,
+                       VariadicOfVariadic<AnyInteger, "map_lower_bound_segment">:$map_range_lower_bound,
+                       DenseI32ArrayAttr:$map_lower_bound_segment,
+                       VariadicOfVariadic<AnyInteger, "map_upper_bound_segment">:$map_range_upper_bound,
+                       DenseI32ArrayAttr:$map_upper_bound_segment);
 
   let regions = (region AnyRegion:$region);
 
@@ -1217,7 +1233,7 @@ def TargetOp : OpenMP_Op<"target",[AttrSizedOperandSegments]> {
     | `device` `(` $device `:` type($device) `)`
     | `thread_limit` `(` $thread_limit `:` type($thread_limit) `)`
     | `nowait` $nowait
-    | `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types) `)`
+    | `map` `(` custom<MapClause>($map_operands, type($map_operands), $map_types, $map_capture_types, $map_range_lower_bound, type($map_range_lower_bound), $map_range_upper_bound, type($map_range_upper_bound)) `)`
     ) $region attr-dict
   }];
 
