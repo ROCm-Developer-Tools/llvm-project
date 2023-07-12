@@ -12,6 +12,7 @@
 
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/LiveVariables.h"
@@ -567,6 +568,11 @@ void MachineBasicBlock::printName(raw_ostream &os, unsigned printNameFlags,
     if (getBBID().has_value()) {
       os << (hasAttributes ? ", " : " (");
       os << "bb_id " << *getBBID();
+      hasAttributes = true;
+    }
+    if (SPAdjustment != 0) {
+      os << (hasAttributes ? ", " : " (");
+      os << "sp-adjustment " << SPAdjustment;
       hasAttributes = true;
     }
   }
@@ -1130,9 +1136,8 @@ MachineBasicBlock *MachineBasicBlock::SplitCriticalEdge(
   if (LV)
     for (MachineInstr &MI :
          llvm::make_range(getFirstInstrTerminator(), instr_end())) {
-      for (MachineOperand &MO : MI.operands()) {
-        if (!MO.isReg() || MO.getReg() == 0 || !MO.isUse() || !MO.isKill() ||
-            MO.isUndef())
+      for (MachineOperand &MO : MI.all_uses()) {
+        if (MO.getReg() == 0 || !MO.isKill() || MO.isUndef())
           continue;
         Register Reg = MO.getReg();
         if (Reg.isPhysical() || LV->getVarInfo(Reg).removeKill(MI)) {
@@ -1462,7 +1467,7 @@ void MachineBasicBlock::replacePhiUsesWith(MachineBasicBlock *Old,
     }
 }
 
-/// Find the next valid DebugLoc starting at MBBI, skipping any DBG_VALUE
+/// Find the next valid DebugLoc starting at MBBI, skipping any debug
 /// instructions.  Return UnknownLoc if there is none.
 DebugLoc
 MachineBasicBlock::findDebugLoc(instr_iterator MBBI) {
@@ -1474,6 +1479,8 @@ MachineBasicBlock::findDebugLoc(instr_iterator MBBI) {
 }
 
 DebugLoc MachineBasicBlock::rfindDebugLoc(reverse_instr_iterator MBBI) {
+  if (MBBI == instr_rend())
+    return findDebugLoc(instr_begin());
   // Skip debug declarations, we don't want a DebugLoc from them.
   MBBI = skipDebugInstructionsBackward(MBBI, instr_rbegin());
   if (!MBBI->isDebugInstr())
@@ -1481,13 +1488,15 @@ DebugLoc MachineBasicBlock::rfindDebugLoc(reverse_instr_iterator MBBI) {
   return {};
 }
 
-/// Find the previous valid DebugLoc preceding MBBI, skipping and DBG_VALUE
+/// Find the previous valid DebugLoc preceding MBBI, skipping any debug
 /// instructions.  Return UnknownLoc if there is none.
 DebugLoc MachineBasicBlock::findPrevDebugLoc(instr_iterator MBBI) {
-  if (MBBI == instr_begin()) return {};
+  if (MBBI == instr_begin())
+    return {};
   // Skip debug instructions, we don't want a DebugLoc from them.
   MBBI = prev_nodbg(MBBI, instr_begin());
-  if (!MBBI->isDebugInstr()) return MBBI->getDebugLoc();
+  if (!MBBI->isDebugInstr())
+    return MBBI->getDebugLoc();
   return {};
 }
 

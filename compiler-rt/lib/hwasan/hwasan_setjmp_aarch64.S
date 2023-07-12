@@ -41,6 +41,8 @@ ASM_WRAPPER_NAME(setjmp):
   CFI_ENDPROC
 ASM_SIZE(ASM_WRAPPER_NAME(setjmp))
 
+ASM_INTERCEPTOR_TRAMPOLINE(setjmp)
+
 #if SANITIZER_ANDROID
 // Bionic also defines a function `setjmp` that calls `sigsetjmp` saving the
 // current signal.
@@ -53,6 +55,8 @@ ASM_WRAPPER_NAME(setjmp_bionic):
   b	ASM_WRAPPER_NAME(sigsetjmp)
   CFI_ENDPROC
 ASM_SIZE(ASM_WRAPPER_NAME(setjmp_bionic))
+
+ASM_INTERCEPTOR_TRAMPOLINE(setjmp_bionic)
 #endif
 
 .global ASM_WRAPPER_NAME(sigsetjmp)
@@ -79,20 +83,17 @@ ASM_WRAPPER_NAME(sigsetjmp):
   CFI_ENDPROC
 ASM_SIZE(ASM_WRAPPER_NAME(sigsetjmp))
 
+ASM_INTERCEPTOR_TRAMPOLINE(sigsetjmp)
 
-.macro WEAK_ALIAS first second
-  .weak \second
-  .equ \second\(), \first
-.endm
 
 #if SANITIZER_ANDROID
-WEAK_ALIAS ASM_WRAPPER_NAME(sigsetjmp), sigsetjmp
-WEAK_ALIAS ASM_WRAPPER_NAME(setjmp_bionic), setjmp
+ASM_TRAMPOLINE_ALIAS(sigsetjmp, sigsetjmp)
+ASM_TRAMPOLINE_ALIAS(setjmp, setjmp_bionic)
 #else
-WEAK_ALIAS ASM_WRAPPER_NAME(sigsetjmp), __sigsetjmp
+ASM_TRAMPOLINE_ALIAS(__sigsetjmp, sigsetjmp)
 #endif
 
-WEAK_ALIAS ASM_WRAPPER_NAME(setjmp), _setjmp
+ASM_TRAMPOLINE_ALIAS(_setjmp, setjmp)
 #endif
 
 // We do not need executable stack.

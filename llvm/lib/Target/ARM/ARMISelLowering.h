@@ -750,7 +750,7 @@ class VectorType;
         ComplexDeinterleavingOperation Operation, Type *Ty) const override;
 
     Value *createComplexDeinterleavingIR(
-        Instruction *I, ComplexDeinterleavingOperation OperationType,
+        IRBuilderBase &B, ComplexDeinterleavingOperation OperationType,
         ComplexDeinterleavingRotation Rotation, Value *InputA, Value *InputB,
         Value *Accumulator = nullptr) const override;
 
@@ -969,6 +969,8 @@ class VectorType;
                                 MachineBasicBlock *DispatchBB, int FI) const;
 
     void EmitSjLjDispatchBlock(MachineInstr &MI, MachineBasicBlock *MBB) const;
+
+    int getSPAdjustment(MachineInstr &MI) const;
 
     MachineBasicBlock *EmitStructByval(MachineInstr &MI,
                                        MachineBasicBlock *MBB) const;

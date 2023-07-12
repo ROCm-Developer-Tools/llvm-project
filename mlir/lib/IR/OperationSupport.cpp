@@ -626,17 +626,17 @@ ValueRange::ValueRange(ResultRange values)
 /// See `llvm::detail::indexed_accessor_range_base` for details.
 ValueRange::OwnerT ValueRange::offset_base(const OwnerT &owner,
                                            ptrdiff_t index) {
-  if (const auto *value = owner.dyn_cast<const Value *>())
+  if (const auto *value = llvm::dyn_cast_if_present<const Value *>(owner))
     return {value + index};
-  if (auto *operand = owner.dyn_cast<OpOperand *>())
+  if (auto *operand = llvm::dyn_cast_if_present<OpOperand *>(owner))
     return {operand + index};
   return owner.get<detail::OpResultImpl *>()->getNextResultAtOffset(index);
 }
 /// See `llvm::detail::indexed_accessor_range_base` for details.
 Value ValueRange::dereference_iterator(const OwnerT &owner, ptrdiff_t index) {
-  if (const auto *value = owner.dyn_cast<const Value *>())
+  if (const auto *value = llvm::dyn_cast_if_present<const Value *>(owner))
     return value[index];
-  if (auto *operand = owner.dyn_cast<OpOperand *>())
+  if (auto *operand = llvm::dyn_cast_if_present<OpOperand *>(owner))
     return operand[index].get();
   return owner.get<detail::OpResultImpl *>()->getNextResultAtOffset(index);
 }
@@ -655,6 +655,10 @@ llvm::hash_code OperationEquivalence::computeHash(
   llvm::hash_code hash =
       llvm::hash_combine(op->getName(), op->getDiscardableAttrDictionary(),
                          op->getResultTypes(), op->hashProperties());
+
+  //   - Location if required
+  if (!(flags & Flags::IgnoreLocations))
+    hash = llvm::hash_combine(hash, op->getLoc());
 
   //   - Operands
   ValueRange operands = op->getOperands();

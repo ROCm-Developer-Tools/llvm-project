@@ -25,6 +25,7 @@
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/SemaInternal.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include <set>
 using namespace clang;
 
@@ -2746,6 +2747,15 @@ void CastOperation::CheckCXXCStyleCast(bool FunctionalStyle,
     }
   }
 
+  // WebAssembly tables cannot be cast.
+  QualType SrcType = SrcExpr.get()->getType();
+  if (SrcType->isWebAssemblyTableType()) {
+    Self.Diag(OpRange.getBegin(), diag::err_wasm_cast_table)
+        << 1 << SrcExpr.get()->getSourceRange();
+    SrcExpr = ExprError();
+    return;
+  }
+
   // C++ [expr.cast]p5: The conversions performed by
   //   - a const_cast,
   //   - a static_cast,
@@ -2921,6 +2931,13 @@ void CastOperation::CheckCStyleCast() {
     return;
   QualType SrcType = SrcExpr.get()->getType();
 
+  if (SrcType->isWebAssemblyTableType()) {
+    Self.Diag(OpRange.getBegin(), diag::err_wasm_cast_table)
+        << 1 << SrcExpr.get()->getSourceRange();
+    SrcExpr = ExprError();
+    return;
+  }
+
   assert(!SrcType->isPlaceholderType());
 
   checkAddressSpaceCast(SrcType, DestType);
@@ -3088,20 +3105,6 @@ void CastOperation::CheckCStyleCast() {
 
   if (isa<ObjCSelectorExpr>(SrcExpr.get())) {
     Self.Diag(SrcExpr.get()->getExprLoc(), diag::err_cast_selector_expr);
-    SrcExpr = ExprError();
-    return;
-  }
-
-  // Can't cast to or from bfloat
-  if (DestType->isBFloat16Type() && !SrcType->isBFloat16Type()) {
-    Self.Diag(SrcExpr.get()->getExprLoc(), diag::err_cast_to_bfloat16)
-        << SrcExpr.get()->getSourceRange();
-    SrcExpr = ExprError();
-    return;
-  }
-  if (SrcType->isBFloat16Type() && !DestType->isBFloat16Type()) {
-    Self.Diag(SrcExpr.get()->getExprLoc(), diag::err_cast_from_bfloat16)
-        << SrcExpr.get()->getSourceRange();
     SrcExpr = ExprError();
     return;
   }

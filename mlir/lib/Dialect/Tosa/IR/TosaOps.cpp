@@ -100,6 +100,22 @@ Operation *TosaDialect::materializeConstant(OpBuilder &builder, Attribute value,
 // TOSA Operator Verifiers.
 //===----------------------------------------------------------------------===//
 
+static bool hasZeroDimension(ShapedType shapedType) {
+  if (!shapedType.hasRank())
+    return false;
+
+  auto rank = shapedType.getRank();
+
+  for (int i = 0; i < rank; i++) {
+    if (shapedType.isDynamicDim(i))
+      continue;
+    if (shapedType.getDimSize(i) == 0)
+      return true;
+  }
+
+  return false;
+}
+
 template <typename T> static LogicalResult verifyConvOp(T op) {
   // All TOSA conv ops have an input() and weight().
   auto inputType = llvm::dyn_cast<RankedTensorType>(op.getInput().getType());
@@ -114,6 +130,10 @@ template <typename T> static LogicalResult verifyConvOp(T op) {
     op.emitOpError("expect a ranked tensor for weight, got ") << op.getWeight();
     return failure();
   }
+
+  if (hasZeroDimension(inputType))
+    return op.emitOpError() << "tensor has a dimension with size zero. Each "
+                               "dimension of a tensor must have size >= 1";
 
   auto inputEType = inputType.getElementType();
   auto weightEType = weightType.getElementType();
@@ -142,7 +162,12 @@ template <typename T> static LogicalResult verifyConvOp(T op) {
 }
 
 LogicalResult tosa::AvgPool2dOp::verify() {
-  auto inputETy = llvm::cast<ShapedType>(getInput().getType()).getElementType();
+  auto inputType = llvm::cast<ShapedType>(getInput().getType());
+  if (hasZeroDimension(inputType))
+    return emitOpError() << "tensor has a dimension with size zero. Each "
+                            "dimension of a tensor must have size >= 1";
+
+  auto inputETy = inputType.getElementType();
   auto resultETy = llvm::cast<ShapedType>(getType()).getElementType();
 
   if (auto quantType =
@@ -154,7 +179,7 @@ LogicalResult tosa::AvgPool2dOp::verify() {
     resultETy = quantType.getStorageType();
 
   auto accType = getAccType();
-  if (inputETy.isa<IntegerType>() && !accType.isInteger(32))
+  if (llvm::isa<IntegerType>(inputETy) && !accType.isInteger(32))
     return emitOpError("accumulator type for integer tensor is not i32");
 
   if ((inputETy.isBF16() || inputETy.isF16()) &&
@@ -758,6 +783,10 @@ mlir::LogicalResult tosa::ReshapeOp::verify() {
   ShapedType inputType = llvm::cast<ShapedType>(getInput1().getType());
   ShapedType outputType = llvm::cast<ShapedType>(getType());
 
+  if (hasZeroDimension(inputType) || hasZeroDimension(outputType))
+    return emitOpError() << "tensor has a dimension with size zero. Each "
+                            "dimension of a tensor must have size >= 1";
+
   if (inputType.hasStaticShape() && outputType.hasStaticShape()) {
     int64_t inputElementsNum = inputType.getNumElements();
     int64_t outputElementsNum = outputType.getNumElements();
@@ -984,7 +1013,7 @@ static LogicalResult ReduceInferReturnTypes(
       OpaqueProperties properties, RegionRange regions,                        \
       SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {           \
     Type inputType =                                                           \
-        operands.getType()[0].cast<TensorType>().getElementType();             \
+        llvm::cast<TensorType>(operands.getType()[0]).getElementType();        \
     return ReduceInferReturnTypes(operands.getShape(0), inputType,             \
                                   properties.as<Properties *>()->axis,         \
                                   inferredReturnShapes);                       \

@@ -210,27 +210,31 @@ operator==(const set<Key, Compare, Allocator>& x,
 template <class Key, class Compare, class Allocator>
 bool
 operator< (const set<Key, Compare, Allocator>& x,
-           const set<Key, Compare, Allocator>& y);
+           const set<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator!=(const set<Key, Compare, Allocator>& x,
-           const set<Key, Compare, Allocator>& y);
+           const set<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator> (const set<Key, Compare, Allocator>& x,
-           const set<Key, Compare, Allocator>& y);
+           const set<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator>=(const set<Key, Compare, Allocator>& x,
-           const set<Key, Compare, Allocator>& y);
+           const set<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator<=(const set<Key, Compare, Allocator>& x,
-           const set<Key, Compare, Allocator>& y);
+           const set<Key, Compare, Allocator>& y);                                // removed in C++20
+
+template<class Key, class Compare, class Allocator>
+  synth-three-way-result<Key> operator<=>(const set<Key, Compare, Allocator>& x,
+                                          const set<Key, Compare, Allocator>& y); // since C++20
 
 // specialized algorithms:
 template <class Key, class Compare, class Allocator>
@@ -435,27 +439,31 @@ operator==(const multiset<Key, Compare, Allocator>& x,
 template <class Key, class Compare, class Allocator>
 bool
 operator< (const multiset<Key, Compare, Allocator>& x,
-           const multiset<Key, Compare, Allocator>& y);
+           const multiset<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator!=(const multiset<Key, Compare, Allocator>& x,
-           const multiset<Key, Compare, Allocator>& y);
+           const multiset<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator> (const multiset<Key, Compare, Allocator>& x,
-           const multiset<Key, Compare, Allocator>& y);
+           const multiset<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator>=(const multiset<Key, Compare, Allocator>& x,
-           const multiset<Key, Compare, Allocator>& y);
+           const multiset<Key, Compare, Allocator>& y);                                // removed in C++20
 
 template <class Key, class Compare, class Allocator>
 bool
 operator<=(const multiset<Key, Compare, Allocator>& x,
-           const multiset<Key, Compare, Allocator>& y);
+           const multiset<Key, Compare, Allocator>& y);                                // removed in C++20
+
+template<class Key, class Compare, class Allocator>
+  synth-three-way-result<Key> operator<=>(const multiset<Key, Compare, Allocator>& x,
+                                          const multiset<Key, Compare, Allocator>& y); // since C++20
 
 // specialized algorithms:
 template <class Key, class Compare, class Allocator>
@@ -473,7 +481,9 @@ erase_if(multiset<Key, Compare, Allocator>& c, Predicate pred);  // C++20
 
 #include <__algorithm/equal.h>
 #include <__algorithm/lexicographical_compare.h>
+#include <__algorithm/lexicographical_compare_three_way.h>
 #include <__assert> // all public C++ headers provide the assertion handler
+#include <__availability>
 #include <__config>
 #include <__functional/is_transparent.h>
 #include <__functional/operations.h>
@@ -771,7 +781,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     insert_return_type insert(node_type&& __nh)
     {
-        _LIBCPP_ASSERT(__nh.empty() || __nh.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__nh.empty() || __nh.get_allocator() == get_allocator(),
             "node_type with incompatible allocator passed to set::insert()");
         return __tree_.template __node_handle_insert_unique<
             node_type, insert_return_type>(_VSTD::move(__nh));
@@ -779,7 +789,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     iterator insert(const_iterator __hint, node_type&& __nh)
     {
-        _LIBCPP_ASSERT(__nh.empty() || __nh.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__nh.empty() || __nh.get_allocator() == get_allocator(),
             "node_type with incompatible allocator passed to set::insert()");
         return __tree_.template __node_handle_insert_unique<node_type>(
             __hint, _VSTD::move(__nh));
@@ -798,7 +808,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(set<key_type, _Compare2, allocator_type>& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_unique(__source.__tree_);
     }
@@ -806,7 +816,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(set<key_type, _Compare2, allocator_type>&& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_unique(__source.__tree_);
     }
@@ -814,7 +824,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(multiset<key_type, _Compare2, allocator_type>& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_unique(__source.__tree_);
     }
@@ -822,7 +832,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(multiset<key_type, _Compare2, allocator_type>&& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_unique(__source.__tree_);
     }
@@ -982,6 +992,8 @@ operator==(const set<_Key, _Compare, _Allocator>& __x,
     return __x.size() == __y.size() && _VSTD::equal(__x.begin(), __x.end(), __y.begin());
 }
 
+#if _LIBCPP_STD_VER <= 17
+
 template <class _Key, class _Compare, class _Allocator>
 inline _LIBCPP_INLINE_VISIBILITY
 bool
@@ -1026,6 +1038,17 @@ operator<=(const set<_Key, _Compare, _Allocator>& __x,
 {
     return !(__y < __x);
 }
+
+#else // _LIBCPP_STD_VER <= 17
+
+template <class _Key, class _Allocator>
+_LIBCPP_HIDE_FROM_ABI __synth_three_way_result<_Key>
+operator<=>(const set<_Key, _Allocator>& __x, const set<_Key, _Allocator>& __y) {
+    return std::lexicographical_compare_three_way(
+        __x.begin(), __x.end(), __y.begin(), __y.end(), std::__synth_three_way<_Key, _Key>);
+}
+
+#endif // _LIBCPP_STD_VER <= 17
 
 // specialized algorithms:
 template <class _Key, class _Compare, class _Allocator>
@@ -1306,7 +1329,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     iterator insert(node_type&& __nh)
     {
-        _LIBCPP_ASSERT(__nh.empty() || __nh.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__nh.empty() || __nh.get_allocator() == get_allocator(),
             "node_type with incompatible allocator passed to multiset::insert()");
         return __tree_.template __node_handle_insert_multi<node_type>(
             _VSTD::move(__nh));
@@ -1314,7 +1337,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     iterator insert(const_iterator __hint, node_type&& __nh)
     {
-        _LIBCPP_ASSERT(__nh.empty() || __nh.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__nh.empty() || __nh.get_allocator() == get_allocator(),
             "node_type with incompatible allocator passed to multiset::insert()");
         return __tree_.template __node_handle_insert_multi<node_type>(
             __hint, _VSTD::move(__nh));
@@ -1333,7 +1356,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(multiset<key_type, _Compare2, allocator_type>& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_multi(__source.__tree_);
     }
@@ -1341,7 +1364,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(multiset<key_type, _Compare2, allocator_type>&& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_multi(__source.__tree_);
     }
@@ -1349,7 +1372,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(set<key_type, _Compare2, allocator_type>& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_multi(__source.__tree_);
     }
@@ -1357,7 +1380,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void merge(set<key_type, _Compare2, allocator_type>&& __source)
     {
-        _LIBCPP_ASSERT(__source.get_allocator() == get_allocator(),
+        _LIBCPP_ASSERT_UNCATEGORIZED(__source.get_allocator() == get_allocator(),
                        "merging container with incompatible allocator");
         __tree_.__node_handle_merge_multi(__source.__tree_);
     }
@@ -1518,6 +1541,8 @@ operator==(const multiset<_Key, _Compare, _Allocator>& __x,
     return __x.size() == __y.size() && _VSTD::equal(__x.begin(), __x.end(), __y.begin());
 }
 
+#if _LIBCPP_STD_VER <= 17
+
 template <class _Key, class _Compare, class _Allocator>
 inline _LIBCPP_INLINE_VISIBILITY
 bool
@@ -1563,6 +1588,17 @@ operator<=(const multiset<_Key, _Compare, _Allocator>& __x,
     return !(__y < __x);
 }
 
+#else // _LIBCPP_STD_VER <= 17
+
+template <class _Key, class _Allocator>
+_LIBCPP_HIDE_FROM_ABI __synth_three_way_result<_Key>
+operator<=>(const multiset<_Key, _Allocator>& __x, const multiset<_Key, _Allocator>& __y) {
+    return std::lexicographical_compare_three_way(
+        __x.begin(), __x.end(), __y.begin(), __y.end(), std::__synth_three_way<_Key, _Key>);
+}
+
+#endif // _LIBCPP_STD_VER <= 17
+
 template <class _Key, class _Compare, class _Allocator>
 inline _LIBCPP_INLINE_VISIBILITY
 void
@@ -1588,10 +1624,10 @@ _LIBCPP_END_NAMESPACE_STD
 _LIBCPP_BEGIN_NAMESPACE_STD
 namespace pmr {
 template <class _KeyT, class _CompareT = std::less<_KeyT>>
-using set = std::set<_KeyT, _CompareT, polymorphic_allocator<_KeyT>>;
+using set _LIBCPP_AVAILABILITY_PMR = std::set<_KeyT, _CompareT, polymorphic_allocator<_KeyT>>;
 
 template <class _KeyT, class _CompareT = std::less<_KeyT>>
-using multiset = std::multiset<_KeyT, _CompareT, polymorphic_allocator<_KeyT>>;
+using multiset _LIBCPP_AVAILABILITY_PMR = std::multiset<_KeyT, _CompareT, polymorphic_allocator<_KeyT>>;
 } // namespace pmr
 _LIBCPP_END_NAMESPACE_STD
 #endif

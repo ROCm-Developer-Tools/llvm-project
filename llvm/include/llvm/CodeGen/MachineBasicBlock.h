@@ -111,6 +111,12 @@ private:
 
   const BasicBlock *BB;
   int Number;
+
+  /// The SP adjustment on entry to this basic block due to call frame setup
+  /// instructions in a predecessor. This is almost always zero, unless basic
+  /// blocks are split in the middle of a call sequence.
+  int SPAdjustment = 0;
+
   MachineFunction *xParent;
   Instructions Insts;
 
@@ -1066,31 +1072,33 @@ public:
   /// instead of basic block \p Old.
   void replacePhiUsesWith(MachineBasicBlock *Old, MachineBasicBlock *New);
 
-  /// Find the next valid DebugLoc starting at MBBI, skipping any DBG_VALUE
-  /// and DBG_LABEL instructions.  Return UnknownLoc if there is none.
+  /// Find the next valid DebugLoc starting at MBBI, skipping any debug
+  /// instructions.  Return UnknownLoc if there is none.
   DebugLoc findDebugLoc(instr_iterator MBBI);
   DebugLoc findDebugLoc(iterator MBBI) {
     return findDebugLoc(MBBI.getInstrIterator());
   }
 
-  /// Has exact same behavior as @ref findDebugLoc (it also
-  /// searches from the first to the last MI of this MBB) except
-  /// that this takes reverse iterator.
+  /// Has exact same behavior as @ref findDebugLoc (it also searches towards the
+  /// end of this MBB) except that this function takes a reverse iterator to
+  /// identify the starting MI.
   DebugLoc rfindDebugLoc(reverse_instr_iterator MBBI);
   DebugLoc rfindDebugLoc(reverse_iterator MBBI) {
     return rfindDebugLoc(MBBI.getInstrIterator());
   }
 
-  /// Find the previous valid DebugLoc preceding MBBI, skipping and DBG_VALUE
-  /// instructions.  Return UnknownLoc if there is none.
+  /// Find the previous valid DebugLoc preceding MBBI, skipping any debug
+  /// instructions. It is possible to find the last DebugLoc in the MBB using
+  /// findPrevDebugLoc(instr_end()).  Return UnknownLoc if there is none.
   DebugLoc findPrevDebugLoc(instr_iterator MBBI);
   DebugLoc findPrevDebugLoc(iterator MBBI) {
     return findPrevDebugLoc(MBBI.getInstrIterator());
   }
 
-  /// Has exact same behavior as @ref findPrevDebugLoc (it also
-  /// searches from the last to the first MI of this MBB) except
-  /// that this takes reverse iterator.
+  /// Has exact same behavior as @ref findPrevDebugLoc (it also searches towards
+  /// the beginning of this MBB) except that this function takes reverse
+  /// iterator to identify the starting MI. A minor difference compared to
+  /// findPrevDebugLoc is that we can't start scanning at "instr_end".
   DebugLoc rfindPrevDebugLoc(reverse_instr_iterator MBBI);
   DebugLoc rfindPrevDebugLoc(reverse_iterator MBBI) {
     return rfindPrevDebugLoc(MBBI.getInstrIterator());
@@ -1142,6 +1150,11 @@ public:
   /// they're not in a MachineFunction yet, in which case this will return -1.
   int getNumber() const { return Number; }
   void setNumber(int N) { Number = N; }
+
+  /// Return the SP adjustment on entry to this basic block.
+  int getSPAdjustment() const { return SPAdjustment; }
+  /// Set the SP adjustment on entry to this basic block.
+  void setSPAdjustment(int N) { SPAdjustment = N; }
 
   /// Return the MCSymbol for this basic block.
   MCSymbol *getSymbol() const;

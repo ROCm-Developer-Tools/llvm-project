@@ -238,6 +238,25 @@ class Property<string storageTypeParam = "", string desc = ""> {
     llvm::hash_value($_storage);
   }];
 
+  // The call expression to emit the storage type to bytecode.
+  //
+  // Format:
+  // - `$_storage` is the storage type value.
+  // - `$_writer` is a `DialectBytecodeWriter`.
+  code writeToMlirBytecode = [{
+    writeToMlirBytecode($_writer, $_storage)
+  }];
+
+  // The call expression to read the storage type from bytecode.
+  //
+  // Format:
+  // - `$_storage` is the storage type value.
+  // - `$_reader` is a `DialectBytecodeReader`.
+  code readFromMlirBytecode = [{
+    if (::mlir::failed(readFromMlirBytecode($_reader, $_storage)))
+      return ::mlir::failure();
+  }];
+
   // Default value for the property.
   string defaultValue = ?;
 }
@@ -551,6 +570,8 @@ def F128 : F<128>;
 
 def BF16 : Type<CPred<"$_self.isBF16()">, "bfloat16 type">,
            BuildableType<"$_builder.getBF16Type()">;
+def TF32 : Type<CPred<"$_self.isTF32()">, "tf32 type">,
+           BuildableType<"$_builder.getTF32Type()">;
 def F8E4M3FN : Type<CPred<"$_self.isFloat8E4M3FN()">, "f8E4M3FN type">,
                BuildableType<"$_builder.getFloat8E4M3FNType()">;
 def F8E5M2 : Type<CPred<"$_self.isFloat8E5M2()">, "f8E5M2 type">,
@@ -1155,6 +1176,20 @@ class DefaultValuedOptionalStrAttr<Attr attr, string val>
 
 //===----------------------------------------------------------------------===//
 // Primitive property kinds
+
+// Any kind of integer stored as properties.
+class IntProperty<string storageTypeParam = "", string desc = ""> :
+    Property<storageTypeParam, desc> {
+  code writeToMlirBytecode = [{
+    $_writer.writeVarInt($_storage);
+  }];
+  code readFromMlirBytecode = [{
+    uint64_t val;
+    if (failed($_reader.readVarInt(val)))
+      return ::mlir::failure();
+    $_storage = val;
+  }];
+}
 
 class ArrayProperty<string storageTypeParam = "", int n, string desc = ""> :
   Property<storageTypeParam # "[" # n # "]", desc> {
@@ -2365,6 +2400,15 @@ class Res<Constraint constraint, string desc = "",
           list<OpVariableDecorator> decorators = []>
   : OpVariable<constraint, desc, decorators>;
 
+// Marker to group ops together for documentation purposes.
+class OpDocGroup {
+  // Single line summary of the group of ops.
+  string summary;
+
+  // Longer description of documentation group.
+  string description;
+}
+
 // Base class for all ops.
 class Op<Dialect dialect, string mnemonic, list<Trait> props = []> {
   // The dialect of the op.
@@ -2381,6 +2425,9 @@ class Op<Dialect dialect, string mnemonic, list<Trait> props = []> {
 
   // Additional, longer human-readable description of what the op does.
   string description = "";
+
+  // Optional. The group of ops this op is part of.
+  OpDocGroup opDocGroup = ?;
 
   // Dag containing the arguments of the op. Default to 0 arguments.
   dag arguments = (ins);
@@ -2515,6 +2562,12 @@ class ElementCount<string name> :
 
 class ElementType<string name> : StrFunc<"getElementTypeOrSelf($" # name # ")">;
 
+class AnyPred<list<string> values> :
+  CPred<!if(!lt(!size(values), 1),
+            "false",
+            !foldl("(" # !head(values) # ")", !tail(values), acc, v,
+                   acc # " || (" # v # ")"))>;
+
 class AllMatchPred<list<string> values> :
   CPred<!if(!lt(!size(values), 2),
             "true",
@@ -2534,6 +2587,17 @@ class AllMatchSameOperatorTrait<list<string> names, string operator,
     PredOpTrait<
         "all of {" # !interleave(names, ", ") # "} have same " # summary,
         AllMatchSameOperatorPred<names, operator>> {
+  list<string> values = names;
+}
+
+class AnyMatchOperatorPred<list<string> names, string operator> :
+    AnyPred<!foreach(n, names, !subst("$_self", "$" # n, operator))>;
+
+class AnyMatchOperatorTrait<list<string> names, string operator,
+                            string summary> :
+    PredOpTrait<
+        "any of {" # !interleave(names, ", ") # "} has " # summary,
+        AnyMatchOperatorPred<names, operator>> {
   list<string> values = names;
 }
 
@@ -2661,5 +2725,17 @@ class TCopVTEtAreSameAt<list<int> indices> : CPred<
       "::mlir::ArrayRef<unsigned>({" # !interleave(indices, ", ") # "}), "
       "[this](unsigned i) { return getElementTypeOrSelf(this->getOperand(i)); "
       "}))">;
+
+class AnyScalarTypeMatch<list<string> names> :
+    AnyMatchOperatorTrait<names, "$_self.getType().isSignlessInteger(1)",
+                          "scalar type">;
+
+class ScalarConditionOrMatchingShape<list<string> names> :
+    PredOpTrait<
+        !head(names) # " is scalar or has matching shape",
+        Or<[AnyScalarTypeMatch<[!head(names)]>.predicate,
+            AllShapesMatch<names>.predicate]>> {
+  list<string> values = names;
+}
 
 #endif // OP_BASE

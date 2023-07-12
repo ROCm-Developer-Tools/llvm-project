@@ -39,6 +39,23 @@ MlirContext mlirContextCreate() {
   return wrap(context);
 }
 
+static inline MLIRContext::Threading toThreadingEnum(bool threadingEnabled) {
+  return threadingEnabled ? MLIRContext::Threading::ENABLED
+                          : MLIRContext::Threading::DISABLED;
+}
+
+MlirContext mlirContextCreateWithThreading(bool threadingEnabled) {
+  auto *context = new MLIRContext(toThreadingEnum(threadingEnabled));
+  return wrap(context);
+}
+
+MlirContext mlirContextCreateWithRegistry(MlirDialectRegistry registry,
+                                          bool threadingEnabled) {
+  auto *context =
+      new MLIRContext(*unwrap(registry), toThreadingEnum(threadingEnabled));
+  return wrap(context);
+}
+
 bool mlirContextEqual(MlirContext ctx1, MlirContext ctx2) {
   return unwrap(ctx1) == unwrap(ctx2);
 }
@@ -82,6 +99,11 @@ void mlirContextEnableMultithreading(MlirContext context, bool enable) {
 
 void mlirContextLoadAllAvailableDialects(MlirContext context) {
   unwrap(context)->loadAllAvailableDialects();
+}
+
+void mlirContextSetThreadPool(MlirContext context,
+                              MlirLlvmThreadPool threadPool) {
+  unwrap(context)->setThreadPool(*unwrap(threadPool));
 }
 
 //===----------------------------------------------------------------------===//
@@ -832,6 +854,10 @@ MlirTypeID mlirTypeGetTypeID(MlirType type) {
   return wrap(unwrap(type).getTypeID());
 }
 
+MlirDialect mlirTypeGetDialect(MlirType type) {
+  return wrap(&unwrap(type).getDialect());
+}
+
 bool mlirTypeEqual(MlirType t1, MlirType t2) {
   return unwrap(t1) == unwrap(t2);
 }
@@ -864,6 +890,10 @@ MlirType mlirAttributeGetType(MlirAttribute attribute) {
 
 MlirTypeID mlirAttributeGetTypeID(MlirAttribute attr) {
   return wrap(unwrap(attr).getTypeID());
+}
+
+MlirDialect mlirAttributeGetDialect(MlirAttribute attr) {
+  return wrap(&unwrap(attr).getDialect());
 }
 
 bool mlirAttributeEqual(MlirAttribute a1, MlirAttribute a2) {

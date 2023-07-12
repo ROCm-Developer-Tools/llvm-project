@@ -49,6 +49,7 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerHelpers.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/DynamicExtent.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 
@@ -790,13 +791,8 @@ public:
   void checkPostCall(const CallEvent &Call, CheckerContext &C) const;
   bool evalCall(const CallEvent &Call, CheckerContext &C) const;
 
-  enum CheckKind {
-    CK_StdCLibraryFunctionArgsChecker,
-    CK_StdCLibraryFunctionsTesterChecker,
-    CK_NumCheckKinds
-  };
-  bool ChecksEnabled[CK_NumCheckKinds] = {false};
-  CheckerNameRef CheckNames[CK_NumCheckKinds];
+  CheckerNameRef CheckName;
+  bool AddTestFunctions = false;
 
   bool DisplayLoadedSummaries = false;
   bool ModelPOSIX = false;
@@ -813,8 +809,6 @@ private:
   void reportBug(const CallEvent &Call, ExplodedNode *N,
                  const ValueConstraint *VC, const ValueConstraint *NegatedVC,
                  const Summary &Summary, CheckerContext &C) const {
-    if (!ChecksEnabled[CK_StdCLibraryFunctionArgsChecker])
-      return;
     assert(Call.getDecl() &&
            "Function found in summary must have a declaration available");
     SmallString<256> Msg;
@@ -834,8 +828,8 @@ private:
     Msg[0] = toupper(Msg[0]);
     if (!BT_InvalidArg)
       BT_InvalidArg = std::make_unique<BugType>(
-          CheckNames[CK_StdCLibraryFunctionArgsChecker],
-          "Function call with invalid argument", categories::LogicError);
+          CheckName, "Function call with invalid argument",
+          categories::LogicError);
     auto R = std::make_unique<PathSensitiveBugReport>(*BT_InvalidArg, Msg, N);
 
     for (ArgNo ArgN : VC->getArgsToTrack()) {
@@ -948,11 +942,9 @@ void StdLibraryFunctionsChecker::RangeConstraint::applyOnWithinRange(
   if (Ranges.empty())
     return;
 
-  const IntRangeVector &R = getRanges();
-  size_t E = R.size();
-  for (size_t I = 0; I != E; ++I) {
-    const llvm::APSInt &Min = BVF.getValue(R[I].first, ArgT);
-    const llvm::APSInt &Max = BVF.getValue(R[I].second, ArgT);
+  for (auto [Start, End] : getRanges()) {
+    const llvm::APSInt &Min = BVF.getValue(Start, ArgT);
+    const llvm::APSInt &Max = BVF.getValue(End, ArgT);
     assert(Min <= Max);
     if (!F(Min, Max))
       return;
@@ -1383,12 +1375,11 @@ bool StdLibraryFunctionsChecker::Signature::matches(
   }
 
   // Check the argument types.
-  for (size_t I = 0, E = ArgTys.size(); I != E; ++I) {
-    QualType ArgTy = ArgTys[I];
+  for (auto [Idx, ArgTy] : llvm::enumerate(ArgTys)) {
     if (isIrrelevant(ArgTy))
       continue;
     QualType FDArgTy =
-        RemoveRestrict(FD->getParamDecl(I)->getType().getCanonicalType());
+        RemoveRestrict(FD->getParamDecl(Idx)->getType().getCanonicalType());
     if (ArgTy != FDArgTy)
       return false;
   }
@@ -1423,6 +1414,7 @@ void StdLibraryFunctionsChecker::initFunctionSummaries(
     CheckerContext &C) const {
   if (SummariesInitialized)
     return;
+  SummariesInitialized = true;
 
   SValBuilder &SVB = C.getSValBuilder();
   BasicValueFactory &BVF = SVB.getBasicValueFactory();
@@ -3370,7 +3362,7 @@ void StdLibraryFunctionsChecker::initFunctionSummaries(
   }
 
   // Functions for testing.
-  if (ChecksEnabled[CK_StdCLibraryFunctionsTesterChecker]) {
+  if (AddTestFunctions) {
     const RangeInt IntMin = BVF.getMinValue(IntTy).getLimitedValue();
 
     addToFunctionSummaryMap(
@@ -3594,12 +3586,11 @@ void StdLibraryFunctionsChecker::initFunctionSummaries(
                    ReturnValueCondition(WithinRange, SingleValue(4))},
                   ErrnoIrrelevant));
   }
-
-  SummariesInitialized = true;
 }
 
 void ento::registerStdCLibraryFunctionsChecker(CheckerManager &mgr) {
   auto *Checker = mgr.registerChecker<StdLibraryFunctionsChecker>();
+  Checker->CheckName = mgr.getCurrentCheckerName();
   const AnalyzerOptions &Opts = mgr.getAnalyzerOptions();
   Checker->DisplayLoadedSummaries =
       Opts.getCheckerBooleanOption(Checker, "DisplayLoadedSummaries");
@@ -3613,16 +3604,12 @@ bool ento::shouldRegisterStdCLibraryFunctionsChecker(
   return true;
 }
 
-#define REGISTER_CHECKER(name)                                                 \
-  void ento::register##name(CheckerManager &mgr) {                             \
-    StdLibraryFunctionsChecker *checker =                                      \
-        mgr.getChecker<StdLibraryFunctionsChecker>();                          \
-    checker->ChecksEnabled[StdLibraryFunctionsChecker::CK_##name] = true;      \
-    checker->CheckNames[StdLibraryFunctionsChecker::CK_##name] =               \
-        mgr.getCurrentCheckerName();                                           \
-  }                                                                            \
-                                                                               \
-  bool ento::shouldRegister##name(const CheckerManager &mgr) { return true; }
+void ento::registerStdCLibraryFunctionsTesterChecker(CheckerManager &mgr) {
+  auto *Checker = mgr.getChecker<StdLibraryFunctionsChecker>();
+  Checker->AddTestFunctions = true;
+}
 
-REGISTER_CHECKER(StdCLibraryFunctionArgsChecker)
-REGISTER_CHECKER(StdCLibraryFunctionsTesterChecker)
+bool ento::shouldRegisterStdCLibraryFunctionsTesterChecker(
+    const CheckerManager &mgr) {
+  return true;
+}

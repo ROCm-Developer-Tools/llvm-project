@@ -113,13 +113,13 @@ static const char *const attrSizedSegmentValueRangeCalcCode = R"(
 /// {0}: The code to get the attribute.
 static const char *const adapterSegmentSizeAttrInitCode = R"(
   assert({0} && "missing segment size attribute for op");
-  auto sizeAttr = {0}.cast<::mlir::DenseI32ArrayAttr>();
+  auto sizeAttr = ::llvm::cast<::mlir::DenseI32ArrayAttr>({0});
 )";
 /// The code snippet to initialize the sizes for the value range calculation.
 ///
 /// {0}: The code to get the attribute.
 static const char *const opSegmentSizeAttrInitCode = R"(
-  auto sizeAttr = {0}.cast<::mlir::DenseI32ArrayAttr>();
+  auto sizeAttr = ::llvm::cast<::mlir::DenseI32ArrayAttr>({0});
 )";
 
 /// The logic to calculate the actual value range for a declared operand
@@ -649,7 +649,7 @@ static void genNativeTraitAttrVerifier(MethodBody &body,
   // {3}: Emit error prefix.
   const char *const checkAttrSizedValueSegmentsCode = R"(
   {
-    auto sizeAttr = tblgen_{0}.cast<::mlir::DenseI32ArrayAttr>();
+    auto sizeAttr = ::llvm::cast<::mlir::DenseI32ArrayAttr>(tblgen_{0});
     auto numElements = sizeAttr.asArrayRef().size();
     if (numElements != {1})
       return {3}"'{0}' attribute for specifying {2} segments must have {1} "
@@ -1103,22 +1103,37 @@ void OpEmitter::genPropertiesSupport() {
                   "getDiag"))
           ->body();
 
+  auto &readPropertiesMethod =
+      opClass
+          .addStaticMethod(
+              "::mlir::LogicalResult", "readProperties",
+              MethodParameter("::mlir::DialectBytecodeReader &", "reader"),
+              MethodParameter("::mlir::OperationState &", "state"))
+          ->body();
+
+  auto &writePropertiesMethod =
+      opClass
+          .addMethod(
+              "void", "writeProperties",
+              MethodParameter("::mlir::DialectBytecodeWriter &", "writer"))
+          ->body();
+
   opClass.declare<UsingDeclaration>("Properties", "FoldAdaptor::Properties");
 
   // Convert the property to the attribute form.
 
   setPropMethod << R"decl(
-  ::mlir::DictionaryAttr dict = dyn_cast<::mlir::DictionaryAttr>(attr);
+  ::mlir::DictionaryAttr dict = ::llvm::dyn_cast<::mlir::DictionaryAttr>(attr);
   if (!dict) {
     if (diag)
       *diag << "expected DictionaryAttr to set properties";
-    return failure();
+    return ::mlir::failure();
   }
     )decl";
   // TODO: properties might be optional as well.
   const char *propFromAttrFmt = R"decl(;
     {{
-      auto setFromAttr = [] (auto &propStorage, ::mlir::Attribute propAttr, 
+      auto setFromAttr = [] (auto &propStorage, ::mlir::Attribute propAttr,
                              ::mlir::InFlightDiagnostic *propDiag) {{
         {0};
       };
@@ -1127,14 +1142,15 @@ void OpEmitter::genPropertiesSupport() {
         if (diag)
           *diag << "expected key entry for {1} in DictionaryAttr to set "
                    "Properties.";
-        return failure();
+        return ::mlir::failure();
       }
-      if (failed(setFromAttr(prop.{1}, attr, diag))) return ::mlir::failure();
+      if (::mlir::failed(setFromAttr(prop.{1}, attr, diag)))
+        return ::mlir::failure();
     }
 )decl";
   for (const auto &attrOrProp : attrOrProperties) {
     if (const auto *namedProperty =
-            attrOrProp.dyn_cast<const NamedProperty *>()) {
+            llvm::dyn_cast_if_present<const NamedProperty *>(attrOrProp)) {
       StringRef name = namedProperty->name;
       auto &prop = namedProperty->prop;
       FmtContext fctx;
@@ -1145,7 +1161,7 @@ void OpEmitter::genPropertiesSupport() {
                                           .addSubst("_diag", propertyDiag)),
                                name);
     } else {
-      const auto *namedAttr = attrOrProp.dyn_cast<const AttributeMetadata *>();
+      const auto *namedAttr = llvm::dyn_cast_if_present<const AttributeMetadata *>(attrOrProp);
       StringRef name = namedAttr->attrName;
       setPropMethod << formatv(R"decl(
   {{
@@ -1156,15 +1172,15 @@ void OpEmitter::genPropertiesSupport() {
         if (diag)
           *diag << "expected key entry for {0} in DictionaryAttr to set "
                    "Properties.";
-        return failure();
+        return ::mlir::failure();
       }
-      auto convertedAttr = dyn_cast<std::remove_reference_t<decltype(propStorage)>>(attr);
+      auto convertedAttr = ::llvm::dyn_cast<std::remove_reference_t<decltype(propStorage)>>(attr);
       if (convertedAttr) {{
         propStorage = convertedAttr;
       } else {{
         if (diag)
           *diag << "Invalid attribute `{0}` in property conversion: " << attr;
-        return failure();
+        return ::mlir::failure();
       }
     }
   }
@@ -1187,7 +1203,7 @@ void OpEmitter::genPropertiesSupport() {
 )decl";
   for (const auto &attrOrProp : attrOrProperties) {
     if (const auto *namedProperty =
-            attrOrProp.dyn_cast<const NamedProperty *>()) {
+            llvm::dyn_cast_if_present<const NamedProperty *>(attrOrProp)) {
       StringRef name = namedProperty->name;
       auto &prop = namedProperty->prop;
       FmtContext fctx;
@@ -1198,7 +1214,7 @@ void OpEmitter::genPropertiesSupport() {
                      .addSubst("_storage", propertyStorage)));
       continue;
     }
-    const auto *namedAttr = attrOrProp.dyn_cast<const AttributeMetadata *>();
+    const auto *namedAttr = llvm::dyn_cast_if_present<const AttributeMetadata *>(attrOrProp);
     StringRef name = namedAttr->attrName;
     getPropMethod << formatv(R"decl(
     {{
@@ -1213,7 +1229,7 @@ void OpEmitter::genPropertiesSupport() {
   getPropMethod << R"decl(
   if (!attrs.empty())
     return odsBuilder.getDictionaryAttr(attrs);
-  return {};    
+  return {};
 )decl";
 
   // Hashing for the property
@@ -1225,7 +1241,7 @@ void OpEmitter::genPropertiesSupport() {
 )decl";
   for (const auto &attrOrProp : attrOrProperties) {
     if (const auto *namedProperty =
-            attrOrProp.dyn_cast<const NamedProperty *>()) {
+            llvm::dyn_cast_if_present<const NamedProperty *>(attrOrProp)) {
       StringRef name = namedProperty->name;
       auto &prop = namedProperty->prop;
       FmtContext fctx;
@@ -1238,13 +1254,13 @@ void OpEmitter::genPropertiesSupport() {
   llvm::interleaveComma(
       attrOrProperties, hashMethod, [&](const ConstArgument &attrOrProp) {
         if (const auto *namedProperty =
-                attrOrProp.dyn_cast<const NamedProperty *>()) {
+                llvm::dyn_cast_if_present<const NamedProperty *>(attrOrProp)) {
           hashMethod << "\n    hash_" << namedProperty->name << "(prop."
                      << namedProperty->name << ")";
           return;
         }
         const auto *namedAttr =
-            attrOrProp.dyn_cast<const AttributeMetadata *>();
+            llvm::dyn_cast_if_present<const AttributeMetadata *>(attrOrProp);
         StringRef name = namedAttr->attrName;
         hashMethod << "\n    llvm::hash_value(prop." << name
                    << ".getAsOpaquePointer())";
@@ -1266,7 +1282,7 @@ void OpEmitter::genPropertiesSupport() {
 )decl";
   for (const auto &attrOrProp : attrOrProperties) {
     if (const auto *namedAttr =
-            attrOrProp.dyn_cast<const AttributeMetadata *>()) {
+            llvm::dyn_cast_if_present<const AttributeMetadata *>(attrOrProp)) {
       StringRef name = namedAttr->attrName;
       getInherentAttrMethod << formatv(getInherentAttrMethodFmt, name);
       setInherentAttrMethod << formatv(setInherentAttrMethodFmt, name);
@@ -1281,7 +1297,7 @@ void OpEmitter::genPropertiesSupport() {
   // syntax. This method verifies the constraint on the properties attributes
   // before they are set, since dyn_cast<> will silently omit failures.
   for (const auto &attrOrProp : attrOrProperties) {
-    const auto *namedAttr = attrOrProp.dyn_cast<const AttributeMetadata *>();
+    const auto *namedAttr = llvm::dyn_cast_if_present<const AttributeMetadata *>(attrOrProp);
     if (!namedAttr || !namedAttr->constraint)
       continue;
     Attribute attr = *namedAttr->constraint;
@@ -1304,6 +1320,66 @@ void OpEmitter::genPropertiesSupport() {
     }
   }
   verifyInherentAttrsMethod << "    return ::mlir::success();";
+
+  // Populate bytecode serialization logic.
+  readPropertiesMethod
+      << "  auto &prop = state.getOrAddProperties<Properties>(); (void)prop;";
+  writePropertiesMethod << "  auto &prop = getProperties(); (void)prop;\n";
+  for (const auto &attrOrProp : attrOrProperties) {
+    if (const auto *namedProperty =
+            attrOrProp.dyn_cast<const NamedProperty *>()) {
+      StringRef name = namedProperty->name;
+      FmtContext fctx;
+      fctx.addSubst("_reader", "reader")
+          .addSubst("_writer", "writer")
+          .addSubst("_storage", propertyStorage);
+      readPropertiesMethod << formatv(
+          R"(
+  {{
+    auto &propStorage = prop.{0};
+    auto readProp = [&]() {
+      {1};
+      return ::mlir::success();
+    };
+    if (::mlir::failed(readProp()))
+      return ::mlir::failure();
+  }
+)",
+          name,
+          tgfmt(namedProperty->prop.getReadFromMlirBytecodeCall(), &fctx));
+      writePropertiesMethod << formatv(
+          R"(
+  {{
+    auto &propStorage = prop.{0};
+    {1};
+  }
+)",
+          name, tgfmt(namedProperty->prop.getWriteToMlirBytecodeCall(), &fctx));
+      continue;
+    }
+    const auto *namedAttr = attrOrProp.dyn_cast<const AttributeMetadata *>();
+    StringRef name = namedAttr->attrName;
+    if (namedAttr->isRequired) {
+      readPropertiesMethod << formatv(R"(
+  if (::mlir::failed(reader.readAttribute(prop.{0})))
+    return ::mlir::failure();
+)",
+                                      name);
+      writePropertiesMethod
+          << formatv("  writer.writeAttribute(prop.{0});\n", name);
+    } else {
+      readPropertiesMethod << formatv(R"(
+  if (::mlir::failed(reader.readOptionalAttribute(prop.{0})))
+    return ::mlir::failure();
+)",
+                                      name);
+      writePropertiesMethod << formatv(R"(
+  writer.writeOptionalAttribute(prop.{0});
+)",
+                                       name);
+    }
+  }
+  readPropertiesMethod << "  return ::mlir::success();";
 }
 
 void OpEmitter::genAttrGetters() {
@@ -1325,7 +1401,7 @@ void OpEmitter::genAttrGetters() {
     if (!method)
       return;
     method->body() << formatv(
-        "  return {0}.{1}<{2}>();", emitHelper.getAttr(attrName),
+        "  return ::llvm::{1}<{2}>({0});", emitHelper.getAttr(attrName),
         attr.isOptional() || attr.hasDefaultValue() ? "dyn_cast_or_null"
                                                     : "cast",
         attr.getStorageType());
@@ -2274,9 +2350,9 @@ void OpEmitter::genUseAttrAsResultTypeBuilder() {
           "  for (auto attr : attributes) {\n"
           "    if (attr.getName() != attrName) continue;\n";
   if (namedAttr.attr.isTypeAttr()) {
-    resultType = "attr.getValue().cast<::mlir::TypeAttr>().getValue()";
+    resultType = "::llvm::cast<::mlir::TypeAttr>(attr.getValue()).getValue()";
   } else {
-    resultType = "attr.getValue().cast<::mlir::TypedAttr>().getType()";
+    resultType = "::llvm::cast<::mlir::TypedAttr>(attr.getValue()).getType()";
   }
 
   // Operands
@@ -2472,7 +2548,7 @@ void OpEmitter::buildParamList(SmallVectorImpl<MethodParameter> &paramList,
     // Calculate the start index from which we can attach default values in the
     // builder declaration.
     for (int i = op.getNumArgs() - 1; i >= 0; --i) {
-      auto *namedAttr = op.getArg(i).dyn_cast<tblgen::NamedAttribute *>();
+      auto *namedAttr = llvm::dyn_cast_if_present<tblgen::NamedAttribute *>(op.getArg(i));
       if (!namedAttr || !namedAttr->attr.hasDefaultValue())
         break;
 
@@ -2502,7 +2578,7 @@ void OpEmitter::buildParamList(SmallVectorImpl<MethodParameter> &paramList,
 
   for (int i = 0, e = op.getNumArgs(), numOperands = 0; i < e; ++i) {
     Argument arg = op.getArg(i);
-    if (const auto *operand = arg.dyn_cast<NamedTypeConstraint *>()) {
+    if (const auto *operand = llvm::dyn_cast_if_present<NamedTypeConstraint *>(arg)) {
       StringRef type;
       if (operand->isVariadicOfVariadic())
         type = "::llvm::ArrayRef<::mlir::ValueRange>";
@@ -2515,7 +2591,7 @@ void OpEmitter::buildParamList(SmallVectorImpl<MethodParameter> &paramList,
                              operand->isOptional());
       continue;
     }
-    if (const auto *operand = arg.dyn_cast<NamedProperty *>()) {
+    if (const auto *operand = llvm::dyn_cast_if_present<NamedProperty *>(arg)) {
       // TODO
       continue;
     }
@@ -2960,11 +3036,14 @@ void OpEmitter::genTypeInterfaceMethods() {
           if (op.getDialect().usePropertiesForAttributes()) {
             body << "(properties ? properties.as<Properties *>()->"
                  << attr->name
-                 << " : attributes.get(\"" + attr->name +
-                        "\").dyn_cast_or_null<::mlir::TypedAttr>());\n";
+                 << " : "
+                    "::llvm::dyn_cast_or_null<::mlir::TypedAttr>(attributes."
+                    "get(\"" +
+                        attr->name + "\")));\n";
           } else {
-            body << "attributes.get(\"" + attr->name +
-                        "\").dyn_cast_or_null<::mlir::TypedAttr>();\n";
+            body << "::llvm::dyn_cast_or_null<::mlir::TypedAttr>(attributes."
+                    "get(\"" +
+                        attr->name + "\"));\n";
           }
           body << "  if (!odsInferredTypeAttr" << inferredTypeIdx
                << ") return ::mlir::failure();\n";
@@ -3300,6 +3379,9 @@ void OpEmitter::genTraits() {
   // native/interface traits and after all the traits with `StructuralOpTrait`.
   opClass.addTrait("::mlir::OpTrait::OpInvariants");
 
+  if (emitHelper.hasProperties())
+    opClass.addTrait("::mlir::BytecodeOpInterface::Trait");
+
   // Add the native and interface traits.
   for (const auto &trait : op.getTraits()) {
     if (auto *opTrait = dyn_cast<tblgen::NativeTrait>(&trait)) {
@@ -3439,7 +3521,7 @@ OpOperandAdaptorEmitter::OpOperandAdaptorEmitter(
     llvm::raw_string_ostream comparatorOs(comparator);
     for (const auto &attrOrProp : attrOrProperties) {
       if (const auto *namedProperty =
-              attrOrProp.dyn_cast<const NamedProperty *>()) {
+              llvm::dyn_cast_if_present<const NamedProperty *>(attrOrProp)) {
         StringRef name = namedProperty->name;
         if (name.empty())
           report_fatal_error("missing name for property");
@@ -3473,7 +3555,7 @@ OpOperandAdaptorEmitter::OpOperandAdaptorEmitter(
                                  .addSubst("_storage", propertyStorage)));
         continue;
       }
-      const auto *namedAttr = attrOrProp.dyn_cast<const AttributeMetadata *>();
+      const auto *namedAttr = llvm::dyn_cast_if_present<const AttributeMetadata *>(attrOrProp);
       const Attribute *attr = nullptr;
       if (namedAttr->constraint)
         attr = &*namedAttr->constraint;
@@ -3502,7 +3584,7 @@ OpOperandAdaptorEmitter::OpOperandAdaptorEmitter(
         const char *accessorFmt = R"decl(
     auto get{0}() {
       auto &propStorage = this->{1};
-      return propStorage.{2}<{3}>();
+      return ::llvm::{2}<{3}>(propStorage);
     }
     void set{0}(const {3} &propValue) {
       this->{1} = propValue;
@@ -3629,11 +3711,11 @@ OpOperandAdaptorEmitter::OpOperandAdaptorEmitter(
     if (!useProperties)
       body << "assert(odsAttrs && \"no attributes when constructing "
               "adapter\");\n";
-    body << formatv("auto attr = {0}.{1}<{2}>();\n", emitHelper.getAttr(name),
-                    attr.hasDefaultValue() || attr.isOptional()
-                        ? "dyn_cast_or_null"
-                        : "cast",
-                    attr.getStorageType());
+    body << formatv(
+        "auto attr = ::llvm::{1}<{2}>({0});\n", emitHelper.getAttr(name),
+        attr.hasDefaultValue() || attr.isOptional() ? "dyn_cast_or_null"
+                                                    : "cast",
+        attr.getStorageType());
 
     if (attr.hasDefaultValue() && attr.isOptional()) {
       // Use the default value if attribute is not set.

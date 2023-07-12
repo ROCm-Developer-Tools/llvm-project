@@ -16,11 +16,18 @@ namespace llvm {
 
 // This needs to be kept in sync with the field bits in SIRegisterClass.
 enum SIRCFlags : uint8_t {
-  // For vector registers.
-  HasVGPR = 1 << 0,
-  HasAGPR = 1 << 1,
-  HasSGPR = 1 << 2
-}; // enum SIRCFlags
+  RegTupleAlignUnitsWidth = 2,
+  HasVGPRBit = RegTupleAlignUnitsWidth,
+  HasAGPRBit,
+  HasSGPRbit,
+
+  HasVGPR = 1 << HasVGPRBit,
+  HasAGPR = 1 << HasAGPRBit,
+  HasSGPR = 1 << HasSGPRbit,
+
+  RegTupleAlignUnitsMask = (1 << RegTupleAlignUnitsWidth) - 1,
+  RegKindMask = (HasVGPR | HasAGPR | HasSGPR)
+}; // enum SIRCFlagsr
 
 namespace SIInstrFlags {
 // This needs to be kept in sync with the field bits in InstSI.
@@ -919,6 +926,17 @@ enum Offset_COV5 : unsigned {
 };
 
 } // namespace ImplicitArg
+
+namespace VirtRegFlag {
+// Virtual register flags used for various target specific handlings during
+// codegen.
+enum Register_Flag : uint8_t {
+  // Register operand in a whole-wave mode operation.
+  WWM_REG = 1 << 0,
+};
+
+} // namespace VirtRegFlag
+
 } // namespace AMDGPU
 
 #define R_00B028_SPI_SHADER_PGM_RSRC1_PS                                0x00B028

@@ -152,8 +152,21 @@ std::optional<Expr<SubscriptInteger>> DynamicType::GetCharLength() const {
 std::size_t DynamicType::GetAlignment(
     const TargetCharacteristics &targetCharacteristics) const {
   if (category_ == TypeCategory::Derived) {
-    if (derived_ && derived_->scope()) {
-      return derived_->scope()->alignment().value_or(1);
+    switch (GetDerivedTypeSpec().category()) {
+      SWITCH_COVERS_ALL_CASES
+    case semantics::DerivedTypeSpec::Category::DerivedType:
+      if (derived_ && derived_->scope()) {
+        return derived_->scope()->alignment().value_or(1);
+      }
+      break;
+    case semantics::DerivedTypeSpec::Category::IntrinsicVector:
+    case semantics::DerivedTypeSpec::Category::PairVector:
+    case semantics::DerivedTypeSpec::Category::QuadVector:
+      if (derived_ && derived_->scope()) {
+        return derived_->scope()->size();
+      } else {
+        common::die("Missing scope for Vector type.");
+      }
     }
   } else {
     return targetCharacteristics.GetAlignment(category_, kind_);
@@ -734,14 +747,15 @@ std::optional<DynamicType> ComparisonType(
   }
 }
 
-bool IsInteroperableIntrinsicType(
-    const DynamicType &type, bool checkCharLength) {
+bool IsInteroperableIntrinsicType(const DynamicType &type,
+    const common::LanguageFeatureControl *features, bool checkCharLength) {
   switch (type.category()) {
   case TypeCategory::Integer:
     return true;
   case TypeCategory::Real:
   case TypeCategory::Complex:
-    return type.kind() >= 4; // no short or half floats
+    return (features && features->IsEnabled(common::LanguageFeature::CUDA)) ||
+        type.kind() >= 4; // no short or half floats
   case TypeCategory::Logical:
     return type.kind() == 1; // C_BOOL
   case TypeCategory::Character:
@@ -749,6 +763,23 @@ bool IsInteroperableIntrinsicType(
       return false;
     }
     return type.kind() == 1 /* C_CHAR */;
+  default:
+    // Derived types are tested in Semantics/check-declarations.cpp
+    return false;
+  }
+}
+
+bool IsCUDAIntrinsicType(const DynamicType &type) {
+  switch (type.category()) {
+  case TypeCategory::Integer:
+  case TypeCategory::Logical:
+    return type.kind() <= 8;
+  case TypeCategory::Real:
+    return type.kind() >= 2 && type.kind() <= 8;
+  case TypeCategory::Complex:
+    return type.kind() == 2 || type.kind() == 4 || type.kind() == 8;
+  case TypeCategory::Character:
+    return type.kind() == 1;
   default:
     // Derived types are tested in Semantics/check-declarations.cpp
     return false;

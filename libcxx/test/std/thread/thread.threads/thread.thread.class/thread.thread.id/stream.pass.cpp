@@ -8,6 +8,7 @@
 
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: no-localization
+// UNSUPPORTED: GCC-ALWAYS_INLINE-FIXME
 
 // TODO FMT This test should not require std::to_chars(floating-point)
 // XFAIL: availability-fp_to_chars-missing
@@ -34,7 +35,7 @@ static void test() {
   std::basic_ostringstream<CharT> os;
   os << id0;
 
-#if TEST_STD_VER > 20 && !defined(_LIBCPP_HAS_NO_INCOMPLETE_FORMAT)
+#if TEST_STD_VER > 20
   // C++23 added a formatter specialization for thread::id.
   // This changed the requirement of ostream to have a
   // [thread.thread.id]/2

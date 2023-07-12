@@ -146,7 +146,8 @@ struct GPUInlinerInterface : public DialectInlinerInterface {
 void GPUDialect::initialize() {
   addTypes<AsyncTokenType>();
   addTypes<MMAMatrixType>();
-  addTypes<SparseHandleType>();
+  addTypes<SparseDnTensorHandleType>();
+  addTypes<SparseSpMatHandleType>();
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/GPU/IR/GPUOps.cpp.inc"
@@ -156,6 +157,17 @@ void GPUDialect::initialize() {
 #include "mlir/Dialect/GPU/IR/GPUOpsAttributes.cpp.inc"
       >();
   addInterfaces<GPUInlinerInterface>();
+}
+
+static std::string getSparseHandleKeyword(SparseHandleKind kind) {
+  switch (kind) {
+  case SparseHandleKind::DnTensor:
+    return "sparse.dntensor_handle";
+  case SparseHandleKind::SpMat:
+    return "sparse.spmat_handle";
+  }
+  llvm_unreachable("unknown sparse handle kind");
+  return "";
 }
 
 Type GPUDialect::parseType(DialectAsmParser &parser) const {
@@ -201,17 +213,24 @@ Type GPUDialect::parseType(DialectAsmParser &parser) const {
                                      shape, elementType, operand);
   }
 
-  if (keyword == "sparse.handle")
-    return SparseHandleType::get(context);
+  if (keyword == getSparseHandleKeyword(SparseHandleKind::DnTensor))
+    return SparseDnTensorHandleType::get(context);
+  if (keyword == getSparseHandleKeyword(SparseHandleKind::SpMat))
+    return SparseSpMatHandleType::get(context);
 
   parser.emitError(parser.getNameLoc(), "unknown gpu type: " + keyword);
   return Type();
 }
-
+// TODO: print refined type here. Notice that should be corresponding to the
+// parser
 void GPUDialect::printType(Type type, DialectAsmPrinter &os) const {
   TypeSwitch<Type>(type)
       .Case<AsyncTokenType>([&](Type) { os << "async.token"; })
-      .Case<SparseHandleType>([&](Type) { os << "sparse.handle"; })
+      .Case<SparseDnTensorHandleType>([&](Type) {
+        os << getSparseHandleKeyword(SparseHandleKind::DnTensor);
+      })
+      .Case<SparseSpMatHandleType>(
+          [&](Type) { os << getSparseHandleKeyword(SparseHandleKind::SpMat); })
       .Case<MMAMatrixType>([&](MMAMatrixType fragTy) {
         os << "mma_matrix<";
         auto shape = fragTy.getShape();
@@ -1720,7 +1739,7 @@ struct SimplifyDimOfAllocOp : public OpRewritePattern<memref::DimOp> {
 
   LogicalResult matchAndRewrite(memref::DimOp dimOp,
                                 PatternRewriter &rewriter) const override {
-    auto index = dimOp.getIndex().getDefiningOp<arith::ConstantIndexOp>();
+    std::optional<int64_t> index = dimOp.getConstantIndex();
     if (!index)
       return failure();
 

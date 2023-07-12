@@ -134,11 +134,10 @@ struct std::formatter<status, CharT> {
   }
 
 private:
-  void throw_format_error(const char* s) const {
+  [[noreturn]] void throw_format_error([[maybe_unused]] const char* s) const {
 #ifndef TEST_HAS_NO_EXCEPTIONS
     throw std::format_error(s);
 #else
-    (void)s;
     std::abort();
 #endif
   }
@@ -206,7 +205,7 @@ std::basic_string<CharT> get_colons() {
 }
 
 constexpr std::string_view get_format_types() {
-  return "aAbBcdeEfFgGopsxX"
+  return "aAbBcdeEfFgGopPsxX"
 #if TEST_STD_VER > 20
          "?"
 #endif

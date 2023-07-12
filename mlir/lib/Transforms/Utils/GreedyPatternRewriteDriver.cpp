@@ -27,16 +27,21 @@
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
 
+#ifdef MLIR_GREEDY_REWRITE_RANDOMIZER_SEED
+#include <random>
+#endif // MLIR_GREEDY_REWRITE_RANDOMIZER_SEED
+
 using namespace mlir;
 
 #define DEBUG_TYPE "greedy-rewriter"
+
+namespace {
 
 //===----------------------------------------------------------------------===//
 // Debugging Infrastructure
 //===----------------------------------------------------------------------===//
 
-namespace {
-#ifdef MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
 /// A helper struct that stores finger prints of ops in order to detect broken
 /// RewritePatterns. A rewrite pattern is broken if it modifies IR without
 /// using the rewriter API or if it returns an inconsistent return value.
@@ -131,6 +136,131 @@ protected:
 #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
 
 //===----------------------------------------------------------------------===//
+// Worklist
+//===----------------------------------------------------------------------===//
+
+/// A LIFO worklist of operations with efficient removal and set semantics.
+///
+/// This class maintains a vector of operations and a mapping of operations to
+/// positions in the vector, so that operations can be removed efficiently at
+/// random. When an operation is removed, it is replaced with nullptr. Such
+/// nullptr are skipped when pop'ing elements.
+class Worklist {
+public:
+  Worklist();
+
+  /// Clear the worklist.
+  void clear();
+
+  /// Return whether the worklist is empty.
+  bool empty() const;
+
+  /// Push an operation to the end of the worklist, unless the operation is
+  /// already on the worklist.
+  void push(Operation *op);
+
+  /// Pop the an operation from the end of the worklist. Only allowed on
+  /// non-empty worklists.
+  Operation *pop();
+
+  /// Remove an operation from the worklist.
+  void remove(Operation *op);
+
+  /// Reverse the worklist.
+  void reverse();
+
+protected:
+  /// The worklist of operations.
+  std::vector<Operation *> list;
+
+  /// A mapping of operations to positions in `list`.
+  DenseMap<Operation *, unsigned> map;
+};
+
+Worklist::Worklist() { list.reserve(64); }
+
+void Worklist::clear() {
+  list.clear();
+  map.clear();
+}
+
+bool Worklist::empty() const {
+  // Skip all nullptr.
+  return !llvm::any_of(list,
+                       [](Operation *op) { return static_cast<bool>(op); });
+}
+
+void Worklist::push(Operation *op) {
+  assert(op && "cannot push nullptr to worklist");
+  // Check to see if the worklist already contains this op.
+  if (map.count(op))
+    return;
+  map[op] = list.size();
+  list.push_back(op);
+}
+
+Operation *Worklist::pop() {
+  assert(!empty() && "cannot pop from empty worklist");
+  // Skip and remove all trailing nullptr.
+  while (!list.back())
+    list.pop_back();
+  Operation *op = list.back();
+  list.pop_back();
+  map.erase(op);
+  // Cleanup: Remove all trailing nullptr.
+  while (!list.empty() && !list.back())
+    list.pop_back();
+  return op;
+}
+
+void Worklist::remove(Operation *op) {
+  assert(op && "cannot remove nullptr from worklist");
+  auto it = map.find(op);
+  if (it != map.end()) {
+    assert(list[it->second] == op && "malformed worklist data structure");
+    list[it->second] = nullptr;
+    map.erase(it);
+  }
+}
+
+void Worklist::reverse() {
+  std::reverse(list.begin(), list.end());
+  for (size_t i = 0, e = list.size(); i != e; ++i)
+    map[list[i]] = i;
+}
+
+#ifdef MLIR_GREEDY_REWRITE_RANDOMIZER_SEED
+/// A worklist that pops elements at a random position. This worklist is for
+/// testing/debugging purposes only. It can be used to ensure that lowering
+/// pipelines work correctly regardless of the order in which ops are processed
+/// by the GreedyPatternRewriteDriver.
+class RandomizedWorklist : public Worklist {
+public:
+  RandomizedWorklist() : Worklist() {
+    generator.seed(MLIR_GREEDY_REWRITE_RANDOMIZER_SEED);
+  }
+
+  /// Pop a random non-empty op from the worklist.
+  Operation *pop() {
+    Operation *op = nullptr;
+    do {
+      assert(!list.empty() && "cannot pop from empty worklist");
+      int64_t pos = generator() % list.size();
+      op = list[pos];
+      list.erase(list.begin() + pos);
+      for (int64_t i = pos, e = list.size(); i < e; ++i)
+        map[list[i]] = i;
+      map.erase(op);
+    } while (!op);
+    return op;
+  }
+
+private:
+  std::minstd_rand0 generator;
+};
+#endif // MLIR_GREEDY_REWRITE_RANDOMIZER_SEED
+
+//===----------------------------------------------------------------------===//
 // GreedyPatternRewriteDriver
 //===----------------------------------------------------------------------===//
 
@@ -176,11 +306,12 @@ protected:
   bool processWorklist();
 
   /// The worklist for this transformation keeps track of the operations that
-  /// need to be revisited, plus their index in the worklist.  This allows us to
-  /// efficiently remove operations from the worklist when they are erased, even
-  /// if they aren't the root of a pattern.
-  std::vector<Operation *> worklist;
-  DenseMap<Operation *, unsigned> worklistMap;
+  /// need to be (re)visited.
+#ifdef MLIR_GREEDY_REWRITE_RANDOMIZER_SEED
+  RandomizedWorklist worklist;
+#else
+  Worklist worklist;
+#endif // MLIR_GREEDY_REWRITE_RANDOMIZER_SEED
 
   /// Non-pattern based folder for operations.
   OperationFolder folder;
@@ -201,9 +332,6 @@ private:
   /// simplifications.
   void addOperandsToWorklist(ValueRange operands);
 
-  /// Pop the next operation from the worklist.
-  Operation *popFromWorklist();
-
   /// Notify the driver that the given block was created.
   void notifyBlockCreated(Block *block) override;
 
@@ -211,9 +339,6 @@ private:
   LogicalResult
   notifyMatchFailure(Location loc,
                      function_ref<void(Diagnostic &)> reasonCallback) override;
-
-  /// If the specified operation is in the worklist, remove it.
-  void removeFromWorklist(Operation *op);
 
 #ifndef NDEBUG
   /// A logger used to emit information during the application process.
@@ -223,7 +348,7 @@ private:
   /// The low-level pattern applicator.
   PatternApplicator matcher;
 
-#ifdef MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
   DebugFingerPrints debugFingerPrints;
 #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
 };
@@ -233,19 +358,17 @@ GreedyPatternRewriteDriver::GreedyPatternRewriteDriver(
     MLIRContext *ctx, const FrozenRewritePatternSet &patterns,
     const GreedyRewriteConfig &config)
     : PatternRewriter(ctx), folder(ctx, this), config(config), matcher(patterns)
-#ifdef MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
       // clang-format off
       , debugFingerPrints(this)
 // clang-format on
 #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
 {
-  worklist.reserve(64);
-
   // Apply a simple cost model based solely on pattern benefit.
   matcher.applyDefaultCostModel();
 
   // Set up listener.
-#ifdef MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
   // Send IR notifications to the debug handler. This handler will then forward
   // all notifications to this GreedyPatternRewriteDriver.
   setListener(&debugFingerPrints);
@@ -278,12 +401,7 @@ bool GreedyPatternRewriteDriver::processWorklist() {
   while (!worklist.empty() &&
          (numRewrites < config.maxNumRewrites ||
           config.maxNumRewrites == GreedyRewriteConfig::kNoLimit)) {
-    auto *op = popFromWorklist();
-
-    // Nulls get added to the worklist when operations are removed, ignore
-    // them.
-    if (op == nullptr)
-      continue;
+    auto *op = worklist.pop();
 
     LLVM_DEBUG({
       logger.getOStream() << "\n";
@@ -346,7 +464,7 @@ bool GreedyPatternRewriteDriver::processWorklist() {
     function_ref<LogicalResult(const Pattern &)> onSuccess = {};
 #endif
 
-#ifdef MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
     debugFingerPrints.computeFingerPrints(
         /*topLevel=*/config.scope ? config.scope->getParentOp() : op);
     auto clearFingerprints =
@@ -358,14 +476,14 @@ bool GreedyPatternRewriteDriver::processWorklist() {
 
     if (succeeded(matchResult)) {
       LLVM_DEBUG(logResultWithLine("success", "pattern matched"));
-#ifdef MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
       debugFingerPrints.notifyRewriteSuccess();
 #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
       changed = true;
       ++numRewrites;
     } else {
       LLVM_DEBUG(logResultWithLine("failure", "pattern failed to match"));
-#ifdef MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
+#if MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
       debugFingerPrints.notifyRewriteFailure();
 #endif // MLIR_ENABLE_EXPENSIVE_PATTERN_API_CHECKS
     }
@@ -395,33 +513,8 @@ void GreedyPatternRewriteDriver::addToWorklist(Operation *op) {
 
 void GreedyPatternRewriteDriver::addSingleOpToWorklist(Operation *op) {
   if (config.strictMode == GreedyRewriteStrictness::AnyOp ||
-      strictModeFilteredOps.contains(op)) {
-    // Check to see if the worklist already contains this op.
-    if (worklistMap.count(op))
-      return;
-
-    worklistMap[op] = worklist.size();
-    worklist.push_back(op);
-  }
-}
-
-Operation *GreedyPatternRewriteDriver::popFromWorklist() {
-  auto *op = worklist.back();
-  worklist.pop_back();
-
-  // This operation is no longer in the worklist, keep worklistMap up to date.
-  if (op)
-    worklistMap.erase(op);
-  return op;
-}
-
-void GreedyPatternRewriteDriver::removeFromWorklist(Operation *op) {
-  auto it = worklistMap.find(op);
-  if (it != worklistMap.end()) {
-    assert(worklist[it->second] == op && "malformed worklist data structure");
-    worklist[it->second] = nullptr;
-    worklistMap.erase(it);
-  }
+      strictModeFilteredOps.contains(op))
+    worklist.push(op);
 }
 
 void GreedyPatternRewriteDriver::notifyBlockCreated(Block *block) {
@@ -475,7 +568,7 @@ void GreedyPatternRewriteDriver::notifyOperationRemoved(Operation *op) {
 
   addOperandsToWorklist(op->getOperands());
   op->walk([this](Operation *operation) {
-    removeFromWorklist(operation);
+    worklist.remove(operation);
     folder.notifyRemoval(operation);
   });
 
@@ -523,7 +616,7 @@ public:
 
   /// Simplify ops inside `region` and simplify the region itself. Return
   /// success if the transformation converged.
-  LogicalResult simplify() &&;
+  LogicalResult simplify(bool *changed) &&;
 
 private:
   /// The region that is simplified.
@@ -559,7 +652,7 @@ private:
 };
 } // namespace
 
-LogicalResult RegionPatternRewriteDriver::simplify() && {
+LogicalResult RegionPatternRewriteDriver::simplify(bool *changed) && {
   auto insertKnownConstant = [&](Operation *op) {
     // Check for existing constants when populating the worklist. This avoids
     // accidentally reversing the constant order during processing.
@@ -570,17 +663,16 @@ LogicalResult RegionPatternRewriteDriver::simplify() && {
     return false;
   };
 
-  bool changed = false;
+  bool continueRewrites = false;
   int64_t iteration = 0;
   MLIRContext *ctx = getContext();
   do {
     // Check if the iteration limit was reached.
-    if (iteration++ >= config.maxIterations &&
+    if (++iteration > config.maxIterations &&
         config.maxIterations != GreedyRewriteConfig::kNoLimit)
       break;
 
     worklist.clear();
-    worklistMap.clear();
 
     if (!config.useTopDownTraversal) {
       // Add operations to the worklist in postorder.
@@ -599,32 +691,32 @@ LogicalResult RegionPatternRewriteDriver::simplify() && {
       });
 
       // Reverse the list so our pop-back loop processes them in-order.
-      std::reverse(worklist.begin(), worklist.end());
-      // Remember the reverse index.
-      for (size_t i = 0, e = worklist.size(); i != e; ++i)
-        worklistMap[worklist[i]] = i;
+      worklist.reverse();
     }
 
     ctx->executeAction<GreedyPatternRewriteIteration>(
         [&] {
-          changed = processWorklist();
+          continueRewrites = processWorklist();
 
           // After applying patterns, make sure that the CFG of each of the
           // regions is kept up to date.
           if (config.enableRegionSimplification)
-            changed |= succeeded(simplifyRegions(*this, region));
+            continueRewrites |= succeeded(simplifyRegions(*this, region));
         },
         {&region}, iteration);
-  } while (changed);
+  } while (continueRewrites);
+
+  if (changed)
+    *changed = iteration > 1;
 
   // Whether the rewrite converges, i.e. wasn't changed in the last iteration.
-  return success(!changed);
+  return success(!continueRewrites);
 }
 
 LogicalResult
 mlir::applyPatternsAndFoldGreedily(Region &region,
                                    const FrozenRewritePatternSet &patterns,
-                                   GreedyRewriteConfig config) {
+                                   GreedyRewriteConfig config, bool *changed) {
   // The top-level operation must be known to be isolated from above to
   // prevent performing canonicalizations on operations defined at or above
   // the region containing 'op'.
@@ -638,7 +730,7 @@ mlir::applyPatternsAndFoldGreedily(Region &region,
   // Start the pattern driver.
   RegionPatternRewriteDriver driver(region.getContext(), patterns, config,
                                     region);
-  LogicalResult converged = std::move(driver).simplify();
+  LogicalResult converged = std::move(driver).simplify(changed);
   LLVM_DEBUG(if (failed(converged)) {
     llvm::dbgs() << "The pattern rewrite did not converge after scanning "
                  << config.maxIterations << " times\n";

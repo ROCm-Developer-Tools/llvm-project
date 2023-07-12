@@ -213,6 +213,7 @@ def PPCaddTls     : SDNode<"PPCISD::ADD_TLS", SDTIntBinOp, []>;
 def PPCaddisTlsgdHA : SDNode<"PPCISD::ADDIS_TLSGD_HA", SDTIntBinOp>;
 def PPCaddiTlsgdL   : SDNode<"PPCISD::ADDI_TLSGD_L", SDTIntBinOp>;
 def PPCgetTlsAddr   : SDNode<"PPCISD::GET_TLS_ADDR", SDTIntBinOp>;
+def PPCgetTpointer : SDNode<"PPCISD::GET_TPOINTER", SDTIntLeaf, []>;
 def PPCaddiTlsgdLAddr : SDNode<"PPCISD::ADDI_TLSGD_L_ADDR",
                                SDTypeProfile<1, 3, [
                                  SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>,
@@ -1083,6 +1084,53 @@ multiclass AForm_3r<bits<6> opcode, bits<5> xo, dag OOL, dag IOL,
                        []>, isRecordForm, RecFormRel;
   }
 }
+
+multiclass
+    Z23Form_TE5_FRTB5_RMC2r<bits<6> opcode, bits<8> xo, dag OOL, dag IOL,
+                            string asmbase, string asmstr, list<dag> pattern> {
+  let BaseName = asmbase in {
+    def NAME
+        : Z23Form_TE5_FRTB5_RMC2<opcode, xo, OOL, IOL,
+                                 !strconcat(asmbase, !strconcat(" ", asmstr)),
+                                 pattern>, RecFormRel;
+    let Defs = [CR0] in
+    def _rec : Z23Form_TE5_FRTB5_RMC2<opcode, xo, OOL, IOL,
+                                 !strconcat(asmbase, !strconcat(". ", asmstr)),
+                                 []>, isRecordForm, RecFormRel;
+  }
+}
+
+multiclass
+    Z23Form_FRTAB5_RMC2r<bits<6> opcode, bits<8> xo, dag OOL, dag IOL,
+                         string asmbase, string asmstr, list<dag> pattern> {
+  let BaseName = asmbase in {
+    def NAME : Z23Form_FRTAB5_RMC2<opcode, xo, OOL, IOL,
+                                   !strconcat(asmbase, !strconcat(" ", asmstr)),
+                                   pattern>, RecFormRel;
+    let Defs = [CR1] in
+    def _rec : Z23Form_FRTAB5_RMC2<opcode, xo, OOL, IOL,
+                              !strconcat(asmbase, !strconcat(". ", asmstr)),
+                              []>, isRecordForm, RecFormRel;
+  }
+}
+
+multiclass
+    Z23Form_FRTB5_R1_RMC2r<bits<6> opcode, bits<8> xo, dag OOL, dag IOL,
+                           string asmbase, string asmstr, list<dag> pattern> {
+  let BaseName = asmbase in {
+    def NAME : Z23Form_FRTB5_R1_RMC2<opcode, xo, OOL, IOL,
+                               !strconcat(asmbase, !strconcat(" ", asmstr)),
+                               pattern>, RecFormRel;
+    let Defs = [CR1] in
+    def _rec : Z23Form_FRTB5_R1_RMC2<opcode, xo, OOL, IOL,
+                               !strconcat(asmbase, !strconcat(". ", asmstr)),
+                               []>, isRecordForm, RecFormRel;
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// END OF MULTICLASS DEFINITIONS
+//===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
 // PowerPC Instruction Definitions.
@@ -3142,6 +3190,24 @@ def GETtlsADDR32AIX : PPCEmitTimePseudo<(outs gprc:$rD), (ins gprc:$offset, gprc
                           "GETtlsADDR32AIX",
                           [(set i32:$rD,
                             (PPCgetTlsAddr i32:$offset, i32:$handle))]>;
+
+// For local-exec accesses on 32-bit AIX, a call to .__get_tpointer is
+// generated to retrieve the thread pointer. GETtlsTpointer32AIX clobbers both
+// R3 and the LR (link register).
+let hasExtraSrcRegAllocReq = 1, hasExtraDefRegAllocReq = 1,
+    Defs = [R3,LR] in
+def GETtlsTpointer32AIX : PPCEmitTimePseudo<(outs gprc:$rD), (ins),
+                          "GETtlsTpointer32AIX",
+                          [(set i32:$rD, (PPCgetTpointer))]>;
+
+// The following pattern matches local-exec TLS accesses on 32-bit AIX.
+// PPCaddTls is used in local-exec accesses in order to:
+//   - Get the address of a variable (add the variable offset to the thread
+//     pointer, retrieved by calling .__get_tpointer).
+//   - Create an opportunity to optimize the user of the loaded address.
+def : Pat<(PPCaddTls i32:$in, i32:$addr),
+          (ADD4TLS $in, $addr)>;
+
 // Combined op for ADDItlsgdL32 and GETtlsADDR32, late expanded.  R3 and LR
 // are true defines while the rest of the Defs are clobbers.
 let hasExtraSrcRegAllocReq = 1, hasExtraDefRegAllocReq = 1,

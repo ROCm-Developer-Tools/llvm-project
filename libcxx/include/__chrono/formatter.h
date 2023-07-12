@@ -38,13 +38,12 @@
 #include <__format/format_functions.h>
 #include <__format/format_parse_context.h>
 #include <__format/formatter.h>
-#include <__format/formatter_output.h>
 #include <__format/parser_std_format_spec.h>
+#include <__format/write_escaped.h>
 #include <__memory/addressof.h>
 #include <cmath>
 #include <ctime>
 #include <sstream>
-#include <string>
 #include <string_view>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
@@ -53,7 +52,7 @@
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#if _LIBCPP_STD_VER >= 20 && !defined(_LIBCPP_HAS_NO_INCOMPLETE_FORMAT)
+#if _LIBCPP_STD_VER >= 20
 
 namespace __formatter {
 
@@ -101,12 +100,12 @@ __format_sub_seconds(const chrono::duration<_Rep, _Period>& __value, basic_strin
     // https://godbolt.org/z/6dsbnW8ba
     std::format_to(std::ostreambuf_iterator<_CharT>{__sstr},
                    _LIBCPP_STATICALLY_WIDEN(_CharT, "{:0{}.0f}"),
-                   __fraction.count(),
+                   chrono::duration_cast<typename chrono::hh_mm_ss<__duration>::precision>(__fraction).count(),
                    chrono::hh_mm_ss<__duration>::fractional_width);
   else
     std::format_to(std::ostreambuf_iterator<_CharT>{__sstr},
                    _LIBCPP_STATICALLY_WIDEN(_CharT, "{:0{}}"),
-                   __fraction.count(),
+                   chrono::duration_cast<typename chrono::hh_mm_ss<__duration>::precision>(__fraction).count(),
                    chrono::hh_mm_ss<__duration>::fractional_width);
 }
 
@@ -270,20 +269,19 @@ _LIBCPP_HIDE_FROM_ABI void __format_chrono_using_chrono_specs(
         //
         // TODO FMT evaluate the comment above.
 
-#  if defined(__GLIBC__) || defined(_AIX)
+#  if defined(__GLIBC__) || defined(_AIX) || defined(_WIN32)
       case _CharT('y'):
         // Glibc fails for negative values, AIX for positive values too.
         __sstr << std::format(_LIBCPP_STATICALLY_WIDEN(_CharT, "{:02}"), (std::abs(__t.tm_year + 1900)) % 100);
         break;
-#  endif // defined(__GLIBC__) || defined(_AIX)
+#  endif // defined(__GLIBC__) || defined(_AIX) || defined(_WIN32)
 
-      case _CharT('Y'): {
-        int __year = __t.tm_year + 1900;
-        if (__year < 1000)
-          __formatter::__format_year(__year, __sstr);
-        else
-          __facet.put({__sstr}, __sstr, _CharT(' '), std::addressof(__t), std::to_address(__s), std::to_address(__it + 1));
-      } break;
+      case _CharT('Y'):
+        // Depending on the platform's libc the range of supported years is
+        // limited. Intead of of testing all conditions use the internal
+        // implementation unconditionally.
+        __formatter::__format_year(__t.tm_year + 1900, __sstr);
+        break;
 
       case _CharT('F'): {
         int __year = __t.tm_year + 1900;
@@ -825,7 +823,7 @@ public:
     return _Base::__parse(__ctx, __format_spec::__fields_chrono, __format_spec::__flags::__time);
   }
 };
-#endif // if _LIBCPP_STD_VER >= 20 && !defined(_LIBCPP_HAS_NO_INCOMPLETE_FORMAT)
+#endif // if _LIBCPP_STD_VER >= 20
 
 _LIBCPP_END_NAMESPACE_STD
 

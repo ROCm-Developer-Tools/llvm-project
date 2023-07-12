@@ -25,6 +25,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
 using namespace mlir::arith;
@@ -123,7 +124,7 @@ static Type getI1SameShape(Type type) {
     return UnrankedTensorType::get(i1Type);
   if (auto vectorType = llvm::dyn_cast<VectorType>(type))
     return VectorType::get(vectorType.getShape(), i1Type,
-                           vectorType.getNumScalableDims());
+                           vectorType.getScalableDims());
   return i1Type;
 }
 
@@ -808,7 +809,7 @@ OpFoldResult arith::OrIOp::fold(FoldAdaptor adaptor) {
   if (matchPattern(getRhs(), m_Zero()))
     return getLhs();
   /// or(x, <all ones>) -> <all ones>
-  if (auto rhsAttr = adaptor.getRhs().dyn_cast_or_null<IntegerAttr>())
+  if (auto rhsAttr = llvm::dyn_cast_if_present<IntegerAttr>(adaptor.getRhs()))
     if (rhsAttr.getValue().isAllOnes())
       return rhsAttr;
 
@@ -1249,7 +1250,7 @@ LogicalResult arith::ExtSIOp::verify() {
 
 /// Always fold extension of FP constants.
 OpFoldResult arith::ExtFOp::fold(FoldAdaptor adaptor) {
-  auto constOperand = adaptor.getIn().dyn_cast_or_null<FloatAttr>();
+  auto constOperand = llvm::dyn_cast_if_present<FloatAttr>(adaptor.getIn());
   if (!constOperand)
     return {};
 
@@ -1702,7 +1703,7 @@ OpFoldResult arith::CmpIOp::fold(FoldAdaptor adaptor) {
 
   // We are moving constants to the right side; So if lhs is constant rhs is
   // guaranteed to be a constant.
-  if (auto lhs = adaptor.getLhs().dyn_cast_or_null<TypedAttr>()) {
+  if (auto lhs = llvm::dyn_cast_if_present<TypedAttr>(adaptor.getLhs())) {
     return constFoldBinaryOp<IntegerAttr>(
         adaptor.getOperands(), getI1SameShape(lhs.getType()),
         [pred = getPredicate()](const APInt &lhs, const APInt &rhs) {
@@ -1772,8 +1773,8 @@ bool mlir::arith::applyCmpPredicate(arith::CmpFPredicate predicate,
 }
 
 OpFoldResult arith::CmpFOp::fold(FoldAdaptor adaptor) {
-  auto lhs = adaptor.getLhs().dyn_cast_or_null<FloatAttr>();
-  auto rhs = adaptor.getRhs().dyn_cast_or_null<FloatAttr>();
+  auto lhs = llvm::dyn_cast_if_present<FloatAttr>(adaptor.getLhs());
+  auto rhs = llvm::dyn_cast_if_present<FloatAttr>(adaptor.getRhs());
 
   // If one operand is NaN, making them both NaN does not change the result.
   if (lhs && lhs.getValue().isNaN())
@@ -2193,11 +2194,11 @@ OpFoldResult arith::SelectOp::fold(FoldAdaptor adaptor) {
   // Constant-fold constant operands over non-splat constant condition.
   // select %cst_vec, %cst0, %cst1 => %cst2
   if (auto cond =
-          adaptor.getCondition().dyn_cast_or_null<DenseElementsAttr>()) {
+          llvm::dyn_cast_if_present<DenseElementsAttr>(adaptor.getCondition())) {
     if (auto lhs =
-            adaptor.getTrueValue().dyn_cast_or_null<DenseElementsAttr>()) {
+            llvm::dyn_cast_if_present<DenseElementsAttr>(adaptor.getTrueValue())) {
       if (auto rhs =
-              adaptor.getFalseValue().dyn_cast_or_null<DenseElementsAttr>()) {
+              llvm::dyn_cast_if_present<DenseElementsAttr>(adaptor.getFalseValue())) {
         SmallVector<Attribute> results;
         results.reserve(static_cast<size_t>(cond.getNumElements()));
         auto condVals = llvm::make_range(cond.value_begin<BoolAttr>(),
@@ -2375,6 +2376,38 @@ TypedAttr mlir::arith::getIdentityValueAttr(AtomicRMWKind kind, Type resultType,
     break;
   }
   return nullptr;
+}
+
+/// Return the identity numeric value associated to the give op.
+std::optional<TypedAttr> mlir::arith::getNeutralElement(Operation *op) {
+  std::optional<AtomicRMWKind> maybeKind =
+      llvm::TypeSwitch<Operation *, std::optional<AtomicRMWKind>>(op)
+          // Floating-point operations.
+          .Case([](arith::AddFOp op) { return AtomicRMWKind::addf; })
+          .Case([](arith::MulFOp op) { return AtomicRMWKind::mulf; })
+          .Case([](arith::MaxFOp op) { return AtomicRMWKind::maxf; })
+          .Case([](arith::MinFOp op) { return AtomicRMWKind::minf; })
+          // Integer operations.
+          .Case([](arith::AddIOp op) { return AtomicRMWKind::addi; })
+          .Case([](arith::OrIOp op) { return AtomicRMWKind::ori; })
+          .Case([](arith::XOrIOp op) { return AtomicRMWKind::ori; })
+          .Case([](arith::AndIOp op) { return AtomicRMWKind::andi; })
+          .Case([](arith::MaxUIOp op) { return AtomicRMWKind::maxu; })
+          .Case([](arith::MinUIOp op) { return AtomicRMWKind::minu; })
+          .Case([](arith::MaxSIOp op) { return AtomicRMWKind::maxs; })
+          .Case([](arith::MinSIOp op) { return AtomicRMWKind::mins; })
+          .Case([](arith::MulIOp op) { return AtomicRMWKind::muli; })
+          .Default([](Operation *op) { return std::nullopt; });
+  if (!maybeKind) {
+    op->emitError() << "Unknown neutral element for: " << *op;
+    return std::nullopt;
+  }
+
+  // Builder only used as helper for attribute creation.
+  OpBuilder b(op->getContext());
+  Type resultType = op->getResult(0).getType();
+
+  return getIdentityValueAttr(*maybeKind, resultType, b, op->getLoc());
 }
 
 /// Returns the identity value associated with an AtomicRMWKind op.

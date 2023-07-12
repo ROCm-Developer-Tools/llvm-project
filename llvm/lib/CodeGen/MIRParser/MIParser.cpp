@@ -501,6 +501,7 @@ public:
   bool parseAddrspace(unsigned &Addrspace);
   bool parseSectionID(std::optional<MBBSectionID> &SID);
   bool parseBBID(std::optional<unsigned> &BBID);
+  bool parseSPAdjustment(int &SPAdjustment);
   bool parseOperandsOffset(MachineOperand &Op);
   bool parseIRValue(const Value *&V);
   bool parseMemoryOperandFlag(MachineMemOperand::Flags &Flags);
@@ -676,6 +677,18 @@ bool MIParser::parseBBID(std::optional<unsigned> &BBID) {
   return false;
 }
 
+// Parse basic block SP adjustment.
+bool MIParser::parseSPAdjustment(int &SPAdjustment) {
+  assert(Token.is(MIToken::kw_sp_adjustment));
+  lex();
+  unsigned Value = 0;
+  if (getUnsigned(Value) || !isInt<32>(Value))
+    return error("Unknown SP adjustment");
+  SPAdjustment = (int)Value;
+  lex();
+  return false;
+}
+
 bool MIParser::parseBasicBlockDefinition(
     DenseMap<unsigned, MachineBasicBlock *> &MBBSlots) {
   assert(Token.is(MIToken::MachineBasicBlockLabel));
@@ -693,6 +706,7 @@ bool MIParser::parseBasicBlockDefinition(
   std::optional<MBBSectionID> SectionID;
   uint64_t Alignment = 0;
   std::optional<unsigned> BBID;
+  int SPAdjustment = 0;
   BasicBlock *BB = nullptr;
   if (consumeIfPresent(MIToken::lparen)) {
     do {
@@ -735,6 +749,10 @@ bool MIParser::parseBasicBlockDefinition(
         break;
       case MIToken::kw_bb_id:
         if (parseBBID(BBID))
+          return true;
+        break;
+      case MIToken::kw_sp_adjustment:
+        if (parseSPAdjustment(SPAdjustment))
           return true;
         break;
       default:
@@ -781,6 +799,7 @@ bool MIParser::parseBasicBlockDefinition(
       MF.setBBSectionsType(BasicBlockSection::Labels);
     MBB->setBBID(BBID.value());
   }
+  MBB->setSPAdjustment(SPAdjustment);
   return false;
 }
 
@@ -1451,7 +1470,8 @@ bool MIParser::parseInstruction(unsigned &OpCode, unsigned &Flags) {
          Token.is(MIToken::kw_nuw) ||
          Token.is(MIToken::kw_nsw) ||
          Token.is(MIToken::kw_exact) ||
-         Token.is(MIToken::kw_nofpexcept)) {
+         Token.is(MIToken::kw_nofpexcept) ||
+         Token.is(MIToken::kw_unpredictable)) {
     // Mine frame and fast math flags
     if (Token.is(MIToken::kw_frame_setup))
       Flags |= MachineInstr::FrameSetup;
@@ -1479,6 +1499,8 @@ bool MIParser::parseInstruction(unsigned &OpCode, unsigned &Flags) {
       Flags |= MachineInstr::IsExact;
     if (Token.is(MIToken::kw_nofpexcept))
       Flags |= MachineInstr::NoFPExcept;
+    if (Token.is(MIToken::kw_unpredictable))
+      Flags |= MachineInstr::Unpredictable;
 
     lex();
   }
@@ -2520,7 +2542,7 @@ bool MIParser::parseCFIOperand(MachineOperand &Dest) {
         parseCFIAddressSpace(AddressSpace))
       return true;
     CFIIndex = MF.addFrameInst(MCCFIInstruction::createLLVMDefAspaceCfa(
-        nullptr, Reg, Offset, AddressSpace));
+        nullptr, Reg, Offset, AddressSpace, SMLoc()));
     break;
   case MIToken::kw_cfi_remember_state:
     CFIIndex = MF.addFrameInst(MCCFIInstruction::createRememberState(nullptr));

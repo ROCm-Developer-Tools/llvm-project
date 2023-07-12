@@ -384,6 +384,7 @@ protected:
     unsigned HadMultipleCandidates : 1;
     unsigned RefersToEnclosingVariableOrCapture : 1;
     unsigned NonOdrUseReason : 2;
+    unsigned IsImmediateEscalating : 1;
 
     /// The location of the declaration name itself.
     SourceLocation Loc;
@@ -827,6 +828,7 @@ protected:
     unsigned StdInitListInitialization : 1;
     unsigned ZeroInitialization : 1;
     unsigned ConstructionKind : 3;
+    unsigned IsImmediateEscalating : 1;
 
     SourceLocation Loc;
   };
@@ -1295,8 +1297,13 @@ public:
   /// parameters are identified by index/level rather than their
   /// declaration pointers) or the exact representation of the statement as
   /// written in the source.
+  /// \param ProfileLambdaExpr whether or not to profile lambda expressions.
+  /// When false, the lambda expressions are never considered to be equal to
+  /// other lambda expressions. When true, the lambda expressions with the same
+  /// implementation will be considered to be the same. ProfileLambdaExpr should
+  /// only be true when we try to merge two declarations within modules.
   void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
-               bool Canonical) const;
+               bool Canonical, bool ProfileLambdaExpr = false) const;
 
   /// Calculate a unique representation for a statement that is
   /// stable across compiler invocations.
@@ -3587,8 +3594,11 @@ public:
     llvm::PointerIntPair<VarDecl *, 2, VariableCaptureKind> VarAndKind;
     SourceLocation Loc;
 
+    Capture() = default;
+
   public:
     friend class ASTStmtReader;
+    friend class CapturedStmt;
 
     /// Create a new capture.
     ///

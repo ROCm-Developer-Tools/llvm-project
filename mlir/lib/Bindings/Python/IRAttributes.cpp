@@ -15,6 +15,7 @@
 
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/BuiltinTypes.h"
+#include "mlir/Bindings/Python/PybindAdaptors.h"
 
 namespace py = pybind11;
 using namespace mlir;
@@ -79,6 +80,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAAffineMap;
   static constexpr const char *pyClassName = "AffineMapAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirAffineMapAttrGetTypeID;
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
@@ -258,6 +261,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAArray;
   static constexpr const char *pyClassName = "ArrayAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirArrayAttrGetTypeID;
 
   class PyArrayAttributeIterator {
   public:
@@ -265,12 +270,11 @@ public:
 
     PyArrayAttributeIterator &dunderIter() { return *this; }
 
-    PyAttribute dunderNext() {
+    MlirAttribute dunderNext() {
       // TODO: Throw is an inefficient way to stop iteration.
       if (nextIndex >= mlirArrayAttrGetNumElements(attr.get()))
         throw py::stop_iteration();
-      return PyAttribute(attr.getContext(),
-                         mlirArrayAttrGetElement(attr.get(), nextIndex++));
+      return mlirArrayAttrGetElement(attr.get(), nextIndex++);
     }
 
     static void bind(py::module &m) {
@@ -285,8 +289,8 @@ public:
     int nextIndex = 0;
   };
 
-  PyAttribute getItem(intptr_t i) {
-    return PyAttribute(getContext(), mlirArrayAttrGetElement(*this, i));
+  MlirAttribute getItem(intptr_t i) {
+    return mlirArrayAttrGetElement(*this, i);
   }
 
   static void bindDerived(ClassTy &c) {
@@ -338,6 +342,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAFloat;
   static constexpr const char *pyClassName = "FloatAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirFloatAttrGetTypeID;
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
@@ -405,6 +411,10 @@ public:
           return mlirIntegerAttrGetValueUInt(self);
         },
         "Returns the value of the integer attribute");
+    c.def_property_readonly_static("static_typeid",
+                                   [](py::object & /*class*/) -> MlirTypeID {
+                                     return mlirIntegerAttrGetTypeID();
+                                   });
   }
 };
 
@@ -428,6 +438,53 @@ public:
         "value",
         [](PyBoolAttribute &self) { return mlirBoolAttrGetValue(self); },
         "Returns the value of the bool attribute");
+  }
+};
+
+class PySymbolRefAttribute : public PyConcreteAttribute<PySymbolRefAttribute> {
+public:
+  static constexpr IsAFunctionTy isaFunction = mlirAttributeIsASymbolRef;
+  static constexpr const char *pyClassName = "SymbolRefAttr";
+  using PyConcreteAttribute::PyConcreteAttribute;
+
+  static MlirAttribute fromList(const std::vector<std::string> &symbols,
+                                PyMlirContext &context) {
+    if (symbols.empty())
+      throw std::runtime_error("SymbolRefAttr must be composed of at least "
+                               "one symbol.");
+    MlirStringRef rootSymbol = toMlirStringRef(symbols[0]);
+    SmallVector<MlirAttribute, 3> referenceAttrs;
+    for (size_t i = 1; i < symbols.size(); ++i) {
+      referenceAttrs.push_back(
+          mlirFlatSymbolRefAttrGet(context.get(), toMlirStringRef(symbols[i])));
+    }
+    return mlirSymbolRefAttrGet(context.get(), rootSymbol,
+                                referenceAttrs.size(), referenceAttrs.data());
+  }
+
+  static void bindDerived(ClassTy &c) {
+    c.def_static(
+        "get",
+        [](const std::vector<std::string> &symbols,
+           DefaultingPyMlirContext context) {
+          return PySymbolRefAttribute::fromList(symbols, context.resolve());
+        },
+        py::arg("symbols"), py::arg("context") = py::none(),
+        "Gets a uniqued SymbolRef attribute from a list of symbol names");
+    c.def_property_readonly(
+        "value",
+        [](PySymbolRefAttribute &self) {
+          std::vector<std::string> symbols = {
+              unwrap(mlirSymbolRefAttrGetRootReference(self)).str()};
+          for (int i = 0; i < mlirSymbolRefAttrGetNumNestedReferences(self);
+               ++i)
+            symbols.push_back(
+                unwrap(mlirSymbolRefAttrGetRootReference(
+                           mlirSymbolRefAttrGetNestedReference(self, i)))
+                    .str());
+          return symbols;
+        },
+        "Returns the value of the SymbolRef attribute as a list[str]");
   }
 };
 
@@ -463,6 +520,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAOpaque;
   static constexpr const char *pyClassName = "OpaqueAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirOpaqueAttrGetTypeID;
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
@@ -500,6 +559,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAString;
   static constexpr const char *pyClassName = "StringAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirStringAttrGetTypeID;
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
@@ -781,13 +842,11 @@ public:
                                  return mlirDenseElementsAttrIsSplat(self);
                                })
         .def("get_splat_value",
-             [](PyDenseElementsAttribute &self) -> PyAttribute {
-               if (!mlirDenseElementsAttrIsSplat(self)) {
+             [](PyDenseElementsAttribute &self) {
+               if (!mlirDenseElementsAttrIsSplat(self))
                  throw py::value_error(
                      "get_splat_value called on a non-splat attribute");
-               }
-               return PyAttribute(self.getContext(),
-                                  mlirDenseElementsAttrGetSplatValue(self));
+               return mlirDenseElementsAttrGetSplatValue(self);
              })
         .def_buffer(&PyDenseElementsAttribute::accessBuffer);
   }
@@ -920,6 +979,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsADictionary;
   static constexpr const char *pyClassName = "DictAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirDictionaryAttrGetTypeID;
 
   intptr_t dunderLen() { return mlirDictionaryAttrGetNumElements(*this); }
 
@@ -954,10 +1015,9 @@ public:
     c.def("__getitem__", [](PyDictAttribute &self, const std::string &name) {
       MlirAttribute attr =
           mlirDictionaryAttrGetElementByName(self, toMlirStringRef(name));
-      if (mlirAttributeIsNull(attr)) {
+      if (mlirAttributeIsNull(attr))
         throw py::key_error("attempt to access a non-existent attribute");
-      }
-      return PyAttribute(self.getContext(), attr);
+      return attr;
     });
     c.def("__getitem__", [](PyDictAttribute &self, intptr_t index) {
       if (index < 0 || index >= self.dunderLen()) {
@@ -1012,6 +1072,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAType;
   static constexpr const char *pyClassName = "TypeAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirTypeAttrGetTypeID;
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
@@ -1023,8 +1085,7 @@ public:
         py::arg("value"), py::arg("context") = py::none(),
         "Gets a uniqued Type attribute");
     c.def_property_readonly("value", [](PyTypeAttribute &self) {
-      return PyType(self.getContext()->getRef(),
-                    mlirTypeAttrGetValue(self.get()));
+      return mlirTypeAttrGetValue(self.get());
     });
   }
 };
@@ -1035,6 +1096,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAUnit;
   static constexpr const char *pyClassName = "UnitAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirUnitAttrGetTypeID;
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
@@ -1054,6 +1117,8 @@ public:
   static constexpr IsAFunctionTy isaFunction = mlirAttributeIsAStridedLayout;
   static constexpr const char *pyClassName = "StridedLayoutAttr";
   using PyConcreteAttribute::PyConcreteAttribute;
+  static constexpr GetTypeIDFunctionTy getTypeIdFunction =
+      mlirStridedLayoutAttrGetTypeID;
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
@@ -1099,6 +1164,60 @@ public:
   }
 };
 
+py::object denseArrayAttributeCaster(PyAttribute &pyAttribute) {
+  if (PyDenseBoolArrayAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseBoolArrayAttribute(pyAttribute));
+  if (PyDenseI8ArrayAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseI8ArrayAttribute(pyAttribute));
+  if (PyDenseI16ArrayAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseI16ArrayAttribute(pyAttribute));
+  if (PyDenseI32ArrayAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseI32ArrayAttribute(pyAttribute));
+  if (PyDenseI64ArrayAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseI64ArrayAttribute(pyAttribute));
+  if (PyDenseF32ArrayAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseF32ArrayAttribute(pyAttribute));
+  if (PyDenseF64ArrayAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseF64ArrayAttribute(pyAttribute));
+  std::string msg =
+      std::string("Can't cast unknown element type DenseArrayAttr (") +
+      std::string(py::repr(py::cast(pyAttribute))) + ")";
+  throw py::cast_error(msg);
+}
+
+py::object denseIntOrFPElementsAttributeCaster(PyAttribute &pyAttribute) {
+  if (PyDenseFPElementsAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseFPElementsAttribute(pyAttribute));
+  if (PyDenseIntElementsAttribute::isaFunction(pyAttribute))
+    return py::cast(PyDenseIntElementsAttribute(pyAttribute));
+  std::string msg =
+      std::string(
+          "Can't cast unknown element type DenseIntOrFPElementsAttr (") +
+      std::string(py::repr(py::cast(pyAttribute))) + ")";
+  throw py::cast_error(msg);
+}
+
+py::object integerOrBoolAttributeCaster(PyAttribute &pyAttribute) {
+  if (PyBoolAttribute::isaFunction(pyAttribute))
+    return py::cast(PyBoolAttribute(pyAttribute));
+  if (PyIntegerAttribute::isaFunction(pyAttribute))
+    return py::cast(PyIntegerAttribute(pyAttribute));
+  std::string msg =
+      std::string("Can't cast unknown element type DenseArrayAttr (") +
+      std::string(py::repr(py::cast(pyAttribute))) + ")";
+  throw py::cast_error(msg);
+}
+
+py::object symbolRefOrFlatSymbolRefAttributeCaster(PyAttribute &pyAttribute) {
+  if (PyFlatSymbolRefAttribute::isaFunction(pyAttribute))
+    return py::cast(PyFlatSymbolRefAttribute(pyAttribute));
+  if (PySymbolRefAttribute::isaFunction(pyAttribute))
+    return py::cast(PySymbolRefAttribute(pyAttribute));
+  std::string msg = std::string("Can't cast unknown SymbolRef attribute (") +
+                    std::string(py::repr(py::cast(pyAttribute))) + ")";
+  throw py::cast_error(msg);
+}
+
 } // namespace
 
 void mlir::python::populateIRAttributes(py::module &m) {
@@ -1118,6 +1237,9 @@ void mlir::python::populateIRAttributes(py::module &m) {
   PyDenseF32ArrayAttribute::PyDenseArrayIterator::bind(m);
   PyDenseF64ArrayAttribute::bind(m);
   PyDenseF64ArrayAttribute::PyDenseArrayIterator::bind(m);
+  PyGlobals::get().registerTypeCaster(
+      mlirDenseArrayAttrGetTypeID(),
+      pybind11::cpp_function(denseArrayAttributeCaster));
 
   PyArrayAttribute::bind(m);
   PyArrayAttribute::PyArrayAttributeIterator::bind(m);
@@ -1125,13 +1247,25 @@ void mlir::python::populateIRAttributes(py::module &m) {
   PyDenseElementsAttribute::bind(m);
   PyDenseFPElementsAttribute::bind(m);
   PyDenseIntElementsAttribute::bind(m);
+  PyGlobals::get().registerTypeCaster(
+      mlirDenseIntOrFPElementsAttrGetTypeID(),
+      pybind11::cpp_function(denseIntOrFPElementsAttributeCaster));
+
   PyDictAttribute::bind(m);
+  PySymbolRefAttribute::bind(m);
+  PyGlobals::get().registerTypeCaster(
+      mlirSymbolRefAttrGetTypeID(),
+      pybind11::cpp_function(symbolRefOrFlatSymbolRefAttributeCaster));
+
   PyFlatSymbolRefAttribute::bind(m);
   PyOpaqueAttribute::bind(m);
   PyFloatAttribute::bind(m);
   PyIntegerAttribute::bind(m);
   PyStringAttribute::bind(m);
   PyTypeAttribute::bind(m);
+  PyGlobals::get().registerTypeCaster(
+      mlirIntegerAttrGetTypeID(),
+      pybind11::cpp_function(integerOrBoolAttributeCaster));
   PyUnitAttribute::bind(m);
 
   PyStridedLayoutAttribute::bind(m);

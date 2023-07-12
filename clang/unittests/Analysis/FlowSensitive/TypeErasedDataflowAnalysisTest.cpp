@@ -64,11 +64,8 @@ runAnalysis(llvm::StringRef Code, AnalysisT (*MakeAnalysis)(ASTContext &)) {
                     AST->getASTContext()));
   assert(Func != nullptr);
 
-  Stmt *Body = Func->getBody();
-  assert(Body != nullptr);
-
-  auto CFCtx = llvm::cantFail(
-      ControlFlowContext::build(*Func, *Body, AST->getASTContext()));
+  auto CFCtx =
+      llvm::cantFail(ControlFlowContext::build(*Func));
 
   AnalysisT Analysis = MakeAnalysis(AST->getASTContext());
   DataflowAnalysisContext DACtx(std::make_unique<WatchedLiteralsSolver>());
@@ -373,6 +370,13 @@ TEST_F(NoreturnDestructorTest, ConditionalOperatorNestedBranchReturns) {
   // FIXME: Called functions at point `p` should contain only "foo".
 }
 
+StructValue &createNewStructValue(AggregateStorageLocation &Loc,
+                                  Environment &Env) {
+  auto &Val = *cast<StructValue>(Env.createValue(Loc.getType()));
+  Env.setValue(Loc, Val);
+  return Val;
+}
+
 // Models an analysis that uses flow conditions.
 class SpecialBoolAnalysis final
     : public DataflowAnalysis<SpecialBoolAnalysis, NoopLattice> {
@@ -393,23 +397,18 @@ public:
     if (const auto *E = selectFirst<CXXConstructExpr>(
             "call", match(cxxConstructExpr(HasSpecialBoolType).bind("call"), *S,
                           getASTContext()))) {
-      auto &ConstructorVal = *Env.createValue(E->getType());
-      ConstructorVal.setProperty("is_set", Env.getBoolLiteralValue(false));
-      Env.setValue(*Env.getStorageLocation(*E, SkipPast::None), ConstructorVal);
+      cast<StructValue>(Env.getValueStrict(*E))
+          ->setProperty("is_set", Env.getBoolLiteralValue(false));
     } else if (const auto *E = selectFirst<CXXMemberCallExpr>(
                    "call", match(cxxMemberCallExpr(callee(cxxMethodDecl(ofClass(
                                                        SpecialBoolRecordDecl))))
                                      .bind("call"),
                                  *S, getASTContext()))) {
-      auto *Object = E->getImplicitObjectArgument();
-      assert(Object != nullptr);
+      auto &ObjectLoc =
+          *cast<AggregateStorageLocation>(getImplicitObjectLocation(*E, Env));
 
-      auto *ObjectLoc = getImplicitObjectLocation(*E, Env);
-      assert(ObjectLoc != nullptr);
-
-      auto &ConstructorVal = *Env.createValue(Object->getType());
-      ConstructorVal.setProperty("is_set", Env.getBoolLiteralValue(true));
-      Env.setValue(*ObjectLoc, ConstructorVal);
+      createNewStructValue(ObjectLoc, Env)
+          .setProperty("is_set", Env.getBoolLiteralValue(true));
     }
   }
 
@@ -554,21 +553,19 @@ public:
         *S, getASTContext());
     if (const auto *E = selectFirst<CXXConstructExpr>(
             "construct", Matches)) {
-      auto &ConstructorVal = *Env.createValue(E->getType());
-      ConstructorVal.setProperty("has_value", Env.getBoolLiteralValue(false));
-      Env.setValue(*Env.getStorageLocation(*E, SkipPast::None), ConstructorVal);
+      cast<StructValue>(Env.getValueStrict(*E))
+          ->setProperty("has_value", Env.getBoolLiteralValue(false));
     } else if (const auto *E =
                    selectFirst<CXXOperatorCallExpr>("operator", Matches)) {
       assert(E->getNumArgs() > 0);
       auto *Object = E->getArg(0);
       assert(Object != nullptr);
 
-      auto *ObjectLoc = Env.getStorageLocation(*Object, SkipPast::Reference);
-      assert(ObjectLoc != nullptr);
+      auto &ObjectLoc = *cast<AggregateStorageLocation>(
+          Env.getStorageLocation(*Object, SkipPast::Reference));
 
-      auto &ConstructorVal = *Env.createValue(Object->getType());
-      ConstructorVal.setProperty("has_value", Env.getBoolLiteralValue(true));
-      Env.setValue(*ObjectLoc, ConstructorVal);
+      createNewStructValue(ObjectLoc, Env)
+          .setProperty("has_value", Env.getBoolLiteralValue(true));
     }
   }
 
@@ -1230,9 +1227,7 @@ public:
         match(callExpr(callee(functionDecl(hasName("makeTop")))).bind("top"),
               *S, getASTContext());
     if (const auto *E = selectFirst<CallExpr>("top", Matches)) {
-      auto &Loc = Env.createStorageLocation(*E);
-      Env.setValue(Loc, Env.makeTopBoolValue());
-      Env.setStorageLocation(*E, Loc);
+      Env.setValueStrict(*E, Env.makeTopBoolValue());
     }
   }
 

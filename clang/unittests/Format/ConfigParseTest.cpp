@@ -167,6 +167,7 @@ TEST(ConfigParseTest, ParsesConfigurationBools) {
   CHECK_PARSE_BOOL(IndentWrappedFunctionNames);
   CHECK_PARSE_BOOL(InsertBraces);
   CHECK_PARSE_BOOL(InsertNewlineAtEOF);
+  CHECK_PARSE_BOOL(KeepEmptyLinesAtEOF);
   CHECK_PARSE_BOOL(KeepEmptyLinesAtTheStartOfBlocks);
   CHECK_PARSE_BOOL(ObjCSpaceAfterProperty);
   CHECK_PARSE_BOOL(ObjCSpaceBeforeProtocolList);
@@ -916,6 +917,13 @@ TEST(ConfigParseTest, ParsesConfiguration) {
               LineEnding, FormatStyle::LE_CRLF);
   Style.LineEnding = DefaultLineEnding;
   CHECK_PARSE("UseCRLF: true", LineEnding, FormatStyle::LE_DeriveCRLF);
+
+  CHECK_PARSE("RemoveParentheses: MultipleParentheses", RemoveParentheses,
+              FormatStyle::RPS_MultipleParentheses);
+  CHECK_PARSE("RemoveParentheses: ReturnStatement", RemoveParentheses,
+              FormatStyle::RPS_ReturnStatement);
+  CHECK_PARSE("RemoveParentheses: Leave", RemoveParentheses,
+              FormatStyle::RPS_Leave);
 }
 
 TEST(ConfigParseTest, ParsesConfigurationWithLanguages) {
@@ -1022,6 +1030,23 @@ TEST(ConfigParseTest, ParsesConfigurationWithLanguages) {
             ParseError::Error);
 
   EXPECT_EQ(FormatStyle::LK_Cpp, Style.Language);
+
+  Style.Language = FormatStyle::LK_Verilog;
+  CHECK_PARSE("---\n"
+              "Language: Verilog\n"
+              "IndentWidth: 12\n"
+              "---\n"
+              "Language: Cpp\n"
+              "IndentWidth: 34\n"
+              "...\n",
+              IndentWidth, 12u);
+  CHECK_PARSE("---\n"
+              "IndentWidth: 78\n"
+              "---\n"
+              "Language: Verilog\n"
+              "IndentWidth: 56\n"
+              "...\n",
+              IndentWidth, 56u);
 }
 
 TEST(ConfigParseTest, UsesLanguageForBasedOnStyle) {

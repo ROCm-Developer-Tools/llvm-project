@@ -51,9 +51,16 @@ namespace mlir {
 /// indicating their types. This allows idiomatic printing of mixed value and
 /// integer attributes in a list. E.g.
 /// `[%arg0 : index, 7, 42, %arg42 : i32]`.
+///
+/// Indices can be scalable. For example, "4" in "[2, [4], 8]" is scalable.
+/// This notation is similar to how scalable dims are marked when defining
+/// Vectors. For each value in `integers`, the corresponding `bool` in
+/// `scalables` encodes whether it's a scalable index. If `scalableVals` is
+/// empty then assume that all indices are non-scalable.
 void printDynamicIndexList(
     OpAsmPrinter &printer, Operation *op, OperandRange values,
     ArrayRef<int64_t> integers, TypeRange valueTypes = TypeRange(),
+    ArrayRef<bool> scalables = {},
     AsmParser::Delimiter delimiter = AsmParser::Delimiter::Square);
 
 /// Parser hook for custom directive in assemblyFormat.
@@ -72,18 +79,44 @@ void printDynamicIndexList(
 ///   1. `result` is filled with the i64 ArrayAttr "[`kDynamic`, 7, 42,
 ///   `kDynamic`]"
 ///   2. `ssa` is filled with "[%arg0, %arg1]".
+///
+/// Indices can be scalable. For example, "4" in "[2, [4], 8]" is scalable.
+/// This notation is similar to how scalable dims are marked when defining
+/// Vectors. For each value in `integers`, the corresponding `bool` in
+/// `scalableVals` encodes whether it's a scalable index.
 ParseResult parseDynamicIndexList(
     OpAsmParser &parser,
     SmallVectorImpl<OpAsmParser::UnresolvedOperand> &values,
-    DenseI64ArrayAttr &integers, SmallVectorImpl<Type> *valueTypes = nullptr,
+    DenseI64ArrayAttr &integers, DenseBoolArrayAttr &scalableVals,
+    SmallVectorImpl<Type> *valueTypes = nullptr,
     AsmParser::Delimiter delimiter = AsmParser::Delimiter::Square);
+inline ParseResult parseDynamicIndexList(
+    OpAsmParser &parser,
+    SmallVectorImpl<OpAsmParser::UnresolvedOperand> &values,
+    DenseI64ArrayAttr &integers, SmallVectorImpl<Type> *valueTypes = nullptr,
+    AsmParser::Delimiter delimiter = AsmParser::Delimiter::Square) {
+  DenseBoolArrayAttr scalableVals = {};
+  return parseDynamicIndexList(parser, values, integers, scalableVals,
+                               valueTypes, delimiter);
+}
 inline ParseResult parseDynamicIndexList(
     OpAsmParser &parser,
     SmallVectorImpl<OpAsmParser::UnresolvedOperand> &values,
     DenseI64ArrayAttr &integers, SmallVectorImpl<Type> &valueTypes,
     AsmParser::Delimiter delimiter = AsmParser::Delimiter::Square) {
-  return parseDynamicIndexList(parser, values, integers, &valueTypes,
-                               delimiter);
+  DenseBoolArrayAttr scalableVals = {};
+  return parseDynamicIndexList(parser, values, integers, scalableVals,
+                               &valueTypes, delimiter);
+}
+inline ParseResult parseDynamicIndexList(
+    OpAsmParser &parser,
+    SmallVectorImpl<OpAsmParser::UnresolvedOperand> &values,
+    DenseI64ArrayAttr &integers, SmallVectorImpl<Type> &valueTypes,
+    DenseBoolArrayAttr &scalableVals,
+    AsmParser::Delimiter delimiter = AsmParser::Delimiter::Square) {
+
+  return parseDynamicIndexList(parser, values, integers, scalableVals,
+                               &valueTypes, delimiter);
 }
 
 /// Verify that a the `values` has as many elements as the number of entries in

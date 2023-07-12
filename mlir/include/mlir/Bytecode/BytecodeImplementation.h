@@ -74,6 +74,10 @@ public:
 
   /// Read a reference to the given attribute.
   virtual LogicalResult readAttribute(Attribute &result) = 0;
+  /// Read an optional reference to the given attribute. Returns success even if
+  /// the Attribute isn't present.
+  virtual LogicalResult readOptionalAttribute(Attribute &attr) = 0;
+
   template <typename T>
   LogicalResult readAttributes(SmallVectorImpl<T> &attrs) {
     return readList(attrs, [this](T &attr) { return readAttribute(attr); });
@@ -83,6 +87,18 @@ public:
     Attribute baseResult;
     if (failed(readAttribute(baseResult)))
       return failure();
+    if ((result = dyn_cast<T>(baseResult)))
+      return success();
+    return emitError() << "expected " << llvm::getTypeName<T>()
+                       << ", but got: " << baseResult;
+  }
+  template <typename T>
+  LogicalResult readOptionalAttribute(T &result) {
+    Attribute baseResult;
+    if (failed(readOptionalAttribute(baseResult)))
+      return failure();
+    if (!baseResult)
+      return success();
     if ((result = dyn_cast<T>(baseResult)))
       return success();
     return emitError() << "expected " << llvm::getTypeName<T>()
@@ -146,6 +162,9 @@ public:
   /// Read a blob from the bytecode.
   virtual LogicalResult readBlob(ArrayRef<char> &result) = 0;
 
+  /// Read a bool from the bytecode.
+  virtual LogicalResult readBool(bool &result) = 0;
+
 private:
   /// Read a handle to a dialect resource.
   virtual FailureOr<AsmDialectResourceHandle> readResourceHandle() = 0;
@@ -179,6 +198,7 @@ public:
 
   /// Write a reference to the given attribute.
   virtual void writeAttribute(Attribute attr) = 0;
+  virtual void writeOptionalAttribute(Attribute attr) = 0;
   template <typename T>
   void writeAttributes(ArrayRef<T> attrs) {
     writeList(attrs, [this](T attr) { writeAttribute(attr); });
@@ -233,6 +253,9 @@ public:
   /// guaranteed to not die before the end of the bytecode process. The blob is
   /// written as-is, with no additional compression or compaction.
   virtual void writeOwnedBlob(ArrayRef<char> blob) = 0;
+
+  /// Write a bool to the output stream.
+  virtual void writeOwnedBool(bool value) = 0;
 
   /// Return the bytecode version being emitted for.
   virtual int64_t getBytecodeVersion() const = 0;

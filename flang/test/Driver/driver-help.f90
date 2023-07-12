@@ -94,9 +94,10 @@
 ! HELP-FC1-NEXT:OPTIONS:
 ! HELP-FC1-NEXT: -cpp                   Enable predefined and command line preprocessor macros
 ! HELP-FC1-NEXT: -D <macro>=<value>     Define <macro> to <value> (or 1 if <value> omitted)
+! HELP-FC1-NEXT: -emit-fir              Build the parse tree, then lower it to FIR
+! HELP-FC1-NEXT: -emit-hlfir            Build the parse tree, then lower it to HLFIR
 ! HELP-FC1-NEXT: -emit-llvm-bc          Build ASTs then convert to LLVM, emit .bc file
 ! HELP-FC1-NEXT: -emit-llvm Use the LLVM representation for assembler and object files
-! HELP-FC1-NEXT: -emit-mlir Build the parse tree, then lower it to MLIR
 ! HELP-FC1-NEXT: -emit-obj Emit native object files
 ! HELP-FC1-NEXT: -E                     Only run the preprocessor
 ! HELP-FC1-NEXT: -falternative-parameter-statement
@@ -157,7 +158,8 @@
 ! HELP-FC1-NEXT: -fopenacc              Enable OpenACC
 ! HELP-FC1-NEXT: -fopenmp-host-ir-file-path <value> 
 ! HELP-FC1-NEXT:                        Path to the IR file produced by the frontend for the host.
-! HELP-FC1-NEXT: -fopenmp-is-device     Generate code only for an OpenMP target device.
+! HELP-FC1-NEXT: -fopenmp-is-target-device
+! HELP-FC1-NEXT:                        Generate code only for an OpenMP target device.
 ! HELP-FC1-NEXT: -fopenmp-target-debug  Enable debugging in the OpenMP offloading device RTL
 ! HELP-FC1-NEXT: -fopenmp-version=<value>
 ! HELP-FC1-NEXT:                        Set OpenMP version (e.g. 45 for OpenMP 4.5, 50 for OpenMP 5.0). Default value is 50 for Clang and 11 for Flang

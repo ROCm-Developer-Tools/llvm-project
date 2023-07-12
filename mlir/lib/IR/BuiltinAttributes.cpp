@@ -42,6 +42,7 @@ void BuiltinDialect::registerAttributes() {
 #define GET_ATTRDEF_LIST
 #include "mlir/IR/BuiltinAttributes.cpp.inc"
       >();
+  addAttributes<DistinctAttr>();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1247,12 +1248,12 @@ DenseElementsAttr DenseElementsAttr::bitcast(Type newElType) {
 DenseElementsAttr
 DenseElementsAttr::mapValues(Type newElementType,
                              function_ref<APInt(const APInt &)> mapping) const {
-  return cast<DenseIntElementsAttr>().mapValues(newElementType, mapping);
+  return llvm::cast<DenseIntElementsAttr>(*this).mapValues(newElementType, mapping);
 }
 
 DenseElementsAttr DenseElementsAttr::mapValues(
     Type newElementType, function_ref<APInt(const APFloat &)> mapping) const {
-  return cast<DenseFPElementsAttr>().mapValues(newElementType, mapping);
+  return llvm::cast<DenseFPElementsAttr>(*this).mapValues(newElementType, mapping);
 }
 
 ShapedType DenseElementsAttr::getType() const {
@@ -1743,6 +1744,18 @@ SparseElementsAttr::verify(function_ref<InFlightDiagnostic()> emitError,
   }
 
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// DistinctAttr
+//===----------------------------------------------------------------------===//
+
+DistinctAttr DistinctAttr::create(Attribute referencedAttr) {
+  return Base::get(referencedAttr.getContext(), referencedAttr);
+}
+
+Attribute DistinctAttr::getReferencedAttr() const {
+  return getImpl()->referencedAttr;
 }
 
 //===----------------------------------------------------------------------===//
