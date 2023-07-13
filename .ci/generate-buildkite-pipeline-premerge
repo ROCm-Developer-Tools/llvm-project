@@ -8,11 +8,10 @@
 #===----------------------------------------------------------------------===##
 
 #
-# This file generates a Buildkite pipeline that triggers the libc++ CI
-# job(s) if needed.
-# See https://buildkite.com/docs/agent/v3/cli-pipeline#pipeline-format.
+# This file generates a Buildkite pipeline that triggers the various CI jobs for
+# the LLVM project during pre-commit CI (each time a Phabricator diff is uploaded).
 #
-# Invoked by CI on pre-merge check for a commit.
+# See https://buildkite.com/docs/agent/v3/cli-pipeline#pipeline-format.
 #
 
 if ! git diff --name-only HEAD~1 | grep -q -E "^libcxx/|^libcxxabi/|^libunwind/|^runtimes/|^cmake/|^clang/"; then
@@ -27,12 +26,28 @@ else
   buildMessage="Push to branch ${BUILDKITE_BRANCH}"
 fi
 
-
 cat <<EOF
 steps:
+EOF
+
+# If libc++ or one of the runtimes directories changed
+if git diff --name-only HEAD~1 | grep -q -E "^libcxx/|^libcxxabi/|^libunwind/|^runtimes/|^cmake/"; then
+  cat <<EOF
   - trigger: "libcxx-ci"
     build:
       message: "${buildMessage}"
       commit: "${BUILDKITE_COMMIT}"
       branch: "${BUILDKITE_BRANCH}"
 EOF
+fi
+
+# If clang changed
+if git diff --name-only HEAD~1 | grep -q -E "^clang/"; then
+  cat <<EOF
+  - trigger: "clang-ci"
+    build:
+      message: "${buildMessage}"
+      commit: "${BUILDKITE_COMMIT}"
+      branch: "${BUILDKITE_BRANCH}"
+EOF
+fi

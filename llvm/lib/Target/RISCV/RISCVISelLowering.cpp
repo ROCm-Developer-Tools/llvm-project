@@ -681,9 +681,6 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
 
       setOperationAction({ISD::ROTL, ISD::ROTR}, VT, Expand);
 
-      setOperationAction({ISD::CTTZ, ISD::CTLZ, ISD::CTPOP}, VT, Expand);
-
-      setOperationAction(ISD::BSWAP, VT, Expand);
       setOperationAction({ISD::VP_BSWAP, ISD::VP_BITREVERSE}, VT, Expand);
       setOperationAction({ISD::VP_FSHL, ISD::VP_FSHR}, VT, Expand);
       setOperationAction({ISD::VP_CTLZ, ISD::VP_CTLZ_ZERO_UNDEF, ISD::VP_CTTZ,
@@ -754,13 +751,20 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       // Splice
       setOperationAction(ISD::VECTOR_SPLICE, VT, Custom);
 
-      // Lower CTLZ_ZERO_UNDEF and CTTZ_ZERO_UNDEF if element of VT in the range
-      // of f32.
-      EVT FloatVT = MVT::getVectorVT(MVT::f32, VT.getVectorElementCount());
-      if (isTypeLegal(FloatVT)) {
-        setOperationAction(
-            {ISD::CTLZ, ISD::CTLZ_ZERO_UNDEF, ISD::CTTZ_ZERO_UNDEF}, VT,
-            Custom);
+      if (Subtarget.hasStdExtZvbb()) {
+        setOperationAction({ISD::BITREVERSE, ISD::BSWAP}, VT, Legal);
+      } else {
+        setOperationAction({ISD::BITREVERSE, ISD::BSWAP}, VT, Expand);
+        setOperationAction({ISD::CTTZ, ISD::CTLZ, ISD::CTPOP}, VT, Expand);
+
+        // Lower CTLZ_ZERO_UNDEF and CTTZ_ZERO_UNDEF if element of VT in the
+        // range of f32.
+        EVT FloatVT = MVT::getVectorVT(MVT::f32, VT.getVectorElementCount());
+        if (isTypeLegal(FloatVT)) {
+          setOperationAction(
+              {ISD::CTLZ, ISD::CTLZ_ZERO_UNDEF, ISD::CTTZ_ZERO_UNDEF}, VT,
+              Custom);
+        }
       }
     }
 
@@ -12135,10 +12139,6 @@ static SDValue performSELECTCombine(SDNode *N, SelectionDAG &DAG,
   if (Subtarget.hasShortForwardBranchOpt())
     return SDValue();
 
-  // Only support XLenVT.
-  if (N->getValueType(0) != Subtarget.getXLenVT())
-    return SDValue();
-
   SDValue TrueVal = N->getOperand(1);
   SDValue FalseVal = N->getOperand(2);
   if (SDValue V = tryFoldSelectIntoOp(N, DAG, TrueVal, FalseVal, /*Swapped*/false))
@@ -13831,12 +13831,18 @@ static MachineBasicBlock *emitVFCVT_RM(MachineInstr &MI, MachineBasicBlock *BB,
   BuildMI(*BB, MI, DL, TII.get(RISCV::SwapFRMImm), SavedFRM)
       .addImm(MI.getOperand(FRMIdx).getImm());
 
-  // Emit an VFCVT without the FRM operand.
+  // Emit an VFCVT with the FRM == DYN
   auto MIB = BuildMI(*BB, MI, DL, TII.get(Opcode));
 
   for (unsigned I = 0; I < MI.getNumOperands(); I++)
     if (I != FRMIdx)
       MIB = MIB.add(MI.getOperand(I));
+    else
+      MIB = MIB.add(MachineOperand::CreateImm(7)); // frm = DYN
+
+  MIB.add(MachineOperand::CreateReg(RISCV::FRM,
+                                    /*IsDef*/ false,
+                                    /*IsImp*/ true));
 
   if (MI.getFlag(MachineInstr::MIFlag::NoFPExcept))
     MIB->setFlag(MachineInstr::MIFlag::NoFPExcept);
@@ -13875,9 +13881,13 @@ static MachineBasicBlock *emitVFROUND_NOEXCEPT_MASK(MachineInstr &MI,
       .add(MI.getOperand(1))
       .add(MI.getOperand(2))
       .add(MI.getOperand(3))
+      .add(MachineOperand::CreateImm(7)) // frm = DYN
       .add(MI.getOperand(4))
       .add(MI.getOperand(5))
-      .add(MI.getOperand(6));
+      .add(MI.getOperand(6))
+      .add(MachineOperand::CreateReg(RISCV::FRM,
+                                     /*IsDef*/ false,
+                                     /*IsImp*/ true));
 
   // Emit a VFCVT_F_X
   BuildMI(*BB, MI, DL, TII.get(CVTFOpc))
@@ -13885,9 +13895,13 @@ static MachineBasicBlock *emitVFROUND_NOEXCEPT_MASK(MachineInstr &MI,
       .add(MI.getOperand(1))
       .addReg(Tmp)
       .add(MI.getOperand(3))
+      .add(MachineOperand::CreateImm(7)) // frm = DYN
       .add(MI.getOperand(4))
       .add(MI.getOperand(5))
-      .add(MI.getOperand(6));
+      .add(MI.getOperand(6))
+      .add(MachineOperand::CreateReg(RISCV::FRM,
+                                     /*IsDef*/ false,
+                                     /*IsImp*/ true));
 
   // Restore FFLAGS.
   BuildMI(*BB, MI, DL, TII.get(RISCV::WriteFFLAGS))
@@ -14152,8 +14166,33 @@ RISCVTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   }
 }
 
+// Returns the index to the rounding mode immediate value if any, otherwise the
+// function will return None.
+static std::optional<unsigned> getRoundModeIdx(const MachineInstr &MI) {
+  uint64_t TSFlags = MI.getDesc().TSFlags;
+  if (!RISCVII::hasRoundModeOp(TSFlags))
+    return std::nullopt;
+
+  // The operand order
+  // -------------------------------------
+  // | n-1 (if any)   | n-2  | n-3 | n-4 |
+  // | policy         | sew  | vl  | rm  |
+  // -------------------------------------
+  return MI.getNumExplicitOperands() - RISCVII::hasVecPolicyOp(TSFlags) - 3;
+}
+
 void RISCVTargetLowering::AdjustInstrPostInstrSelection(MachineInstr &MI,
                                                         SDNode *Node) const {
+  // Add FRM dependency to vector floating-point instructions with dynamic
+  // rounding mode.
+  if (auto RoundModeIdx = getRoundModeIdx(MI)) {
+    unsigned FRMImm = MI.getOperand(*RoundModeIdx).getImm();
+    if (FRMImm == RISCVFPRndMode::DYN && !MI.readsRegister(RISCV::FRM)) {
+      MI.addOperand(MachineOperand::CreateReg(RISCV::FRM, /*isDef*/ false,
+                                              /*isImp*/ true));
+    }
+  }
+
   // Add FRM dependency to any instructions with dynamic rounding mode.
   unsigned Opc = MI.getOpcode();
   auto Idx = RISCV::getNamedOperandIdx(Opc, RISCV::OpName::frm);
