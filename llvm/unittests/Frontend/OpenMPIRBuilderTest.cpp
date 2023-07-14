@@ -5068,6 +5068,36 @@ TEST_F(OpenMPIRBuilderTest, TargetDataRegion) {
   EXPECT_FALSE(verifyModule(*M, &errs()));
 }
 
+namespace {
+
+// Some basic handling of argument mapping for the moment
+void CreateDefaultMapInfos(llvm::OpenMPIRBuilder &ompBuilder,
+                           llvm::SmallVectorImpl<llvm::Value *> &args,
+                           llvm::OpenMPIRBuilder::MapInfosTy &combinedInfo) {
+  for (auto arg : args) {
+    if (!arg->getType()->isPointerTy()) {
+      combinedInfo.BasePointers.clear();
+      combinedInfo.Pointers.clear();
+      combinedInfo.Sizes.clear();
+      combinedInfo.Types.clear();
+      combinedInfo.Names.clear();
+      return;
+    }
+    combinedInfo.BasePointers.emplace_back(arg);
+    combinedInfo.Pointers.emplace_back(arg);
+    uint32_t SrcLocStrSize;
+    combinedInfo.Names.emplace_back(ompBuilder.getOrCreateSrcLocStr(
+        "Unknown loc - stub implementation", SrcLocStrSize));
+    combinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(
+        llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_FROM |
+        llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM));
+    combinedInfo.Sizes.emplace_back(ompBuilder.Builder.getInt64(
+        ompBuilder.M.getDataLayout().getTypeAllocSize(arg->getType())));
+  }
+}
+
+} // namespace
+
 TEST_F(OpenMPIRBuilderTest, TargetRegion) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
@@ -5099,10 +5129,19 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
   Inputs.push_back(BPtr);
   Inputs.push_back(CPtr);
 
+  llvm::OpenMPIRBuilder::MapInfosTy CombinedInfos;
+  auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
+      -> llvm::OpenMPIRBuilder::MapInfosTy & {
+    CreateDefaultMapInfos(OMPBuilder, Inputs, CombinedInfos);
+    return CombinedInfos;
+  };
+
   TargetRegionEntryInfo EntryInfo("func", 42, 4711, 17);
   OpenMPIRBuilder::LocationDescription OmpLoc({Builder.saveIP(), DL});
-  Builder.restoreIP(OMPBuilder.createTarget(OmpLoc, Builder.saveIP(), EntryInfo,
-                                            -1, -1, Inputs, BodyGenCB));
+
+  Builder.restoreIP(OMPBuilder.createTarget(OmpLoc, Builder.saveIP(),
+                                            Builder.saveIP(), EntryInfo, -1, -1,
+                                            Inputs, GenMapInfoCB, BodyGenCB));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
 
@@ -5138,6 +5177,13 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
       Constant::getIntegerValue(Type::getInt32Ty(Ctx), APInt(32, 0)),
       Constant::getNullValue(Type::getInt32PtrTy(Ctx))};
 
+  llvm::OpenMPIRBuilder::MapInfosTy CombinedInfos;
+  auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
+      -> llvm::OpenMPIRBuilder::MapInfosTy & {
+    CreateDefaultMapInfos(OMPBuilder, CapturedArgs, CombinedInfos);
+    return CombinedInfos;
+  };
+
   auto BodyGenCB = [&](OpenMPIRBuilder::InsertPointTy AllocaIP,
                        OpenMPIRBuilder::InsertPointTy CodeGenIP)
       -> OpenMPIRBuilder::InsertPointTy {
@@ -5151,9 +5197,10 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
   TargetRegionEntryInfo EntryInfo("parent", /*DeviceID=*/1, /*FileID=*/2,
                                   /*Line=*/3, /*Count=*/0);
 
-  Builder.restoreIP(
-      OMPBuilder.createTarget(Loc, EntryIP, EntryInfo, /*NumTeams=*/-1,
-                              /*NumThreads=*/-1, CapturedArgs, BodyGenCB));
+  Builder.restoreIP(OMPBuilder.createTarget(
+      Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
+      /*NumThreads=*/-1, CapturedArgs, GenMapInfoCB, BodyGenCB));
+
   Builder.CreateRetVoid();
   OMPBuilder.finalize();
 

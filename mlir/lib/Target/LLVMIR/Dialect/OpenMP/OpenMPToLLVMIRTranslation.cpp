@@ -1612,6 +1612,33 @@ static bool targetOpSupported(Operation &opInst) {
   return true;
 }
 
+static void
+createDefaultMapInfos(llvm::OpenMPIRBuilder &ompBuilder,
+                      llvm::SmallVectorImpl<llvm::Value *> &args,
+                      llvm::OpenMPIRBuilder::MapInfosTy &combinedInfo) {
+  for (auto arg : args) {
+    if (!arg->getType()->isPointerTy()) {
+      // TODO: Only LLVMPointerTypes are handled.
+      combinedInfo.BasePointers.clear();
+      combinedInfo.Pointers.clear();
+      combinedInfo.Sizes.clear();
+      combinedInfo.Types.clear();
+      combinedInfo.Names.clear();
+      return;
+    }
+    combinedInfo.BasePointers.emplace_back(arg);
+    combinedInfo.Pointers.emplace_back(arg);
+    uint32_t SrcLocStrSize;
+    combinedInfo.Names.emplace_back(ompBuilder.getOrCreateSrcLocStr(
+        "Unknown loc - stub implementation", SrcLocStrSize));
+    combinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(
+        llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_FROM |
+        llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM));
+    combinedInfo.Sizes.emplace_back(ompBuilder.Builder.getInt64(
+        ompBuilder.M.getDataLayout().getTypeAllocSize(arg->getType())));
+  }
+}
+
 static LogicalResult
 convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                  LLVM::ModuleTranslation &moduleTranslation) {
@@ -1658,11 +1685,24 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
     return failure();
 
   int32_t defaultValTeams = -1;
-  int32_t defaultValThreads = -1;
+  int32_t defaultValThreads = 0;
+
+  llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
+      findAllocaInsertPoint(builder, moduleTranslation);
+
+  // TODO: Replace createDefaultMapInfo's with more complex map
+  // processing like createTargetData (also in this file) does.
+  llvm::OpenMPIRBuilder::MapInfosTy combinedInfos;
+  auto genMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
+      -> llvm::OpenMPIRBuilder::MapInfosTy & {
+    createDefaultMapInfos(*moduleTranslation.getOpenMPBuilder(), inputs,
+                          combinedInfos);
+    return combinedInfos;
+  };
 
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
-      ompLoc, builder.saveIP(), entryInfo, defaultValTeams, defaultValThreads,
-      inputs, bodyCB));
+      ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
+      defaultValThreads, inputs, genMapInfoCB, bodyCB));
 
   return bodyGenStatus;
 }
