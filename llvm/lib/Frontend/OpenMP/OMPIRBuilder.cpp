@@ -5462,7 +5462,10 @@ void OpenMPIRBuilder::OutlineInfo::collectBlocks(
 void OpenMPIRBuilder::createOffloadEntry(Constant *ID, Constant *Addr,
                                          uint64_t Size, int32_t Flags,
                                          GlobalValue::LinkageTypes) {
-  if (!Config.isGPU()) {
+  // TODO Original check was 'if (!Config.isGPU())', which is currently not
+  // initialized properly. Change into Config.isTargetDevice() temporarily to
+  // produce nvvm.annotations until Config.isGPU() is correct.
+  if (!Config.isTargetDevice()) {
     emitOffloadingEntry(ID, Addr->getName(), Size, Flags);
     return;
   }
