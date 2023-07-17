@@ -300,9 +300,6 @@ bool CodeGenAction::beginSourceFileAction() {
   // run the default passes.
   mlir::PassManager pm((*mlirModule)->getName(),
                        mlir::OpPassManager::Nesting::Implicit);
-//FIXME:This pass causes failure in the device pass with this error
-// .loc("/home/grodgers/git/trunk17.0/aomp/trunk/kernel_test/tmpf/../main.f95":6:9): 'llvm.call' op '_QPwriteindex' does not reference a symbol in the current scope
-#if 0
   // Add OpenMP-related passes
   // WARNING: These passes must be run immediately after the lowering to ensure
   // that the FIR is correct with respect to OpenMP operations/attributes.
@@ -318,7 +315,6 @@ bool CodeGenAction::beginSourceFileAction() {
       pm.addPass(fir::createOMPEarlyOutliningPass());
     pm.addPass(fir::createOMPFunctionFilteringPass());
   }
-#endif
 
   pm.enableVerifier(/*verifyPasses=*/true);
   pm.addPass(std::make_unique<Fortran::lower::VerifierPass>());
