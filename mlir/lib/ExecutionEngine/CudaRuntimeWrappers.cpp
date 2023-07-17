@@ -528,8 +528,6 @@ mgpuCreateCuSparseLtDnMat(void *dh, intptr_t rows, intptr_t cols, void *values,
                           int32_t dtp, CUstream /*stream*/) {
   assert(cusparseLt_initiated && "client did not call mgpuCreateSparseLtEnv()");
   auto dnmat_handle = reinterpret_cast<cusparseLtDnMatHandleAndData *>(dh);
-  // CusparseLt expects the descriptors to be zero-initialized.
-  memset(dnmat_handle, 0, sizeof(cusparseLtDnMatHandleAndData));
   dnmat_handle->values = values;
   auto dTp = static_cast<cudaDataType_t>(dtp);
   // Assume row-major when deciding lda.
@@ -550,8 +548,6 @@ mgpuCusparseLtCreate2To4SpMat(void *sh, intptr_t rows, intptr_t cols,
                               void *values, int32_t dtp, CUstream /*stream*/) {
   assert(cusparseLt_initiated && "client did not call mgpuCreateSparseLtEnv()");
   auto spmat_handle = reinterpret_cast<cusparseLtSpMatHandleAndData *>(sh);
-  // CusparseLt expects the descriptors to be zero-initialized.
-  memset(spmat_handle, 0, sizeof(cusparseLtSpMatHandleAndData));
   spmat_handle->values = values;
   auto dTp = static_cast<cudaDataType_t>(dtp);
   // Assume row-major when deciding lda.
@@ -571,7 +567,7 @@ mgpuDestroyCuSparseLtSpMat(void *sh, CUstream /*stream*/) {
 // and returning workspace and compressed matrices data buffer sizes.
 extern "C" MLIR_CUDA_WRAPPERS_EXPORT void
 mgpuCuSparseLtSpMMBufferSize(void *bs, int32_t ma, int32_t mb, void *a, void *b,
-                             void *c, int32_t ctp, CUstream /*stream*/) {
+                             void *c, int32_t ctp, CUstream stream) {
   assert(cusparseLt_initiated && "client did not call mgpuCreateSparseLtEnv()");
   // TODO: support more advanced settings, e.g., the input right operand is a
   // sparse matrix assuming matA is the sparse matrix
@@ -599,6 +595,25 @@ mgpuCuSparseLtSpMMBufferSize(void *bs, int32_t ma, int32_t mb, void *a, void *b,
 
   CUSPARSE_REPORT_IF_ERROR(cusparseLtMatmulPlanInit(
       &cusparseLt_env, &(matA->plan), &(matA->matmul), &(matA->alg_sel)))
+
+  // Pruning step (in-place).
+  CUSPARSE_REPORT_IF_ERROR(
+      cusparseLtSpMMAPrune(&cusparseLt_env, &(matA->matmul), matA->values,
+                           matA->values, CUSPARSELT_PRUNE_SPMMA_STRIP, stream))
+
+  // Check structure of A.
+  // Note that this adds a synchronization on the stream.
+  // TODO: Do we want that?
+  int *dvalid = (int *)mgpuMemAlloc(sizeof(int), stream);
+  CUSPARSE_REPORT_IF_ERROR(cusparseLtSpMMAPruneCheck(
+      &cusparseLt_env, &(matA->matmul), matA->values, dvalid, stream))
+  int valid = 0;
+  mgpuMemcpy(&valid, dvalid, sizeof(int), stream);
+  mgpuStreamSynchronize(stream);
+  mgpuMemFree(dvalid, stream);
+  if (valid != 0)
+    fprintf(stderr, "CUPARSE-LT: sparse matrix is not 2:4; computed results "
+                    "will be invalid\n");
 
   CUSPARSE_REPORT_IF_ERROR(cusparseLtMatmulGetWorkspace(
       &cusparseLt_env, &(matA->plan), &workspace_size_))

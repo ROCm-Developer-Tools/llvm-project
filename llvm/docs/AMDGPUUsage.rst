@@ -490,6 +490,20 @@ Every processor supports every OS ABI (see :ref:`amdgpu-os`) with the following 
                                                                         work-item                       Add product
                                                                         IDs                             names.
 
+     ``gfx1150``                 ``amdgcn``   APU   - cumode          - Architected                   *TBA*
+                                                    - wavefrontsize64   flat
+                                                                        scratch                       .. TODO::
+                                                                      - Packed
+                                                                        work-item                       Add product
+                                                                        IDs                             names.
+
+     ``gfx1151``                 ``amdgcn``   APU   - cumode          - Architected                   *TBA*
+                                                    - wavefrontsize64   flat
+                                                                        scratch                       .. TODO::
+                                                                      - Packed
+                                                                        work-item                       Add product
+                                                                        IDs                             names.
+
      =========== =============== ============ ===== ================= =============== =============== ======================
 
 .. _amdgpu-target-features:
@@ -1090,6 +1104,14 @@ The AMDGPU backend supports the following LLVM IR attributes.
                                              kernel argument that holds the completion action pointer. If this
                                              attribute is absent, then the amdgpu-no-implicitarg-ptr is also removed.
 
+     "amdgpu-lds-size"="min[,max]"           Min is the minimum number of bytes that will be allocated in the Local
+                                             Data Store at address zero. Variables are allocated within this frame
+                                             using absolute symbol metadata, primarily by the AMDGPULowerModuleLDS
+                                             pass. Optional max is the maximum number of bytes that will be allocated.
+                                             Note that min==max indicates that no further variables can be added to
+                                             the frame. This is an internal detail of how LDS variables are lowered,
+                                             language front ends should not set this attribute.
+
      ======================================= ==========================================================
 
 Calling Conventions
@@ -1481,14 +1503,14 @@ The AMDGPU backend uses the following ELF header:
      ``EF_AMDGPU_MACH_AMDGCN_GFX940``     0x040      ``gfx940``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1100``    0x041      ``gfx1100``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1013``    0x042      ``gfx1013``
-     *reserved*                           0x043      Reserved.
+     ``EF_AMDGPU_MACH_AMDGCN_GFX1150``    0x043      ``gfx1150``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1103``    0x044      ``gfx1103``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1036``    0x045      ``gfx1036``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1101``    0x046      ``gfx1101``
      ``EF_AMDGPU_MACH_AMDGCN_GFX1102``    0x047      ``gfx1102``
      *reserved*                           0x048      Reserved.
      *reserved*                           0x049      Reserved.
-     *reserved*                           0x04a      Reserved.
+     ``EF_AMDGPU_MACH_AMDGCN_GFX1151``    0x04a      ``gfx1151``
      ``EF_AMDGPU_MACH_AMDGCN_GFX941``     0x04b      ``gfx941``
      ``EF_AMDGPU_MACH_AMDGCN_GFX942``     0x04c      ``gfx942``
      ==================================== ========== =============================

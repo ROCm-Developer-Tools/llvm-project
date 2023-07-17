@@ -2108,6 +2108,36 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
     ReplaceNode(Node, Load);
     return;
   }
+  case ISD::PREFETCH:
+    unsigned Locality = Node->getConstantOperandVal(3);
+    if (Locality > 2)
+      break;
+
+    if (auto *LoadStoreMem = dyn_cast<MemSDNode>(Node)) {
+      MachineMemOperand *MMO = LoadStoreMem->getMemOperand();
+      MMO->setFlags(MachineMemOperand::MONonTemporal);
+
+      int NontemporalLevel = 0;
+      switch (Locality) {
+      case 0:
+        NontemporalLevel = 3; // NTL.ALL
+        break;
+      case 1:
+        NontemporalLevel = 1; // NTL.PALL
+        break;
+      case 2:
+        NontemporalLevel = 0; // NTL.P1
+        break;
+      default:
+        llvm_unreachable("unexpected locality value.");
+      }
+
+      if (NontemporalLevel & 0b1)
+        MMO->setFlags(MONontemporalBit0);
+      if (NontemporalLevel & 0b10)
+        MMO->setFlags(MONontemporalBit1);
+    }
+    break;
   }
 
   // Select the default instruction.
@@ -2482,7 +2512,7 @@ bool RISCVDAGToDAGISel::selectSETCC(SDValue N, ISD::CondCode ExpectedCCVal,
   SDValue LHS = N->getOperand(0);
   SDValue RHS = N->getOperand(1);
 
-  if (!LHS.getValueType().isInteger())
+  if (!LHS.getValueType().isScalarInteger())
     return false;
 
   // If the RHS side is 0, we don't need any extra instructions, return the LHS.

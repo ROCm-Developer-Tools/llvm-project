@@ -23,7 +23,16 @@ class TestCTF(TestBase):
     @skipUnlessDarwin
     def test(self):
         self.build()
+        self.do_test()
 
+    @skipTestIfFn(no_ctf_convert)
+    @skipTestIfFn(no_objcopy)
+    @skipUnlessDarwin
+    def test_compressed(self):
+        self.build(dictionary={"COMPRESS_CTF": "YES"})
+        self.do_test()
+
+    def do_test(self):
         lldbutil.run_to_name_breakpoint(self, "printf")
 
         symbol_file = self.getBuildArtifact("a.ctf")
