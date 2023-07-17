@@ -29,7 +29,6 @@ struct TargetOpMapCapturePass
   void runOnOperation() override {
     auto module = getOperation();
 
-    llvm::errs() << "enter \n";
     module.walk([&](mlir::omp::TargetOp tarOp) {
         llvm::SetVector<Value> operandSet;
         getUsedValuesDefinedAbove(tarOp.getRegion(), operandSet);
@@ -43,26 +42,6 @@ struct TargetOpMapCapturePass
             
             if (insertable)
               usedButNotCaptured.push_back(v);
-        }
-
-        llvm::errs() << "Upper Before \n";
-        tarOp.getMapUpperBoundSegmentAttr().dump();
-        for (unsigned int i = 0;
-             i < tarOp.getMapRangeUpperBoundMutable().size(); ++i) {
-            for (unsigned int j = 0;
-                 j < tarOp.getMapRangeUpperBoundMutable()[i].size(); ++j) {
-              tarOp.getMapRangeUpperBoundMutable()[i][j].dump();
-            }
-        }
-
-        llvm::errs() << "Lower Before \n";
-        tarOp.getMapLowerBoundSegmentAttr().dump();
-        for (unsigned int i = 0;
-             i < tarOp.getMapRangeLowerBoundMutable().size(); ++i) {
-            for (unsigned int j = 0;
-                 j < tarOp.getMapRangeLowerBoundMutable()[i].size(); ++j) {
-              tarOp.getMapRangeLowerBoundMutable()[i][j].dump();
-            }
         }
 
         auto lb = tarOp.getMapRangeLowerBoundMutable().getBase().first;
@@ -154,25 +133,6 @@ struct TargetOpMapCapturePass
             mlir::NamedAttribute(tarOp.getMapUpperBoundSegmentAttrName(),
                                  tarOp.getMapUpperBoundSegmentAttr()));
 
-        llvm::errs() << "Upper After \n";
-        tarOp.getMapUpperBoundSegmentAttr().dump();
-        for (unsigned int i = 0;
-             i < tarOp.getMapRangeUpperBoundMutable().size(); ++i) {
-            for (unsigned int j = 0;
-                 j < tarOp.getMapRangeUpperBoundMutable()[i].size(); ++j) {
-              tarOp.getMapRangeUpperBoundMutable()[i][j].dump();
-            }
-        }
-
-        llvm::errs() << "Lower After \n";
-        tarOp.getMapLowerBoundSegmentAttr().dump();
-        for (unsigned int i = 0;
-             i < tarOp.getMapRangeLowerBoundMutable().size(); ++i) {
-            for (unsigned int j = 0;
-                 j < tarOp.getMapRangeLowerBoundMutable()[i].size(); ++j) {
-              tarOp.getMapRangeLowerBoundMutable()[i][j].dump();
-            }
-        }
     });
   }
 };

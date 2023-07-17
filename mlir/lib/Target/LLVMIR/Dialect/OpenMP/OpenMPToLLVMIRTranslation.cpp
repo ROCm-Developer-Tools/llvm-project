@@ -1470,7 +1470,9 @@ processMapOp(llvm::IRBuilderBase &builder,
              LLVM::ModuleTranslation &moduleTranslation, DataLayout &DL,
              llvm::OpenMPIRBuilder::MapInfosTy &combinedInfo,
              const SmallVector<Value> &mapOperands, const ArrayAttr &mapTypes,
-             const DenseMap<Value, llvm::Value *> &remappedOperands =
+             const DenseMap<Value, llvm::Value *> &operandsBasePointers =
+                 DenseMap<Value, llvm::Value *>{},
+             const DenseMap<Value, llvm::Value *> &operandsPointers =
                  DenseMap<Value, llvm::Value *>{},
              const llvm::SmallVector<uint64_t> &inputSizes =
                  llvm::SmallVector<uint64_t>{}) {
@@ -1488,32 +1490,34 @@ processMapOp(llvm::IRBuilderBase &builder,
       return;
     }
 
-    llvm::Value *mapOpValue = nullptr;
-    auto mapV = remappedOperands.find(mapOp);
-    if (mapV != remappedOperands.end()) {
-      mapOpValue = mapV->second;
-      mapOpValue->dump();
-    }
+    llvm::Value *basePointer = nullptr;
+    auto mapV = operandsBasePointers.find(mapOp);
+    if (mapV != operandsBasePointers.end())
+      basePointer = mapV->second;
 
-    if (!mapOpValue)
-      mapOpValue = moduleTranslation.lookupValue(mapOp);
+    if (!basePointer)
+      basePointer = moduleTranslation.lookupValue(mapOp);
 
     if (auto *refPtr = getRefPtrIfDeclareTarget(mapOp, moduleTranslation))
       combinedInfo.BasePointers.emplace_back(refPtr);
     else
-      combinedInfo.BasePointers.emplace_back(mapOpValue);
+      combinedInfo.BasePointers.emplace_back(basePointer);
 
-    combinedInfo.Pointers.emplace_back(mapOpValue);
+    llvm::Value *pointer = nullptr;
+    mapV = operandsPointers.find(mapOp);
+    if (mapV != operandsPointers.end())
+      pointer = mapV->second;
+
+    if (!pointer)
+      pointer = moduleTranslation.lookupValue(mapOp);
+
+    combinedInfo.Pointers.emplace_back(pointer);
     combinedInfo.Names.emplace_back(
         mlir::LLVM::createMappingInformation(mapOp.getLoc(), *ompBuilder));
     combinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(
         mapTypes[index].dyn_cast<mlir::IntegerAttr>().getInt()));
-    if (inputSizes.empty()) {
-      combinedInfo.Sizes.emplace_back(
-          builder.getInt64(getSizeInBytes(DL, mapOp.getType())));
-    } else {
-      combinedInfo.Sizes.emplace_back(builder.getInt64(inputSizes[index]));
-    }
+    combinedInfo.Sizes.emplace_back(builder.getInt64(inputSizes[index]));
+
     index++;
   }
 }
@@ -1761,7 +1765,8 @@ handleDeclareTargetMapVar(llvm::SmallVector<Value> &mapOperands,
 // arguments to the kernel, based on map capture kinds which are then
 // utilised in the combinedInfo in place of the original Map value.
 static void createAlteredByCaptureMap(
-    DenseMap<Value, llvm::Value *> &remappedOperands,
+    DenseMap<Value, llvm::Value *> &operandsBasePointers,
+    DenseMap<Value, llvm::Value *> &operandsPointers,
     llvm::SmallVector<Value> &mapOperands,
     llvm::SmallVector<llvm::Value *> &inputs,
     llvm::SmallVector<llvm::Type *> &inputTypes,
@@ -1774,19 +1779,17 @@ static void createAlteredByCaptureMap(
     llvm::Value *mapOpValue = moduleTranslation.lookupValue(mapOp);
 
     // if it's a declare target or we've somehow remapped it before, skip
-    // processing it.
-    if (remappedOperands.find(mapOp) != remappedOperands.end() ||
+    // processing it. NOTE/TODO: This may be counter-productive in certain cases
+    // where a double mapping is allowed, but this requires deeper
+    // investigation.
+    if (operandsBasePointers.find(mapOp) != operandsBasePointers.end() ||
+        operandsPointers.find(mapOp) != operandsPointers.end() ||
         getRefPtrIfDeclareTarget(mapOp, moduleTranslation))
       continue;
-    // this gep isn't getting generated properly it seems, but we are also only
-    // pass remappedOperands to basepointers, which i think is wrong, it needs
-    // to pass this to the other combinedinfo arg relating to pointers, so it
-    // appears there's two problems, I'm also not sure the sizes are correct, 40
-    // seems a bit excessive, c++ is 20 i think
+
     switch (inputsCaptureKind[index]) {
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
         OMPTargetVarCaptureByRef: {
-      llvm::errs() << "triggered ByRef \n";
       // default capture case, do nothing for the moment,
       // perhaps more complex logic required in the future
       // as we extend for more complex types, clang invokes EmitLValue,
@@ -1803,17 +1806,15 @@ static void createAlteredByCaptureMap(
           if (auto intAttr = dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
             index = intAttr.getInt();
 
-        // mapOpValue->dump();
-
-        remappedOperands[mapOp] = builder.CreateGEP(
-            type, mapOpValue, builder.getInt64(index), "testname");
-        remappedOperands[mapOp]->dump();
+        // NOTE: 2D GEP required for 1D array boundary it seems
+        auto arr = std::vector<llvm::Value *>{builder.getInt64(0),
+                                              builder.getInt64(index)};
+        operandsPointers[mapOp] =
+            builder.CreateInBoundsGEP(type, mapOpValue, arr, "arrayidx");
       }
-
     } break;
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
         OMPTargetVarCaptureByCopy: {
-      llvm::errs() << "triggered ByCopy \n";
       llvm::Type *type = inputTypes[index];
       llvm::Value *newV = builder.CreateLoad(type, mapOpValue);
 
@@ -1829,9 +1830,9 @@ static void createAlteredByCaptureMap(
 
         builder.CreateStore(newV, memTempAlloc);
         newV = builder.CreateLoad(builder.getInt8PtrTy(), memTempAlloc);
-                    }
+      }
 
-      remappedOperands[mapOp] = newV;
+      operandsBasePointers[mapOp] = newV;
     } break;
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
         OMPTargetVarCaptureThis:
@@ -1910,13 +1911,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
           llvm::SmallVector<uint64_t> &inputSizes) {
         int index = 0;
         for (const auto &mapOp : mapOps) {
-          // skip over if it is a declare target, it will be mapped by the
-          // runtime as a pointer rather than an argument
-          if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation)) {
-            index++;
-            continue;
-          }
-
           // We care about the pointee type, not the pointer, however, in
           // certain cases it may just return a pointer or null which is
           // acceptable
@@ -1928,6 +1922,68 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
               underlyingType = eleType;
               type = moduleTranslation.convertType(eleType);
             }
+          }
+
+          if (auto arrayTy =
+                  underlyingType.dyn_cast_or_null<LLVM::LLVMArrayType>()) {
+            // TODO: Handle multi-dimensional ranges, the prior lowering stages
+            // should work just fine for it, but need to work out the lowering
+            // logic to LLVM IR.
+            // TODO: Might need to support dynamic range, unsure though. If we
+            // don't it could be possible to simplify the lowering from the PFT
+            // and the way the bounds are stored in the MLIR Op. Perhaps they'll
+            // already be lowered to constants by here though. Uncertain till I
+            // dig a little deeper.
+            // TODO: Move this upwards above the declare target or into a
+            // seperate function so declare targets also have a size when we
+            // give in this info. and so this is less cluttered hopefully
+            if (mapLowerBounds[index].empty() &&
+                mapUpperBounds[index].empty()) {
+              inputSizes.push_back(getSizeInBytes(dl, mapOp.getType()));
+            } else if (mapLowerBounds[index].empty() &&
+                       !mapUpperBounds[index].empty()) {
+            } else if (!mapLowerBounds[index].empty() &&
+                       mapUpperBounds[index].empty()) {
+            } else {
+
+              int lBoundCount = 0, uBoundCount = 0, elementCount = 0;
+              if (auto constOp = mlir::dyn_cast<mlir::LLVM::ConstantOp>(
+                      mapLowerBounds[index][0].getDefiningOp()))
+                if (auto intAttr =
+                        dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
+                  lBoundCount = intAttr.getInt();
+
+              if (auto constOp = mlir::dyn_cast<mlir::LLVM::ConstantOp>(
+                      mapUpperBounds[index][0].getDefiningOp()))
+                if (auto intAttr =
+                        dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
+                  uBoundCount = intAttr.getInt();
+
+              // the mapping includes both the final and initial element in
+              // Clang e.g. a bounds of 1:4 includes element 1, 2, 3 and 4.
+              // Rather than just the difference between the upper and lower
+              // bound. Unsure this is OpenMP behaviour, but we replicate it
+              // here for now.
+              elementCount = (uBoundCount - lBoundCount) + 1;
+
+              // NOTE: May need to flesh out this size retrieval more or find
+              // an alternative, getSizeInBytes returns 0 for things like i32's
+              // so it is possible it will do so for other types as well.
+              unsigned size = getSizeInBytes(dl, arrayTy.getElementType());
+              if (size == 0)
+                size = arrayTy.getElementType().getIntOrFloatBitWidth() / 8;
+
+              inputSizes.push_back(size * elementCount);
+            }
+          } else {
+            inputSizes.push_back(getSizeInBytes(dl, mapOp.getType()));
+          }
+
+          // skip over the rest if it it is a declare target, it will be mapped
+          // by the runtime as a pointer rather than an argument
+          if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation)) {
+            index++;
+            continue;
           }
 
           inputTypes.push_back(type);
@@ -1963,44 +2019,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
           }
           }
 
-          // TODO: Handle multi-dimensional ranges, the prior lowering stages
-          // should work just fine for it, but need to work out the lowering
-          // logic to LLVM IR.
-          // TODO: Might need to support dynamic range, unsure though. If we
-          // don't it could be possible to simplify the lowering from the PFT
-          // and the way the bounds are stored in the MLIR Op. Perhaps they'll
-          // already be lowered to constants by here though. Uncertain till I
-          // dig a little deeper.
-          // TODO: Move this upwards above the declare target or into a seperate
-          // function so declare targets also have a size when we give in this
-          // info. and so this is less cluttered hopefully
-          if (mapLowerBounds[index].empty() && mapUpperBounds[index].empty()) {
-            inputSizes.push_back(getSizeInBytes(dl, mapOp.getType()));
-          } else if (mapLowerBounds[index].empty() &&
-                     !mapUpperBounds[index].empty()) {
-
-          } else if (!mapLowerBounds[index].empty() &&
-                     mapUpperBounds[index].empty()) {
-          } else {
-
-            int lBoundCount = 0, uBoundCount = 0, elementCount = 0;
-            if (auto constOp = mlir::dyn_cast<mlir::LLVM::ConstantOp>(
-                    mapLowerBounds[index][0].getDefiningOp()))
-              if (auto intAttr =
-                      dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
-                lBoundCount = intAttr.getInt();
-
-            if (auto constOp = mlir::dyn_cast<mlir::LLVM::ConstantOp>(
-                    mapUpperBounds[index][0].getDefiningOp()))
-              if (auto intAttr =
-                      dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
-                uBoundCount = intAttr.getInt();
-
-            elementCount = uBoundCount - lBoundCount;
-            inputSizes.push_back(getSizeInBytes(dl, underlyingType) *
-                                 elementCount);
-          }
-
           index++;
         }
       };
@@ -2019,19 +2037,23 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   // involve generating new loads and stores, which changes the
   // MLIR value to LLVM value mapping, however, we only wish to do this
   // locally for the current function/target and also avoid altering
-  // ModuleTranslation, so we use an intermediate map.
-  DenseMap<Value, llvm::Value *> remappedOperands;
+  // ModuleTranslation, so we use these intermediate maps, not every
+  // operand will have a remapped base pointer or pointer to pass to
+  // to combined info to help generate the kernel. It currently
+  // becomes relevant in cases like bycopy, or byref range'd arrays. In
+  // the default case, we simply pass as a pointer byref.
+  DenseMap<Value, llvm::Value *> operandsBasePointers, operandsPointers;
   if (!moduleTranslation.getOpenMPBuilder()->Config.isEmbedded())
-    createAlteredByCaptureMap(remappedOperands, mapOperands, inputs, inputTypes,
-                              mapLowerBounds, inputsCaptureKind,
-                              moduleTranslation, builder);
+    createAlteredByCaptureMap(operandsBasePointers, operandsPointers,
+                              mapOperands, inputs, inputTypes, mapLowerBounds,
+                              inputsCaptureKind, moduleTranslation, builder);
 
   llvm::OpenMPIRBuilder::MapInfosTy combinedInfos;
   auto genMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
       -> llvm::OpenMPIRBuilder::MapInfosTy & {
     builder.restoreIP(codeGenIP);
     processMapOp(builder, moduleTranslation, dl, combinedInfos, mapOperands,
-                 mapTypes, remappedOperands);
+                 mapTypes, operandsBasePointers, operandsPointers, inputSizes);
     return combinedInfos;
   };
 
