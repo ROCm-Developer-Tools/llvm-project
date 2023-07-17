@@ -1036,12 +1036,12 @@ getDataOperandBaseAddr(Fortran::lower::AbstractConverter &converter,
   return symAddr;
 }
 
-void createArrayElementBounds(
+static void createArrayElementBounds(
     Fortran::lower::AbstractConverter &converter,
     Fortran::semantics::SemanticsContext &semanticsContext,
     Fortran::lower::StatementContext &stmtCtx, fir::FirOpBuilder &firOpBuilder,
     const Fortran::parser::OmpObject &ompObject,
-    mlir::Location &currentLocation, llvm::SmallVector<mlir::Value> lBounds,
+    mlir::Location &currentLocation, llvm::SmallVector<mlir::Value> &lBounds,
     llvm::SmallVector<mlir::Value> &uBounds) {
   auto *arrayElement =
       Fortran::parser::Unwrap<Fortran::parser::ArrayElement>(ompObject);
@@ -1078,9 +1078,8 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
   llvm::SmallVector<mlir::Value> mapOperands, devicePtrOperands,
       deviceAddrOperands;
   llvm::SmallVector<mlir::IntegerAttr> mapTypes;
-  llvm::SmallVector<mlir::ValueRange> mapUBounds;
-  llvm::SmallVector<mlir::ValueRange> mapLBounds;
   llvm::SmallVector<mlir::omp::VariableCaptureKindAttr> mapCaptureKinds;
+  llvm::SmallVector<llvm::SmallVector<mlir::Value>> mapUBounds, mapLBounds;
   llvm::SmallVector<mlir::Type> useDeviceTypes;
   llvm::SmallVector<mlir::Location> useDeviceLocs;
   SmallVector<const Fortran::semantics::Symbol *> useDeviceSymbols;
@@ -1093,7 +1092,6 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
       if (!boxType.getElementType().isa<fir::PointerType>())
         TODO(location, "OMPD_target_data MapOperand BoxType");
   };
-
   // Ref pointers are used rather than direct access when we
   // map a declare target link variable or declare target to
   // with USM mode.
@@ -1197,8 +1195,7 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
           if (auto *arrayElement =
                   Fortran::parser::Unwrap<Fortran::parser::ArrayElement>(
                       ompObject)) {
-            llvm::SmallVector<mlir::Value> uBounds;
-            llvm::SmallVector<mlir::Value> lBounds;
+            llvm::SmallVector<mlir::Value> uBounds, lBounds;
             createArrayElementBounds(converter, semanticsContext, stmtCtx,
                                      firOpBuilder, ompObject, currentLocation,
                                      lBounds, uBounds);
@@ -1313,11 +1310,24 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
       ArrayAttr::get(firOpBuilder.getContext(),
                      llvm::SmallVector<mlir::Attribute>{mapCaptureKinds.begin(),
                                                         mapCaptureKinds.end()});
+
+  // Need to convert to ValueRanges to pass to create target unfortunately,
+  // and value ranges are a view/ref not an owner of Values, so we can't
+  // have it be the original type of mapLBounds/mapUBounds without having
+  // some kind of other data container so the Values don't fall out of scope
+  // before the create call.
+  llvm::SmallVector<mlir::ValueRange> uBoundsRange, lBoundsRange;
+  for (auto &mapBound : mapLBounds)
+    lBoundsRange.push_back(mapBound);
+
+  for (auto &mapBound : mapUBounds)
+    uBoundsRange.push_back(mapBound);
+
   if (directive == llvm::omp::Directive::OMPD_target) {
     auto targetOp = firOpBuilder.create<omp::TargetOp>(
         currentLocation, ifClauseOperand, deviceOperand, threadLmtOperand,
         nowaitAttr, mapOperands, mapTypesArrayAttr, mapCaptureKindsArr,
-        mapUBounds, mapLBounds);
+        lBoundsRange, uBoundsRange);
     createBodyOfOp(targetOp, converter, currentLocation, *eval, &opClauseList);
   } else if (directive == llvm::omp::Directive::OMPD_target_data) {
     auto dataOp = firOpBuilder.create<omp::DataOp>(

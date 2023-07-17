@@ -1221,9 +1221,9 @@ def TargetOp : OpenMP_Op<"target",[AttrSizedOperandSegments]> {
                        Variadic<OpenMP_PointerLikeType>:$map_operands,
                        OptionalAttr<I64ArrayAttr>:$map_types,
                        OptionalAttr<VariableCaptureKindArrayAttr>:$map_capture_types,
-                       VariadicOfVariadic<AnyInteger, "map_lower_bound_segment">:$map_range_lower_bound,
+                       VariadicOfVariadic<IntLikeType, "map_lower_bound_segment">:$map_range_lower_bound,
                        DenseI32ArrayAttr:$map_lower_bound_segment,
-                       VariadicOfVariadic<AnyInteger, "map_upper_bound_segment">:$map_range_upper_bound,
+                       VariadicOfVariadic<IntLikeType, "map_upper_bound_segment">:$map_range_upper_bound,
                        DenseI32ArrayAttr:$map_upper_bound_segment);
 
   let regions = (region AnyRegion:$region);
