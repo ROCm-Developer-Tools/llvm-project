@@ -59,7 +59,8 @@ getOmpObjectSymbol(const Fortran::parser::OmpObject &ompObject) {
                         designator)) {
               sym = GetFirstName(arrayEle->base).symbol;
             } else if (const Fortran::parser::Name *name =
-                           getDesignatorNameIfDataRef(designator)) {
+                           Fortran::semantics::getDesignatorNameIfDataRef(
+                               designator)) {
               sym = name->symbol;
             }
           },
@@ -555,6 +556,11 @@ static void genObjectList(const Fortran::parser::OmpObjectList &objectList,
                           llvm::SmallVectorImpl<Value> &operands) {
   auto addOperands = [&](Fortran::lower::SymbolRef sym) {
     const mlir::Value variable = converter.getSymbolAddress(sym);
+    if (variable.getDefiningOp())
+      llvm::errs() << "There is a defining op \n";
+    else
+      llvm::errs() << "There is no defining op \n";
+
     if (variable) {
       operands.push_back(variable);
     } else {
@@ -772,7 +778,8 @@ static void createBodyOfTargetOp(
     }
     argIndex++;
   }
-  
+}
+
 // genObjectList in OpenACC may be of some interest for breaking down types
 ///  \param [in] converter - the abstract converter for the current invocation
 /// of the lowering process
@@ -1097,6 +1104,12 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
   // with USM mode.
   auto requiresReference = [&firOpBuilder](const mlir::Value &mapOp) {
     auto *op = mapOp.getDefiningOp();
+    // It's a BlockArgument, which has no defining operation, it cannot be
+    // declare target as it's origination must be a global value or a SAVE
+    // variable
+    if (!op)
+      return false;
+
     if (auto addrOp = dyn_cast<fir::AddrOfOp>(op)) {
       op = firOpBuilder.getModule().lookupSymbol(addrOp.getSymbol());
     }
@@ -1118,18 +1131,19 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
     return false;
   };
 
+  llvm::errs() << "1 \n";
+
   auto addMapClause =
       [&](const auto &mapClause, mlir::Location &location) {
         const auto &oMapType =
             std::get<std::optional<Fortran::parser::OmpMapType>>(
                 mapClause->v.t);
-        auto mapType = std::get<Fortran::parser::OmpMapType::Type>(
-            std::get<std::optional<Fortran::parser::OmpMapType>>(mapClause->v.t)
-                ->t);
+
         llvm::omp::OpenMPOffloadMappingFlags mapTypeBits =
             llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_NONE;
         // If the map type is specified, then process it else Tofrom is the
         // default.
+        llvm::errs() << "9 \n";
         if (oMapType) {
           const Fortran::parser::OmpMapType::Type &mapType =
               std::get<Fortran::parser::OmpMapType::Type>(oMapType->t);
@@ -1166,6 +1180,8 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
 
         // TODO: Add support MapTypeModifiers close, mapper, present, iterator
 
+        llvm::errs() << "10 \n";
+
         llvm::SmallVector<mlir::Value> mapOperand;
         /// Check for unsupported map operand types.
         for (const Fortran::parser::OmpObject &ompObject :
@@ -1174,8 +1190,15 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
                   ompObject))
             TODO(location, "OMPD_target_data for Structure Components");
         }
+
+        llvm::errs() << "map op size b4: " << mapOperand.size() << "\n";
+
         genObjectList(std::get<Fortran::parser::OmpObjectList>(mapClause->v.t),
                       converter, mapOperand);
+
+        llvm::errs() << "map op size after: " << mapOperand.size() << "\n";
+
+        llvm::errs() << "11 \n";
 
         for (const Fortran::parser::OmpObject &ompObject :
              std::get<Fortran::parser::OmpObjectList>(mapClause->v.t).v) {
@@ -1207,10 +1230,13 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
           }
         }
 
+        llvm::errs() << "12 \n";
+
         for (mlir::Value mapOp : mapOperand) {
           checkType(mapOp.getLoc(), mapOp.getType());
 
           llvm::omp::OpenMPOffloadMappingFlags perValMapTypeBit = mapTypeBits;
+          llvm::errs() << "12.1 \n";
 
           // TODO: Clang special cases this for several other cases (member
           // references as one example), see getMapTypeBits inside of
@@ -1221,6 +1247,8 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
           if (requiresRef)
             perValMapTypeBit |=
                 llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
+
+          llvm::errs() << "12.2 \n";
 
           // TODO: Handle cases with overlapping elements, captures and
           // composite types as generateInfoForCapture in Clang does, which
@@ -1233,17 +1261,22 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
             perValMapTypeBit |=
                 llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
 
+          llvm::errs() << "12.3 \n";
+
           mlir::IntegerAttr mapTypeAttr = firOpBuilder.getIntegerAttr(
               firOpBuilder.getI64Type(),
               static_cast<
                   std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
                   perValMapTypeBit));
 
+          llvm::errs() << "12.4 \n";
           mapOperands.push_back(mapOp);
           mapTypes.push_back(mapTypeAttr);
         }
+        llvm::errs() << "13 \n";
       };
 
+  llvm::errs() << "2 \n";
   auto addUseDeviceClause = [&](const auto &useDeviceClause, auto &operands) {
     genObjectList(useDeviceClause, converter, operands);
     for (auto &operand : operands) {
@@ -1256,6 +1289,8 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
       useDeviceSymbols.push_back(sym);
     }
   };
+
+  llvm::errs() << "3 \n";
 
   for (const Fortran::parser::OmpClause &clause : opClauseList.v) {
     mlir::Location clauseLocation = converter.genLocation(clause.source);
@@ -1301,6 +1336,8 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
     }
   }
 
+  llvm::errs() << "4 \n";
+
   llvm::SmallVector<mlir::Attribute> mapTypesAttr(mapTypes.begin(),
                                                   mapTypes.end());
   mlir::ArrayAttr mapTypesArrayAttr =
@@ -1310,6 +1347,8 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
       ArrayAttr::get(firOpBuilder.getContext(),
                      llvm::SmallVector<mlir::Attribute>{mapCaptureKinds.begin(),
                                                         mapCaptureKinds.end()});
+
+  llvm::errs() << "5 \n";
 
   // Need to convert to ValueRanges to pass to create target unfortunately,
   // and value ranges are a view/ref not an owner of Values, so we can't
@@ -1323,19 +1362,24 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
   for (auto &mapBound : mapUBounds)
     uBoundsRange.push_back(mapBound);
 
+  llvm::errs() << "6 \n";
+
   if (directive == llvm::omp::Directive::OMPD_target) {
     auto targetOp = firOpBuilder.create<omp::TargetOp>(
         currentLocation, ifClauseOperand, deviceOperand, threadLmtOperand,
         nowaitAttr, mapOperands, mapTypesArrayAttr, mapCaptureKindsArr,
         lBoundsRange, uBoundsRange);
+    llvm::errs() << "7 \n";
     createBodyOfOp(targetOp, converter, currentLocation, *eval, &opClauseList);
+    llvm::errs() << "8 \n";
   } else if (directive == llvm::omp::Directive::OMPD_target_data) {
     auto dataOp = firOpBuilder.create<omp::DataOp>(
         currentLocation, ifClauseOperand, deviceOperand, devicePtrOperands,
         deviceAddrOperands, mapOperands, mapTypesArrayAttr,
         mapCaptureKindsArr, ::llvm::ArrayRef<::mlir::ValueRange>{},
         ::llvm::ArrayRef<::mlir::ValueRange>{});
-    createBodyOfTargetOp(dataOp, converter, currentLocation, *eval, &opClauseList);
+    createBodyOfTargetOp(converter, dataOp, useDeviceTypes, useDeviceLocs,
+                         useDeviceSymbols, currentLocation);
   } else if (directive == llvm::omp::Directive::OMPD_target_enter_data) {
     firOpBuilder.create<omp::EnterDataOp>(
         currentLocation, ifClauseOperand, deviceOperand, nowaitAttr,
@@ -2429,11 +2473,11 @@ genOMP(Fortran::lower::AbstractConverter &converter,
     createBodyOfOp(taskGroupOp, converter, currentLocation, eval,
                    &opClauseList);
   } else if (blockDirective.v == llvm::omp::OMPD_target) {
-    createTargetOp(converter, opClauseList, blockDirective.v, currentLocation,
-                   &eval);
+    createTargetOp(converter, semanticsContext, opClauseList, blockDirective.v,
+                   currentLocation, &eval);
   } else if (blockDirective.v == llvm::omp::OMPD_target_data) {
-    createTargetOp(converter, opClauseList, blockDirective.v, currentLocation,
-                   &eval);
+    createTargetOp(converter, semanticsContext, opClauseList, blockDirective.v,
+                   currentLocation, &eval);
   } else {
     TODO(currentLocation, "Unhandled block directive");
   }

@@ -21,7 +21,7 @@
 #include "flang/Runtime/stop.h"
 #include "flang/Runtime/time-intrinsic.h"
 #include "flang/Semantics/tools.h"
-#include "mlir/Dialect/OpenMP/OpenMPDialect.h"
+#include "mlir/Dialect/OpenMP/IR/OpenMPDialect.h"
 #include "llvm/Support/Debug.h"
 #include <optional>
 
