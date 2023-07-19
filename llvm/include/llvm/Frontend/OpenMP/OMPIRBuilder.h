@@ -1496,6 +1496,8 @@ public:
   void emitIfClause(Value *Cond, BodyGenCallbackTy ThenGen,
                     BodyGenCallbackTy ElseGen, InsertPointTy AllocaIP = {});
 
+  void setPropertyExecutionMode(StringRef Name, bool Mode, std::vector<llvm::WeakTrackingVH> *LLVMCompilerUsed);
+
   /// Create the global variable holding the offload mappings information.
   GlobalVariable *createOffloadMaptypes(SmallVectorImpl<uint64_t> &Mappings,
                                         std::string VarName);

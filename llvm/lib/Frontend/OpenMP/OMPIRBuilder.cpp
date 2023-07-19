@@ -5027,6 +5027,25 @@ void OpenMPIRBuilder::emitIfClause(Value *Cond, BodyGenCallbackTy ThenGen,
   emitBlock(ContBlock, CurFn, /*IsFinished=*/true);
 }
 
+// Create a unique global variable to indicate the execution mode of this target
+// region. The execution mode is either 'generic', or 'spmd' depending on the
+// target directive. This variable is picked up by the offload library to setup
+// the device appropriately before kernel launch. If the execution mode is
+// 'generic', the runtime reserves one warp for the master, otherwise, all
+// warps participate in parallel work.
+void OpenMPIRBuilder::setPropertyExecutionMode(StringRef Name, bool Mode, std::vector<llvm::WeakTrackingVH> *LLVMCompilerUsed) {
+  auto *GVMode = new llvm::GlobalVariable(
+      M, llvm::Type::getInt8Ty(M.getContext()), /*isConstant=*/true,
+      llvm::GlobalValue::WeakAnyLinkage,
+      llvm::ConstantInt::get(llvm::Type::getInt8Ty(M.getContext()), Mode ? OMP_TGT_EXEC_MODE_SPMD
+                                              : OMP_TGT_EXEC_MODE_GENERIC),
+      Twine(Name, "_exec_mode"));
+  GVMode->setVisibility(llvm::GlobalVariable::ProtectedVisibility);
+  assert(!GVMode->isDeclaration() &&
+         "Only globals with definition can force usage.");
+  LLVMCompilerUsed->emplace_back(GVMode);
+}
+
 bool OpenMPIRBuilder::checkAndEmitFlushAfterAtomic(
     const LocationDescription &Loc, llvm::AtomicOrdering AO, AtomicKind AK) {
   assert(!(AO == AtomicOrdering::NotAtomic ||

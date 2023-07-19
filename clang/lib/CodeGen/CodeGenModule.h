@@ -1005,6 +1005,10 @@ public:
     return EmittedGlobalBlocks.lookup(BE);
   }
 
+  std::vector<llvm::WeakTrackingVH> *getLLVMCompilerUsed() {
+    return &LLVMCompilerUsed;
+  }
+
   /// Notes that BE's global block is available via Addr. Asserts that BE
   /// isn't already emitted.
   void setAddrOfGlobalBlock(const BlockExpr *BE, llvm::Constant *Addr);
