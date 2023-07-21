@@ -1528,7 +1528,12 @@ processMapOp(llvm::IRBuilderBase &builder,
         mlir::LLVM::createMappingInformation(mapOp.getLoc(), *ompBuilder));
     combinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(
         mapTypes[index].dyn_cast<mlir::IntegerAttr>().getInt()));
-    combinedInfo.Sizes.emplace_back(builder.getInt64(inputSizes[index]));
+
+    if (inputSizes.empty())
+      combinedInfo.Sizes.emplace_back(
+          builder.getInt64(getSizeInBytes(DL, mapOp.getType())));
+    else
+      combinedInfo.Sizes.emplace_back(builder.getInt64(inputSizes[index]));
 
     index++;
   }
@@ -1782,7 +1787,7 @@ static void createAlteredByCaptureMap(
     llvm::SmallVector<Value> &mapOperands,
     llvm::SmallVector<llvm::Value *> &inputs,
     llvm::SmallVector<llvm::Type *> &inputTypes,
-    mlir::OperandRangeRange &inputLowerBounds,
+    mlir::DenseIntElementsAttr &inputLowerBounds,
     llvm::SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
         &inputsCaptureKind,
     LLVM::ModuleTranslation &moduleTranslation, llvm::IRBuilderBase &builder) {
@@ -1802,25 +1807,38 @@ static void createAlteredByCaptureMap(
     switch (inputsCaptureKind[index]) {
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
         OMPTargetVarCaptureByRef: {
-      // default capture case, do nothing for the moment,
-      // perhaps more complex logic required in the future
-      // as we extend for more complex types, clang invokes EmitLValue,
-      // which has specialised logic for special Clang types such as user
-      // defines, so it is possible we will have to extend this for
-      // structures or other complex types.
+      // Currently handles lowerbound case, but more logic may be required.
+      // Clang invokes EmitLValue, which has specialised logic for special
+      // Clang types such as user defines, so it is possible we will have
+      // to extend this for structures or other complex types. As the general
+      // idea is that this function mimics some of the logic from Clang that
+      // we require for kernel argument passing from host -> device. The load
+      // in from kernel arguments for device is currently handled inside of the
+      // OMPIRBuilder.
+      auto isDefaultZeroRange = [](ArrayRef<int64_t> bound) {
+        if (bound.size() == 1) {
+          if (bound[0] == 0)
+            return true;
+        }
+        return false;
+      };
 
       // TODO: Handle N-dimensional array range
+      auto shape = inputLowerBounds.getShapedType();
+      assert((index < shape.getDimSize(0)) &&
+             "missing lower bound for map value");
+      ArrayRef<int64_t> lBound =
+          ArrayRef<int64_t>(&*std::next(inputLowerBounds.value_begin<int64_t>(),
+                                        index * shape.getDimSize(index + 1)),
+                            shape.getDimSize(index + 1));
+
       llvm::Type *type = inputTypes[index];
-      if (type->isArrayTy() && !inputLowerBounds[index].empty()) {
-        int index = 0;
-        if (auto constOp = mlir::dyn_cast<mlir::LLVM::ConstantOp>(
-                inputLowerBounds[index][0].getDefiningOp()))
-          if (auto intAttr = dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
-            index = intAttr.getInt();
+      if (type->isArrayTy() && !isDefaultZeroRange(lBound)) {
+        int lBVal = lBound[0];
 
         // NOTE: 2D GEP required for 1D array boundary it seems
         auto arr = std::vector<llvm::Value *>{builder.getInt64(0),
-                                              builder.getInt64(index)};
+                                              builder.getInt64(lBVal)};
         operandsPointers[mapOp] =
             builder.CreateInBoundsGEP(type, mapOpValue, arr, "arrayidx");
       }
@@ -1869,7 +1887,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   if (!targetOpSupported(opInst))
     return failure();
 
-  llvm::errs() << "Lower 1 \n";
   auto targetOp = cast<omp::TargetOp>(opInst);
   auto &targetRegion = targetOp.getRegion();
 
@@ -1877,12 +1894,12 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   ArrayAttr mapTypes = targetOp.getMapTypes().value_or(ArrayAttr{});
   ArrayAttr mapCaptures = targetOp.getMapCaptureTypes().value_or(ArrayAttr{});
-  mlir::OperandRangeRange mapUpperBounds = targetOp.getMapRangeUpperBound();
-  mlir::OperandRangeRange mapLowerBounds = targetOp.getMapRangeLowerBound();
+  mlir::DenseIntElementsAttr mapUpperBounds =
+      targetOp.getMapUpperBound().value();
+  mlir::DenseIntElementsAttr mapLowerBounds =
+      targetOp.getMapLowerBound().value();
 
   LogicalResult bodyGenStatus = success();
-
-  llvm::errs() << "Lower 2 \n";
 
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
   auto bodyCB = [&](InsertPointTy allocaIP,
@@ -1897,8 +1914,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
   StringRef parentName = opInst.getParentOfType<LLVM::LLVMFuncOp>().getName();
 
-  llvm::errs() << "Lower 3 \n";
-
   // Override parent name if early outlining function
   if (auto earlyOutlineOp = llvm::dyn_cast<mlir::omp::EarlyOutliningInterface>(
           opInst.getParentOfType<LLVM::LLVMFuncOp>().getOperation())) {
@@ -1911,8 +1926,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   if (!getTargetEntryUniqueInfo(entryInfo, targetOp, parentName))
     return failure();
 
-  llvm::errs() << "Lower 4 \n";
-
   int32_t defaultValTeams = -1;
   int32_t defaultValThreads = 0;
 
@@ -1920,12 +1933,10 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       findAllocaInsertPoint(builder, moduleTranslation);
   DataLayout dl = DataLayout(opInst.getParentOfType<ModuleOp>());
 
-  opInst.getParentOfType<ModuleOp>().dump();
-  
   auto getKernelInfo =
       [&](const SmallVector<Value> &mapOps, const ArrayAttr &mapCaptures,
-          mlir::OperandRangeRange &mapLowerBounds,
-          mlir::OperandRangeRange &mapUpperBounds,
+          mlir::DenseIntElementsAttr &mapLowerBounds,
+          mlir::DenseIntElementsAttr &mapUpperBounds,
           llvm::SmallVector<llvm::Value *> &inputs,
           llvm::SmallVector<llvm::Type *> &inputTypes,
           SmallVector<llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind>
@@ -1933,27 +1944,52 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
           llvm::SmallVector<uint64_t> &inputSizes) {
         int index = 0;
         for (const auto &mapOp : mapOps) {
-          llvm::errs() << "5.1 \n";
           // We care about the pointee type, not the pointer, however, in
           // certain cases it may just return a pointer or null which is
           // acceptable
           llvm::Type *type = moduleTranslation.convertType(mapOp.getType());
           mlir::Type underlyingType = mapOp.getType();
-          underlyingType.dump();
           if (auto pointerType =
                   llvm::dyn_cast<mlir::omp::PointerLikeType>(mapOp.getType())) {
             if (auto eleType = pointerType.getElementType()) {
-              llvm::errs() << "underlying type set again \n";
               underlyingType = eleType;
               type = moduleTranslation.convertType(eleType);
             }
           }
 
-          llvm::errs() << "5.1.1 \n";
-          underlyingType.dump();
-          llvm::errs() << "broke on dump \n";
           if (auto arrayTy =
                   underlyingType.dyn_cast_or_null<LLVM::LLVMArrayType>()) {
+            auto shapeLower = mapLowerBounds.getShapedType();
+            auto shapeUpper = mapUpperBounds.getShapedType();
+
+            assert((index < shapeLower.getDimSize(0) ||
+                    index < shapeUpper.getDimSize(0)) &&
+                   "missing bound size for map value");
+
+            ArrayRef<int64_t> lowerMapBound(
+                &*std::next(mapLowerBounds.value_begin<int64_t>(),
+                            index * shapeLower.getDimSize(index + 1)),
+                shapeLower.getDimSize(index + 1));
+
+            ArrayRef<int64_t> upperMapBound(
+                &*std::next(mapUpperBounds.value_begin<int64_t>(),
+                            index * shapeUpper.getDimSize(index + 1)),
+                shapeUpper.getDimSize(index + 1));
+
+            // TODO/FIXME: DenseIntElementsAttr cannot have an empty dimension,
+            // so we fill everyhting with at least a single dimension of value
+            // 0. But this makes it a little irritating to tell when no range is
+            // specified, perhaps there is a better way to indicate no range
+            // was provided, either a different internal type like APInt, or
+            // perhaps a way to have an optional range for each map.
+            auto isDefaultZeroRange = [](ArrayRef<int64_t> bound) {
+              if (bound.size() == 1) {
+                if (bound[0] == 0)
+                  return true;
+              }
+              return false;
+            };
+
             // TODO: Handle multi-dimensional ranges, the prior lowering stages
             // should work just fine for it, but need to work out the lowering
             // logic to LLVM IR.
@@ -1962,72 +1998,45 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
             // and the way the bounds are stored in the MLIR Op. Perhaps they'll
             // already be lowered to constants by here though. Uncertain till I
             // dig a little deeper.
-            // TODO: Move this upwards above the declare target or into a
-            // seperate function so declare targets also have a size when we
-            // give in this info. and so this is less cluttered hopefully
-            if (mapLowerBounds[index].empty() &&
-                mapUpperBounds[index].empty()) {
+            if (isDefaultZeroRange(lowerMapBound) &&
+                isDefaultZeroRange(upperMapBound)) {
               inputSizes.push_back(getSizeInBytes(dl, mapOp.getType()));
-            } else if (mapLowerBounds[index].empty() &&
-                       !mapUpperBounds[index].empty()) {
-            } else if (!mapLowerBounds[index].empty() &&
-                       mapUpperBounds[index].empty()) {
             } else {
-              llvm::errs() << "get into bounds? \n";
-              for (auto i = mapLowerBounds[index][0].use_begin();
-                   i != mapLowerBounds[index][0].use_end(); i++)
-                i->get().dump();
+              // The mapping includes both the final and initial
+              // element in Clang e.g. a bounds of 1:4 includes
+              // element 1, 2, 3 and 4. Rather than just the
+              // difference between the upper and lower bound. Unsure
+              // this is OpenMP behaviour, but we replicate it here
+              // for now.
+              unsigned uBoundCount = 0;
+              if (isDefaultZeroRange(upperMapBound)) {
+                // FIXME: This likely will not hold up for
+                // multi-dimensional arrays
+                uBoundCount = arrayTy.getNumElements();
+              } else {
+                uBoundCount = upperMapBound[0];
+              }
 
-              for (auto i = mapLowerBounds[index][0].user_begin();
-                   i != mapLowerBounds[index][0].user_end(); i++)
-                i->dump();
-              
-              llvm::errs() << "1 \n";
-              mlir::BlockArgument bArg;
-              int lBoundCount = 0, uBoundCount = 0, elementCount = 0;
-              if (auto constOp = mlir::dyn_cast<mlir::LLVM::ConstantOp>(
-                      mapLowerBounds[index][0].getDefiningOp()))
-                if (auto intAttr =
-                        dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
-                  lBoundCount = intAttr.getInt();
+              unsigned lBoundCount = lowerMapBound[0];
+              unsigned elementCount = (uBoundCount - lBoundCount) + 1;
 
-              llvm::errs() << "2 \n";
-              
-              if (auto constOp = mlir::dyn_cast<mlir::LLVM::ConstantOp>(
-                      mapUpperBounds[index][0].getDefiningOp()))
-                if (auto intAttr =
-                        dyn_cast<mlir::IntegerAttr>(constOp.getValue()))
-                  uBoundCount = intAttr.getInt();
-
-              // the mapping includes both the final and initial element in
-              // Clang e.g. a bounds of 1:4 includes element 1, 2, 3 and 4.
-              // Rather than just the difference between the upper and lower
-              // bound. Unsure this is OpenMP behaviour, but we replicate it
-              // here for now.
-              elementCount = (uBoundCount - lBoundCount) + 1;
-
-              llvm::errs() << "3 \n";
-              
               unsigned size = getSizeInBytes(dl, arrayTy.getElementType());
               if (size == 0)
                 size = arrayTy.getElementType().getIntOrFloatBitWidth() / 8;
 
-llvm::errs() << "4 \n";
               inputSizes.push_back(size * elementCount);
             }
           } else {
             inputSizes.push_back(getSizeInBytes(dl, mapOp.getType()));
           }
 
-llvm::errs() << "5.2 \n";
           // skip over the rest if it it is a declare target, it will be mapped
           // by the runtime as a pointer rather than an argument
           if (getRefPtrIfDeclareTarget(mapOp, moduleTranslation)) {
             index++;
             continue;
           }
-
-llvm::errs() << "5.3 \n";
+          
           inputTypes.push_back(type);
           inputs.push_back(moduleTranslation.lookupValue(mapOp));
 
@@ -2060,12 +2069,9 @@ llvm::errs() << "5.3 \n";
             break;
           }
           }
-llvm::errs() << "5.4 \n";
           index++;
         }
       };
-
-  llvm::errs() << "Lower 5 \n";
 
   // Collect the kernel info we need from the arguments.
   llvm::SmallVector<llvm::Value *> inputs;
@@ -2075,8 +2081,6 @@ llvm::errs() << "5.4 \n";
       inputsCaptureKind;
   getKernelInfo(mapOperands, mapCaptures, mapLowerBounds, mapUpperBounds,
                 inputs, inputTypes, inputsCaptureKind, inputSizes);
-
-  llvm::errs() << "Lower 5.5 \n";
 
   // We wish to modify some of the methods in which kernel arguments are
   // passed based on their capture type by the target region, this can
@@ -2094,8 +2098,6 @@ llvm::errs() << "5.4 \n";
                               mapOperands, inputs, inputTypes, mapLowerBounds,
                               inputsCaptureKind, moduleTranslation, builder);
 
-  llvm::errs() << "Lower 6 \n";
-
   llvm::OpenMPIRBuilder::MapInfosTy combinedInfos;
   auto genMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
       -> llvm::OpenMPIRBuilder::MapInfosTy & {
@@ -2105,19 +2107,13 @@ llvm::errs() << "5.4 \n";
     return combinedInfos;
   };
 
-  llvm::errs() << "Lower 7 \n";
-
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
       ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
       defaultValThreads, inputs, inputTypes, inputsCaptureKind, genMapInfoCB,
       bodyCB));
 
-  llvm::errs() << "Lower 8 \n";
-
   if (moduleTranslation.getOpenMPBuilder()->Config.isTargetDevice())
     handleDeclareTargetMapVar(mapOperands, moduleTranslation, builder);
-
-  llvm::errs() << "Lower 9 \n";
 
   return bodyGenStatus;
 }

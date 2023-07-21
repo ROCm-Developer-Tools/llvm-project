@@ -44,28 +44,40 @@ struct TargetOpMapCapturePass
               usedButNotCaptured.push_back(v);
         }
 
-        auto lb = tarOp.getMapRangeLowerBoundMutable().getBase().first;
-        mlir::MutableOperandRange lowerOpRange(std::move(lb));
-        std::vector<int32_t> lowerSegment;
-        for (unsigned int i = 0;
-             i < tarOp.getMapRangeLowerBoundMutable().size(); ++i)
-            lowerSegment.push_back(
-                tarOp.getMapRangeLowerBoundMutable()[i].size());
-
-        auto ub = tarOp.getMapRangeUpperBoundMutable().getBase().first;
-        mlir::MutableOperandRange upperOpRange(std::move(ub));
-        std::vector<int32_t> upperSegment;
-        for (unsigned int i = 0;
-             i < tarOp.getMapRangeUpperBoundMutable().size(); ++i)
-            upperSegment.push_back(
-                tarOp.getMapRangeUpperBoundMutable()[i].size());
-
         llvm::SmallVector<mlir::Attribute> newMapTypesAttr(tarOp.getMapTypesAttr().begin(),
                                                         tarOp.getMapTypesAttr().end());
 
         llvm::SmallVector<mlir::Attribute> newMapCapturesAttr(
             tarOp.getMapCaptureTypesAttr().begin(),
             tarOp.getMapCaptureTypesAttr().end());
+
+        auto shape = tarOp.getMapLowerBound().value().getShapedType();
+        llvm::SmallVector<int64_t> lShape, lBounds;
+        lShape.push_back(shape.getDimSize(0));
+        for (int64_t i = 0; i != shape.getDimSize(0); ++i) {
+            ArrayRef<int64_t> mapBound(
+                &*std::next(
+                    tarOp.getMapLowerBound().value().value_begin<int64_t>(),
+                    i * shape.getDimSize(i + 1)),
+                shape.getDimSize(i + 1));
+            lShape.push_back(shape.getDimSize(i + 1));
+            for (int64_t j = 0; j < shape.getDimSize(i + 1); ++j)
+              lBounds.push_back(mapBound[j]);
+        }
+
+        shape = tarOp.getMapUpperBound().value().getShapedType();
+        llvm::SmallVector<int64_t> uShape, uBounds;
+        uShape.push_back(shape.getDimSize(0));
+        for (int64_t i = 0; i != shape.getDimSize(0); ++i) {
+            ArrayRef<int64_t> mapBound(
+                &*std::next(
+                    tarOp.getMapUpperBound().value().value_begin<int64_t>(),
+                    i * shape.getDimSize(i + 1)),
+                shape.getDimSize(i + 1));
+            uShape.push_back(shape.getDimSize(i + 1));
+            for (int64_t j = 0; j < shape.getDimSize(i + 1); ++j)
+              uBounds.push_back(mapBound[j]);
+        }
 
         // NOTE: Ponter-case, unused currently as it is a WIP.
         // llvm::omp::OpenMPOffloadMappingFlags captureByThis =
@@ -106,32 +118,34 @@ struct TargetOpMapCapturePass
                     module.getContext(),
                     mlir::omp::VariableCaptureKind::ByCopy));
 
-            // implicit map has no range, but we fill in empty data for
-            // consistency in the later lowering step.
-            upperSegment.push_back(0);
-            lowerSegment.push_back(0);
-            upperOpRange.append(mlir::ValueRange{});
-            lowerOpRange.append(mlir::ValueRange{});
+            if (!lShape.empty())
+                lShape[0] += 1;
+            else
+                lShape.push_back(1);
+            lBounds.push_back(0);
+
+            if (!uShape.empty())
+                uShape[0] += 1;
+            else
+                uShape.push_back(1);
+            uBounds.push_back(0);
         }
 
         tarOp.getMapOperandsMutable().append(usedButNotCaptured);
         tarOp.setMapTypesAttr(
             ArrayAttr::get(module.getContext(), newMapTypesAttr));
-        tarOp.setMapCaptureTypesAttr(ArrayAttr::get(module.getContext(), newMapCapturesAttr));
+        tarOp.setMapCaptureTypesAttr(
+            ArrayAttr::get(module.getContext(), newMapCapturesAttr));
 
-        tarOp.setMapLowerBoundSegmentAttr(mlir::DenseI32ArrayAttr::get(
-            module->getContext(), llvm::ArrayRef<int32_t>{lowerSegment}));
-        tarOp.getMapRangeLowerBoundMutable() = mlir::MutableOperandRangeRange(
-            lowerOpRange,
-            mlir::NamedAttribute(tarOp.getMapLowerBoundSegmentAttrName(),
-                                 tarOp.getMapLowerBoundSegmentAttr()));
+        tarOp.setMapLowerBoundAttr(mlir::DenseIntElementsAttr::get(
+            mlir::VectorType::get(llvm::ArrayRef<int64_t>(lShape),
+                                  IntegerType::get(module.getContext(), 64)),
+            llvm::ArrayRef<int64_t>{lBounds}));
 
-        tarOp.setMapUpperBoundSegmentAttr(mlir::DenseI32ArrayAttr::get(
-            module->getContext(), llvm::ArrayRef<int32_t>{upperSegment}));
-        tarOp.getMapRangeUpperBoundMutable() = mlir::MutableOperandRangeRange(
-            upperOpRange,
-            mlir::NamedAttribute(tarOp.getMapUpperBoundSegmentAttrName(),
-                                 tarOp.getMapUpperBoundSegmentAttr()));
+        tarOp.setMapUpperBoundAttr(mlir::DenseIntElementsAttr::get(
+            mlir::VectorType::get(llvm::ArrayRef<int64_t>(uShape),
+                                  IntegerType::get(module.getContext(), 64)),
+            llvm::ArrayRef<int64_t>{uBounds}));
 
     });
   }

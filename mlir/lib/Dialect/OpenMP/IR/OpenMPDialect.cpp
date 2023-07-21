@@ -687,10 +687,8 @@ parseMapClause(OpAsmParser &parser,
                SmallVectorImpl<OpAsmParser::UnresolvedOperand> &map_operands,
                SmallVectorImpl<Type> &map_operand_types, ArrayAttr &map_types,
                ArrayAttr &map_capture_types,
-               SmallVectorImpl<SmallVector<OpAsmParser::UnresolvedOperand>> &map_range_lower_bound,
-               SmallVectorImpl<SmallVector<Type>> &map_range_lower_bound_types,
-               SmallVectorImpl<SmallVector<OpAsmParser::UnresolvedOperand>> &map_range_upper_bound,
-               SmallVectorImpl<SmallVector<Type>> &map_range_upper_bound_types) {
+               DenseElementsAttr &map_lower_bound,
+               DenseElementsAttr &map_upper_bound) {
   StringRef mapTypeMod;
   OpAsmParser::UnresolvedOperand arg1;
   Type arg1Type;
@@ -769,10 +767,8 @@ static void printMapClause(OpAsmPrinter &p, Operation *op,
                            OperandRange map_operands,
                            TypeRange map_operand_types, ArrayAttr map_types,
                            ArrayAttr map_capture_types,
-                           OperandRangeRange map_range_lower_bound,
-                           const TypeRangeRange &map_range_lower_bound_types,
-                           OperandRangeRange map_range_upper_bound,
-                           const TypeRangeRange &map_range_upper_bound_types) {
+                           DenseElementsAttr map_lower_bound,
+                           DenseElementsAttr map_upper_bound) {
 
   // Helper function to get bitwise AND of `value` and 'flag'
   auto bitAnd = [](int64_t value,
