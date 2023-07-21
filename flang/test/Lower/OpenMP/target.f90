@@ -131,12 +131,12 @@ subroutine omp_target_data_mt
    integer :: b(1024)
    !CHECK: %[[VAR_A:.*]] = fir.alloca !fir.array<1024xi32> {bindc_name = "a", uniq_name = "_QFomp_target_data_mtEa"}
    !CHECK: %[[VAR_B:.*]] = fir.alloca !fir.array<1024xi32> {bindc_name = "b", uniq_name = "_QFomp_target_data_mtEb"}
-   !CHECK: omp.target_data   map((tofrom -> %[[VAR_A]] : !fir.ref<!fir.array<1024xi32>>))
+   !CHECK: omp.target_data   map((ByRef, tofrom -> %[[VAR_A]] : !fir.ref<!fir.array<1024xi32>>))
    !$omp target data map(a)
    !CHECK: omp.terminator
    !$omp end target data
    !CHECK: }
-   !CHECK: omp.target_data   map((always, from -> %[[VAR_B]] : !fir.ref<!fir.array<1024xi32>>))
+   !CHECK: omp.target_data   map((always, ByRef, from -> %[[VAR_B]] : !fir.ref<!fir.array<1024xi32>>))
    !$omp target data map(always, from : b)
    !CHECK: omp.terminator
    !$omp end target data
@@ -190,7 +190,7 @@ subroutine omp_target_device_ptr
    use iso_c_binding, only : c_ptr, c_loc
    type(c_ptr) :: a
    integer, target :: b
-   !CHECK: omp.target_data map((tofrom -> %[[VAL_0:.*]] : !fir.ref<!fir.type<_QM__fortran_builtinsT__builtin_c_ptr{__address:i64}>>)) use_device_ptr(%[[VAL_0]] : !fir.ref<!fir.type<_QM__fortran_builtinsT__builtin_c_ptr{__address:i64}>>)
+   !CHECK: omp.target_data map((ByRef, tofrom -> %[[VAL_0:.*]] : !fir.ref<!fir.type<_QM__fortran_builtinsT__builtin_c_ptr{__address:i64}>>)) use_device_ptr(%[[VAL_0]] : !fir.ref<!fir.type<_QM__fortran_builtinsT__builtin_c_ptr{__address:i64}>>)
    !$omp target data map(tofrom: a) use_device_ptr(a)
    !CHECK: ^bb0(%[[VAL_1:.*]]: !fir.ref<!fir.type<_QM__fortran_builtinsT__builtin_c_ptr{__address:i64}>>):
    !CHECK: {{.*}} = fir.coordinate_of %[[VAL_1:.*]], {{.*}} : (!fir.ref<!fir.type<_QM__fortran_builtinsT__builtin_c_ptr{__address:i64}>>, !fir.field) -> !fir.ref<i64>
@@ -207,7 +207,7 @@ end subroutine omp_target_device_ptr
  !CHECK-LABEL: func.func @_QPomp_target_device_addr() {
  subroutine omp_target_device_addr
    integer, pointer :: a
-   !CHECK:   omp.target_data map((tofrom -> %[[VAL_0:.*]] : !fir.ref<!fir.box<!fir.ptr<i32>>>)) use_device_addr(%[[VAL_0]] : !fir.ref<!fir.box<!fir.ptr<i32>>>)
+   !CHECK:   omp.target_data map((ByRef, tofrom -> %[[VAL_0:.*]] : !fir.ref<!fir.box<!fir.ptr<i32>>>)) use_device_addr(%[[VAL_0]] : !fir.ref<!fir.box<!fir.ptr<i32>>>)
    !$omp target data map(tofrom: a) use_device_addr(a)
    !CHECK: ^bb0(%[[VAL_1:.*]]: !fir.ref<!fir.box<!fir.ptr<i32>>>):
    !CHECK: {{.*}} = fir.load %[[VAL_1]] : !fir.ref<!fir.box<!fir.ptr<i32>>>

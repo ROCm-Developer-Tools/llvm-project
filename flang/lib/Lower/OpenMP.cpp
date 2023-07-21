@@ -1240,34 +1240,43 @@ createTargetOp(Fortran::lower::AbstractConverter &converter,
   // have it be the original type of mapLBounds/mapUBounds without having
   // some kind of other data container so the Values don't fall out of scope
   // before the create call.
-  llvm::SmallVector<int64_t> uShape, uBounds;
-  uShape.push_back(mapUBounds.size());
-  for (auto &mapBound : mapUBounds) {
-    uShape.push_back(mapBound.size());
-    for (auto& v : mapBound)
-      uBounds.push_back(v);
+  mlir::DenseIntElementsAttr uBound{};
+  if (mapUBounds.size()) {
+    llvm::SmallVector<int64_t> uShape, uBounds;
+    uShape.push_back(mapUBounds.size());
+    for (auto &mapBound : mapUBounds) {
+      uShape.push_back(mapBound.size());
+      for (auto &v : mapBound)
+        uBounds.push_back(v);
+    }
+
+    uBound = mlir::DenseIntElementsAttr::get(
+        mlir::VectorType::get(llvm::ArrayRef<int64_t>(uShape),
+                              firOpBuilder.getI64Type()),
+        llvm::ArrayRef<int64_t>{uBounds});
   }
 
-  llvm::SmallVector<int64_t> lShape, lBounds;
-  lShape.push_back(mapUBounds.size());
-  for (auto &mapBound : mapLBounds) {
-    lShape.push_back(mapBound.size());
-    for (auto& v : mapBound)
-      lBounds.push_back(v);
+  mlir::DenseIntElementsAttr lBound{};
+  if (mapLBounds.size()) {
+    llvm::SmallVector<int64_t> lShape, lBounds;
+    lShape.push_back(mapUBounds.size());
+    for (auto &mapBound : mapLBounds) {
+      lShape.push_back(mapBound.size());
+      for (auto &v : mapBound)
+        lBounds.push_back(v);
+    }
+
+    lBound = mlir::DenseIntElementsAttr::get(
+        mlir::VectorType::get(llvm::ArrayRef<int64_t>(lShape),
+                              firOpBuilder.getI64Type()),
+        llvm::ArrayRef<int64_t>{lBounds});
   }
 
   if (directive == llvm::omp::Directive::OMPD_target) {
     auto targetOp = firOpBuilder.create<omp::TargetOp>(
         currentLocation, ifClauseOperand, deviceOperand, threadLmtOperand,
-        nowaitAttr, mapOperands, mapTypesArrayAttr, mapCaptureKindsArr,
-        mlir::DenseIntElementsAttr::get(
-            mlir::VectorType::get(llvm::ArrayRef<int64_t>(lShape),
-                                  firOpBuilder.getI64Type()),
-            llvm::ArrayRef<int64_t>{lBounds}),
-        mlir::DenseIntElementsAttr::get(
-            mlir::VectorType::get(llvm::ArrayRef<int64_t>(uShape),
-                                  firOpBuilder.getI64Type()),
-            llvm::ArrayRef<int64_t>{uBounds}));
+        nowaitAttr, mapOperands, mapTypesArrayAttr, mapCaptureKindsArr, lBound,
+        uBound);
     createBodyOfOp(targetOp, converter, currentLocation, *eval, &opClauseList);
   } else if (directive == llvm::omp::Directive::OMPD_target_data) {
     auto dataOp = firOpBuilder.create<omp::DataOp>(

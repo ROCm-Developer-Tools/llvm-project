@@ -51,34 +51,37 @@ struct TargetOpMapCapturePass
             tarOp.getMapCaptureTypesAttr().begin(),
             tarOp.getMapCaptureTypesAttr().end());
 
-        auto shape = tarOp.getMapLowerBound().value().getShapedType();
         llvm::SmallVector<int64_t> lShape, lBounds;
-        lShape.push_back(shape.getDimSize(0));
-        for (int64_t i = 0; i != shape.getDimSize(0); ++i) {
-            ArrayRef<int64_t> mapBound(
-                &*std::next(
-                    tarOp.getMapLowerBound().value().value_begin<int64_t>(),
-                    i * shape.getDimSize(i + 1)),
-                shape.getDimSize(i + 1));
-            lShape.push_back(shape.getDimSize(i + 1));
-            for (int64_t j = 0; j < shape.getDimSize(i + 1); ++j)
-              lBounds.push_back(mapBound[j]);
+        if (tarOp.getMapLowerBound().has_value()) {
+            auto shape = tarOp.getMapLowerBound().value().getShapedType();
+            lShape.push_back(shape.getDimSize(0));
+            for (int64_t i = 0; i != shape.getDimSize(0); ++i) {
+              ArrayRef<int64_t> mapBound(
+                  &*std::next(
+                      tarOp.getMapLowerBound().value().value_begin<int64_t>(),
+                      i * shape.getDimSize(i + 1)),
+                  shape.getDimSize(i + 1));
+              lShape.push_back(shape.getDimSize(i + 1));
+              for (int64_t j = 0; j < shape.getDimSize(i + 1); ++j)
+               lBounds.push_back(mapBound[j]);
+            }
         }
 
-        shape = tarOp.getMapUpperBound().value().getShapedType();
         llvm::SmallVector<int64_t> uShape, uBounds;
-        uShape.push_back(shape.getDimSize(0));
-        for (int64_t i = 0; i != shape.getDimSize(0); ++i) {
-            ArrayRef<int64_t> mapBound(
-                &*std::next(
-                    tarOp.getMapUpperBound().value().value_begin<int64_t>(),
-                    i * shape.getDimSize(i + 1)),
-                shape.getDimSize(i + 1));
-            uShape.push_back(shape.getDimSize(i + 1));
-            for (int64_t j = 0; j < shape.getDimSize(i + 1); ++j)
-              uBounds.push_back(mapBound[j]);
+        if (tarOp.getMapLowerBound().has_value()) {
+            auto shape = tarOp.getMapUpperBound().value().getShapedType();
+            uShape.push_back(shape.getDimSize(0));
+            for (int64_t i = 0; i != shape.getDimSize(0); ++i) {
+              ArrayRef<int64_t> mapBound(
+                  &*std::next(
+                      tarOp.getMapUpperBound().value().value_begin<int64_t>(),
+                      i * shape.getDimSize(i + 1)),
+                  shape.getDimSize(i + 1));
+              uShape.push_back(shape.getDimSize(i + 1));
+              for (int64_t j = 0; j < shape.getDimSize(i + 1); ++j)
+               uBounds.push_back(mapBound[j]);
+            }
         }
-
         // NOTE: Ponter-case, unused currently as it is a WIP.
         // llvm::omp::OpenMPOffloadMappingFlags captureByThis =
         //     llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TO |
@@ -86,7 +89,7 @@ struct TargetOpMapCapturePass
 
         llvm::omp::OpenMPOffloadMappingFlags literalCapture =
             llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_LITERAL;
-
+ 
         llvm::omp::OpenMPOffloadMappingFlags mapTypeBits;
         // Mimicing Map Type Generation code from CGOpenMPRuntime.cpp in Clang's
         // generateDefaultMapInfo, this is an initial 
@@ -141,12 +144,10 @@ struct TargetOpMapCapturePass
             mlir::VectorType::get(llvm::ArrayRef<int64_t>(lShape),
                                   IntegerType::get(module.getContext(), 64)),
             llvm::ArrayRef<int64_t>{lBounds}));
-
         tarOp.setMapUpperBoundAttr(mlir::DenseIntElementsAttr::get(
             mlir::VectorType::get(llvm::ArrayRef<int64_t>(uShape),
                                   IntegerType::get(module.getContext(), 64)),
             llvm::ArrayRef<int64_t>{uBounds}));
-
     });
   }
 };

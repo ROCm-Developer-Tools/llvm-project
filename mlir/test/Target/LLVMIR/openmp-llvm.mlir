@@ -2595,7 +2595,7 @@ module attributes {omp.is_target_device = true} {
 
 // CHECK-DAG: %struct.__tgt_offload_entry = type { ptr, ptr, i64, i32, i32 } 
 // CHECK-DAG: !omp_offload.info = !{!{{.*}}}
-module attributes {llvm.target_triple = "x86_64-unknown-linux-gnu", omp.is_device = #omp.isdevice<is_device = false>} {
+module attributes {llvm.target_triple = "x86_64-unknown-linux-gnu", omp.is_device = false} {
 
   // CHECK-DAG: @_QMtest_0Earray_1d = global [3 x i32] [i32 1, i32 2, i32 3]
   // CHECK-DAG: @_QMtest_0Earray_1d_decl_tgt_ref_ptr = weak global ptr @_QMtest_0Earray_1d 

@@ -767,7 +767,9 @@ convertOmpTaskgroupOp(omp::TaskGroupOp tgOp, llvm::IRBuilderBase &builder,
 static LogicalResult
 convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
                  LLVM::ModuleTranslation &moduleTranslation) {
+  llvm::errs() << "1 \n";
   auto loop = cast<omp::WsLoopOp>(opInst);
+
   // TODO: this should be in the op verifier instead.
   if (loop.getLowerBound().empty())
     return failure();
@@ -785,7 +787,7 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
         moduleTranslation.lookupValue(loop.getScheduleChunkVar());
     chunk = builder.CreateSExtOrTrunc(chunkVar, ivType);
   }
-
+  llvm::errs() << "2 \n";
   SmallVector<omp::ReductionDeclareOp> reductionDecls;
   collectReductionDecls(loop, reductionDecls);
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
@@ -807,6 +809,8 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
     }
   }
 
+  llvm::errs() << "3 \n";
+
   // Store the mapping between reduction variables and their private copies on
   // ModuleTranslation stack. It can be then recovered when translating
   // omp.reduce operations in a separate call.
@@ -826,6 +830,8 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
                                "reduction neutral element declaration region");
     builder.CreateStore(phis[0], privateReductionVariables[i]);
   }
+
+  llvm::errs() << "4 \n";
 
   // Set up the source location value for OpenMP runtime.
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
@@ -854,6 +860,8 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
     convertOmpOpRegions(loop.getRegion(), "omp.wsloop.region", builder,
                         moduleTranslation, bodyGenStatus);
   };
+
+  llvm::errs() << "5 \n";
 
   // Delegate actual loop construction to the OpenMP IRBuilder.
   // TODO: this currently assumes WsLoop is semantically similar to SCF loop,
@@ -884,6 +892,8 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
       return failure();
   }
 
+  llvm::errs() << "6 \n";
+
   // Collapse loops. Store the insertion point because LoopInfos may get
   // invalidated.
   llvm::IRBuilderBase::InsertPoint afterIP = loopInfos.front()->getAfterIP();
@@ -892,12 +902,14 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
 
   allocaIP = findAllocaInsertPoint(builder, moduleTranslation);
 
+  llvm::errs() << "7 \n";
   // TODO: Handle doacross loops when the ordered clause has a parameter.
   bool isOrdered = loop.getOrderedVal().has_value();
   std::optional<omp::ScheduleModifier> scheduleModifier =
       loop.getScheduleModifier();
   bool isSimd = loop.getSimdModifier();
 
+  llvm::errs() << "8 \n";
   ompBuilder->applyWorkshareLoop(
       ompLoc.DL, loopInfo, allocaIP, !loop.getNowait(),
       convertToScheduleKind(schedule), chunk, isSimd,
@@ -914,6 +926,7 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   if (numReductions == 0)
     return success();
 
+  llvm::errs() << "9 \n";
   // Create the reduction generators. We need to own them here because
   // ReductionInfo only accepts references to the generators.
   SmallVector<OwningReductionGen> owningReductionGens;
@@ -925,6 +938,7 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
         makeAtomicReductionGen(reductionDecls[i], builder, moduleTranslation));
   }
 
+  llvm::errs() << "10 \n";
   // Collect the reduction information.
   SmallVector<llvm::OpenMPIRBuilder::ReductionInfo> reductionInfos;
   reductionInfos.reserve(numReductions);
@@ -939,6 +953,7 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
          privateReductionVariables[i], owningReductionGens[i], atomicGen});
   }
 
+  llvm::errs() << "11 \n";
   // The call to createReductions below expects the block to have a
   // terminator. Create an unreachable instruction to serve as terminator
   // and remove it later.
@@ -953,6 +968,8 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
       ompBuilder->createBarrier(contInsertPoint, llvm::omp::OMPD_for);
   tempTerminator->eraseFromParent();
   builder.restoreIP(nextInsertionPoint);
+
+  llvm::errs() << "12 \n";
 
   return success();
 }
@@ -1815,32 +1832,35 @@ static void createAlteredByCaptureMap(
       // we require for kernel argument passing from host -> device. The load
       // in from kernel arguments for device is currently handled inside of the
       // OMPIRBuilder.
-      auto isDefaultZeroRange = [](ArrayRef<int64_t> bound) {
-        if (bound.size() == 1) {
-          if (bound[0] == 0)
-            return true;
-        }
-        return false;
-      };
-
+      //
       // TODO: Handle N-dimensional array range
-      auto shape = inputLowerBounds.getShapedType();
-      assert((index < shape.getDimSize(0)) &&
-             "missing lower bound for map value");
-      ArrayRef<int64_t> lBound =
-          ArrayRef<int64_t>(&*std::next(inputLowerBounds.value_begin<int64_t>(),
-                                        index * shape.getDimSize(index + 1)),
-                            shape.getDimSize(index + 1));
+      if (inputLowerBounds) {
+        auto isDefaultZeroRange = [](ArrayRef<int64_t> bound) {
+          if (bound.size() == 1) {
+            if (bound[0] == 0)
+              return true;
+          }
+          return false;
+        };
 
-      llvm::Type *type = inputTypes[index];
-      if (type->isArrayTy() && !isDefaultZeroRange(lBound)) {
-        int lBVal = lBound[0];
+        auto shape = inputLowerBounds.getShapedType();
+        assert((index < shape.getDimSize(0)) &&
+               "missing lower bound for map value");
+        ArrayRef<int64_t> lBound = ArrayRef<int64_t>(
+            &*std::next(inputLowerBounds.value_begin<int64_t>(),
+                        index * shape.getDimSize(index + 1)),
+            shape.getDimSize(index + 1));
 
-        // NOTE: 2D GEP required for 1D array boundary it seems
-        auto arr = std::vector<llvm::Value *>{builder.getInt64(0),
-                                              builder.getInt64(lBVal)};
-        operandsPointers[mapOp] =
-            builder.CreateInBoundsGEP(type, mapOpValue, arr, "arrayidx");
+        llvm::Type *type = inputTypes[index];
+        if (type->isArrayTy() && !isDefaultZeroRange(lBound)) {
+          int lBVal = lBound[0];
+
+          // NOTE: 2D GEP required for 1D array boundary it seems
+          auto arr = std::vector<llvm::Value *>{builder.getInt64(0),
+                                                builder.getInt64(lBVal)};
+          operandsPointers[mapOp] =
+              builder.CreateInBoundsGEP(type, mapOpValue, arr, "arrayidx");
+        }
       }
     } break;
     case llvm::OffloadEntriesInfoManager::OMPTargetVarCaptureKind::
@@ -1895,9 +1915,9 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   ArrayAttr mapTypes = targetOp.getMapTypes().value_or(ArrayAttr{});
   ArrayAttr mapCaptures = targetOp.getMapCaptureTypes().value_or(ArrayAttr{});
   mlir::DenseIntElementsAttr mapUpperBounds =
-      targetOp.getMapUpperBound().value();
+      targetOp.getMapUpperBound().value_or(mlir::DenseIntElementsAttr{});
   mlir::DenseIntElementsAttr mapLowerBounds =
-      targetOp.getMapLowerBound().value();
+      targetOp.getMapLowerBound().value_or(mlir::DenseIntElementsAttr{});
 
   LogicalResult bodyGenStatus = success();
 
@@ -2277,7 +2297,6 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
 LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
     Operation *op, llvm::IRBuilderBase &builder,
     LLVM::ModuleTranslation &moduleTranslation) const {
-
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
   return llvm::TypeSwitch<Operation *, LogicalResult>(op)

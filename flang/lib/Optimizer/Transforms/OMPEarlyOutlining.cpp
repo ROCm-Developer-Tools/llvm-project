@@ -47,17 +47,19 @@ class OMPEarlyOutliningPass
     llvm::SetVector<mlir::Value> declareTargetAddrOfNew;
     llvm::SetVector<mlir::Operation *> declareTargetclone;
     for (auto input : inputs) {
-      if (fir::AddrOfOp addressOfOp =
-              mlir::dyn_cast<fir::AddrOfOp>(input.getDefiningOp())) {
-        if (fir::GlobalOp gOp = mlir::dyn_cast<fir::GlobalOp>(
-                addressOfOp->getParentOfType<mlir::ModuleOp>().lookupSymbol(
-                    addressOfOp.getSymbol()))) {
-          if (auto declareTargetGlobal =
-                  llvm::dyn_cast<mlir::omp::DeclareTargetInterface>(
-                      gOp.getOperation())) {
-            declareTargetAddrOfOld.insert(input);
-            inputs.remove(input);
-            declareTargetclone.insert(addressOfOp);
+      if (input.getDefiningOp()) {
+        if (fir::AddrOfOp addressOfOp =
+                mlir::dyn_cast<fir::AddrOfOp>(input.getDefiningOp())) {
+          if (fir::GlobalOp gOp = mlir::dyn_cast<fir::GlobalOp>(
+                  addressOfOp->getParentOfType<mlir::ModuleOp>().lookupSymbol(
+                      addressOfOp.getSymbol()))) {
+            if (auto declareTargetGlobal =
+                    llvm::dyn_cast<mlir::omp::DeclareTargetInterface>(
+                        gOp.getOperation())) {
+              declareTargetAddrOfOld.insert(input);
+              inputs.remove(input);
+              declareTargetclone.insert(addressOfOp);
+            }
           }
         }
       }
