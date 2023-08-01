@@ -96,7 +96,7 @@ CodeGenFunction::~CodeGenFunction() {
   // time of the CodeGenModule, because we have to ensure the IR has not yet
   // been "emitted" to the outside, thus, modifications are still sensible.
   if (CGM.getLangOpts().OpenMPIRBuilder && CurFn)
-    CGM.getOpenMPRuntime().getOMPBuilder().finalize(CurFn);
+    CGM.getOpenMPRuntime().getOMPBuilder().finalizeFunction(CurFn);
 }
 
 // Map the LangOption for exception behavior into
