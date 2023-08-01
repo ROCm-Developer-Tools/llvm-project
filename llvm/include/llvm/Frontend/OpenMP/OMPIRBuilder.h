@@ -456,10 +456,14 @@ public:
 
   void setConfig(OpenMPIRBuilderConfig C) { Config = C; }
 
-  /// Finalize the underlying module, e.g., by outlining regions.
+  /// Finalize the underlying function, e.g., by outlining regions.
   /// \param Fn                    The function to be finalized. If not used,
   ///                              all functions are finalized.
-  void finalize(Function *Fn = nullptr);
+  void finalizeFunction(Function *Fn = nullptr);
+
+  /// Finalize the underlying module. Finalize all functions and create
+  /// offload metadata for the module
+  void finalizeModule();
 
   /// Add attributes known for \p FnID to \p Fn.
   void addAttributes(omp::RuntimeFunction FnID, Function &Fn);

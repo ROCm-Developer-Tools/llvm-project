@@ -464,7 +464,7 @@ ModuleTranslation::ModuleTranslation(Operation *module,
 
 ModuleTranslation::~ModuleTranslation() {
   if (ompBuilder)
-    ompBuilder->finalize();
+    ompBuilder->finalizeModule();
 }
 
 void ModuleTranslation::forgetMapping(Region &region) {
