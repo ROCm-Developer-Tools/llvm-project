@@ -191,6 +191,10 @@ def FeatureAVXVNNIINT8  : SubtargetFeature<"avxvnniint8",
                              "HasAVXVNNIINT8", "true",
                              "Enable AVX-VNNI-INT8",
                              [FeatureAVX2]>;
+def FeatureAVXVNNIINT16 : SubtargetFeature<"avxvnniint16",
+                             "HasAVXVNNIINT16", "true",
+                             "Enable AVX-VNNI-INT16",
+                             [FeatureAVX2]>;
 def FeaturePCLMUL  : SubtargetFeature<"pclmul", "HasPCLMUL", "true",
                          "Enable packed carry-less multiplication instructions",
                                [FeatureSSE2]>;
@@ -238,10 +242,19 @@ def FeatureADX     : SubtargetFeature<"adx", "HasADX", "true",
 def FeatureSHA     : SubtargetFeature<"sha", "HasSHA", "true",
                                       "Enable SHA instructions",
                                       [FeatureSSE2]>;
+def FeatureSHA512  : SubtargetFeature<"sha512", "HasSHA512", "true",
+                                      "Support SHA512 instructions",
+                                      [FeatureAVX]>;
 // Processor supports CET SHSTK - Control-Flow Enforcement Technology
 // using Shadow Stack
 def FeatureSHSTK   : SubtargetFeature<"shstk", "HasSHSTK", "true",
                        "Support CET Shadow-Stack instructions">;
+def FeatureSM3     : SubtargetFeature<"sm3", "HasSM3", "true",
+                                      "Support SM3 instructions",
+                                      [FeatureAVX]>;
+def FeatureSM4     : SubtargetFeature<"sm4", "HasSM4", "true",
+                                      "Support SM4 instructions",
+                                      [FeatureAVX]>;
 def FeaturePRFCHW  : SubtargetFeature<"prfchw", "HasPRFCHW", "true",
                                       "Support PRFCHW instructions">;
 def FeatureRDSEED  : SubtargetFeature<"rdseed", "HasRDSEED", "true",
@@ -1065,10 +1078,14 @@ def ProcessorFeatures {
 
   // Graniterapids
   list<SubtargetFeature> GNRAdditionalFeatures = [FeatureAMXFP16,
-                                                  FeaturePREFETCHI,
-                                                  FeatureAMXCOMPLEX];
+                                                  FeaturePREFETCHI];
   list<SubtargetFeature> GNRFeatures =
     !listconcat(SPRFeatures, GNRAdditionalFeatures);
+
+  // Graniterapids D
+  list<SubtargetFeature> GNRDAdditionalFeatures = [FeatureAMXCOMPLEX];
+  list<SubtargetFeature> GNRDFeatures =
+    !listconcat(GNRFeatures, GNRDAdditionalFeatures);
 
   // Atom
   list<SubtargetFeature> AtomFeatures = [FeatureX87,
@@ -1187,6 +1204,8 @@ def ProcessorFeatures {
   list<SubtargetFeature> SRFAdditionalFeatures = [FeatureCMPCCXADD,
                                                   FeatureAVXIFMA,
                                                   FeatureAVXNECONVERT,
+                                                  FeatureENQCMD,
+                                                  FeatureUINTR,
                                                   FeatureAVXVNNIINT8];
   list<SubtargetFeature> SRFFeatures =
     !listconcat(ADLFeatures, SRFAdditionalFeatures);
@@ -1195,6 +1214,14 @@ def ProcessorFeatures {
   list<SubtargetFeature> GRRAdditionalFeatures = [FeatureRAOINT];
   list<SubtargetFeature> GRRFeatures =
     !listconcat(SRFFeatures, GRRAdditionalFeatures);
+
+  // Arrowlake S
+  list<SubtargetFeature> ARLSAdditionalFeatures = [FeatureAVXVNNIINT16,
+                                                   FeatureSHA512,
+                                                   FeatureSM3,
+                                                   FeatureSM4];
+  list<SubtargetFeature> ARLSFeatures =
+    !listconcat(SRFFeatures, ARLSAdditionalFeatures);
 
   // Knights Landing
   list<SubtargetFeature> KNLFeatures = [FeatureX87,
@@ -1698,10 +1725,20 @@ def : ProcModel<"raptorlake", AlderlakePModel,
                 ProcessorFeatures.ADLFeatures, ProcessorFeatures.ADLTuning>;
 def : ProcModel<"meteorlake", AlderlakePModel,
                 ProcessorFeatures.ADLFeatures, ProcessorFeatures.ADLTuning>;
+def : ProcModel<"arrowlake", AlderlakePModel,
+                ProcessorFeatures.SRFFeatures, ProcessorFeatures.ADLTuning>;
+foreach P = ["arrowlake-s", "arrowlake_s", "lunarlake"] in {
+def : ProcModel<P, AlderlakePModel,
+                ProcessorFeatures.ARLSFeatures, ProcessorFeatures.ADLTuning>;
+}
 def : ProcModel<"graniterapids", SapphireRapidsModel,
                 ProcessorFeatures.GNRFeatures, ProcessorFeatures.SPRTuning>;
 def : ProcModel<"emeraldrapids", SapphireRapidsModel,
                 ProcessorFeatures.SPRFeatures, ProcessorFeatures.SPRTuning>;
+foreach P = ["graniterapids-d", "graniterapids_d"] in {
+def : ProcModel<P, SapphireRapidsModel,
+                ProcessorFeatures.GNRDFeatures, ProcessorFeatures.SPRTuning>;
+}
 
 // AMD CPUs.
 

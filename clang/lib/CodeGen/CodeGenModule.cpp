@@ -497,7 +497,7 @@ void CodeGenModule::addReplacement(StringRef Name, llvm::Constant *C) {
 
 void CodeGenModule::applyReplacements() {
   for (auto &I : Replacements) {
-    StringRef MangledName = I.first();
+    StringRef MangledName = I.first;
     llvm::Constant *Replacement = I.second;
     llvm::GlobalValue *Entry = GetGlobalValue(MangledName);
     if (!Entry)
@@ -1196,6 +1196,8 @@ void CodeGenModule::Release() {
     getModule().setOverrideStackAlignment(getCodeGenOpts().StackAlignment);
   if (getCodeGenOpts().SkipRaxSetup)
     getModule().addModuleFlag(llvm::Module::Override, "SkipRaxSetup", 1);
+  if (getLangOpts().RegCall4)
+    getModule().addModuleFlag(llvm::Module::Override, "RegCallv4", 1);
 
   if (getContext().getTargetInfo().getMaxTLSAlign())
     getModule().addModuleFlag(llvm::Module::Error, "MaxTLSAlign",
@@ -1707,7 +1709,10 @@ static std::string getMangledNameImpl(CodeGenModule &CGM, GlobalDecl GD,
 
     if (FD &&
         FD->getType()->castAs<FunctionType>()->getCallConv() == CC_X86RegCall) {
-      Out << "__regcall3__" << II->getName();
+      if (CGM.getLangOpts().RegCall4)
+        Out << "__regcall4__" << II->getName();
+      else
+        Out << "__regcall3__" << II->getName();
     } else if (FD && FD->hasAttr<CUDAGlobalAttr>() &&
                GD.getKernelReferenceKind() == KernelReferenceKind::Stub) {
       Out << "__device_stub__" << II->getName();
@@ -2236,7 +2241,7 @@ static bool requiresMemberFunctionPointerTypeMetadata(CodeGenModule &CGM,
          !isa<CXXDestructorDecl>(MD);
 }
 
-std::vector<const CXXRecordDecl *>
+SmallVector<const CXXRecordDecl *, 0>
 CodeGenModule::getMostBaseClasses(const CXXRecordDecl *RD) {
   llvm::SetVector<const CXXRecordDecl *> MostBases;
 
@@ -3605,6 +3610,13 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
         // Emit declaration of the must-be-emitted declare target variable.
         if (std::optional<OMPDeclareTargetDeclAttr::MapTypeTy> Res =
                 OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(VD)) {
+
+          // If this variable has external storage and doesn't require special
+          // link handling we defer to its canonical definition.
+          if (VD->hasExternalStorage() &&
+              Res != OMPDeclareTargetDeclAttr::MT_Link)
+            return;
+
           bool UnifiedMemoryEnabled =
               getOpenMPRuntime().hasRequiresUnifiedSharedMemory();
           if ((*Res == OMPDeclareTargetDeclAttr::MT_To ||
@@ -4438,13 +4450,10 @@ llvm::Constant *CodeGenModule::GetOrCreateLLVMFunction(
 /// GetAddrOfFunction - Return the address of the given function.  If Ty is
 /// non-null, then this function will use the specified type if it has to
 /// create it (this occurs when we see a definition of the function).
-llvm::Constant *CodeGenModule::GetAddrOfFunction(GlobalDecl GD,
-                                                 llvm::Type *Ty,
-                                                 bool ForVTable,
-                                                 bool DontDefer,
-                                              ForDefinition_t IsForDefinition) {
-  assert(!cast<FunctionDecl>(GD.getDecl())->isImmediateFunction() &&
-         "an immediate function should never be emitted");
+llvm::Constant *
+CodeGenModule::GetAddrOfFunction(GlobalDecl GD, llvm::Type *Ty, bool ForVTable,
+                                 bool DontDefer,
+                                 ForDefinition_t IsForDefinition) {
   // If there was no specific requested type, just convert it now.
   if (!Ty) {
     const auto *FD = cast<FunctionDecl>(GD.getDecl());
@@ -5234,7 +5243,7 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
   // Is accessible from all the threads within the grid and from the host
   // through the runtime library (cudaGetSymbolAddress() / cudaGetSymbolSize()
   // / cudaMemcpyToSymbol() / cudaMemcpyFromSymbol())."
-  if (GV && LangOpts.CUDA) {
+  if (LangOpts.CUDA) {
     if (LangOpts.CUDAIsDevice) {
       if (Linkage != llvm::GlobalValue::InternalLinkage &&
           (D->hasAttr<CUDADeviceAttr>() || D->hasAttr<CUDAConstantAttr>() ||
@@ -7152,10 +7161,8 @@ llvm::Constant *CodeGenModule::GetAddrOfRTTIDescriptor(QualType Ty,
   // Return a bogus pointer if RTTI is disabled, unless it's for EH.
   // FIXME: should we even be calling this method if RTTI is disabled
   // and it's not for EH?
-  if ((!ForEH && !getLangOpts().RTTI) || getLangOpts().CUDAIsDevice ||
-      (getLangOpts().OpenMP && getLangOpts().OpenMPIsTargetDevice &&
-       getTriple().isNVPTX()))
-    return llvm::Constant::getNullValue(Int8PtrTy);
+  if (!shouldEmitRTTI(ForEH))
+    return llvm::Constant::getNullValue(GlobalsInt8PtrTy);
 
   if (ForEH && Ty->isObjCObjectPointerType() &&
       LangOpts.ObjCRuntime.isGNUFamily())
@@ -7453,6 +7460,8 @@ void CodeGenModule::moveLazyEmissionStates(CodeGenModule *NewBuilder) {
   assert(NewBuilder->DeferredDecls.empty() &&
          "Newly created module should not have deferred decls");
   NewBuilder->DeferredDecls = std::move(DeferredDecls);
+  assert(EmittedDeferredDecls.empty() &&
+         "Still have (unmerged) EmittedDeferredDecls deferred decls");
 
   assert(NewBuilder->DeferredVTables.empty() &&
          "Newly created module should not have deferred vtables");
@@ -7467,11 +7476,6 @@ void CodeGenModule::moveLazyEmissionStates(CodeGenModule *NewBuilder) {
   NewBuilder->WeakRefReferences = std::move(WeakRefReferences);
 
   NewBuilder->TBAA = std::move(TBAA);
-
-  assert(NewBuilder->EmittedDeferredDecls.empty() &&
-         "Still have (unmerged) EmittedDeferredDecls deferred decls");
-
-  NewBuilder->EmittedDeferredDecls = std::move(EmittedDeferredDecls);
 
   NewBuilder->ABI->MangleCtx = std::move(ABI->MangleCtx);
 }

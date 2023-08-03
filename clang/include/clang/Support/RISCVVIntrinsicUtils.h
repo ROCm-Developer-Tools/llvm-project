@@ -218,6 +218,7 @@ enum ScalarTypeKind : uint8_t {
   UnsignedInteger,
   Float,
   Invalid,
+  Undefined,
 };
 
 // Exponential LMUL
@@ -240,7 +241,7 @@ class RVVType {
   friend class RVVTypeCache;
 
   BasicType BT;
-  ScalarTypeKind ScalarType = Invalid;
+  ScalarTypeKind ScalarType = Undefined;
   LMULType LMUL;
   bool IsPointer = false;
   // IsConstant indices are "int", but have the constant expression.
@@ -475,8 +476,7 @@ public:
 enum RVVRequire : uint8_t {
   RVV_REQ_None = 0,
   RVV_REQ_RV64 = 1 << 0,
-  RVV_REQ_FullMultiply = 1 << 1,
-  RVV_REQ_Xsfvcp = 1 << 2,
+  RVV_REQ_Xsfvcp = 1 << 1,
 
   LLVM_MARK_AS_BITMASK_ENUM(RVV_REQ_Xsfvcp)
 };

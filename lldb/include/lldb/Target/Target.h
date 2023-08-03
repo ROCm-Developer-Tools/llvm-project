@@ -346,9 +346,16 @@ public:
     m_use_dynamic = dynamic;
   }
 
-  const Timeout<std::micro> &GetTimeout() const { return m_timeout; }
+  const Timeout<std::micro> &GetTimeout() const {
+    assert(m_timeout && m_timeout->count() > 0);
+    return m_timeout;
+  }
 
-  void SetTimeout(const Timeout<std::micro> &timeout) { m_timeout = timeout; }
+  void SetTimeout(const Timeout<std::micro> &timeout) {
+    // Disallow setting a non-zero timeout.
+    if (timeout && timeout->count() > 0)
+      m_timeout = timeout;
+  }
 
   const Timeout<std::micro> &GetOneThreadTimeout() const {
     return m_one_thread_timeout;
@@ -1625,12 +1632,6 @@ private:
 
   Target(const Target &) = delete;
   const Target &operator=(const Target &) = delete;
-
-private:
-  void CallLocateModuleCallbackIfSet(const ModuleSpec &module_spec,
-                                     lldb::ModuleSP &module_sp,
-                                     FileSpec &symbol_file_spec,
-                                     bool &did_create_module);
 };
 
 } // namespace lldb_private

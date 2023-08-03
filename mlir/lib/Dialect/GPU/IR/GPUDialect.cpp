@@ -28,6 +28,7 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
 using namespace mlir::gpu;
@@ -42,20 +43,68 @@ int64_t GPUBlockMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getBlock());
 }
 
+bool GPUBlockMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUBlockMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
+}
+
+int64_t GPUWarpgroupMappingAttr::getMappingId() const {
+  return static_cast<int64_t>(getWarpgroup());
+}
+
+bool GPUWarpgroupMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUWarpgroupMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
+}
+
 int64_t GPUWarpMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getWarp());
 }
 
-int64_t GPULinearIdMappingAttr::getMappingId() const {
-  return static_cast<int64_t>(getLinearId());
+bool GPUWarpMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUWarpMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
 }
 
 int64_t GPUThreadMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getThread());
 }
 
+bool GPUThreadMappingAttr::isLinearMapping() const {
+  return getMappingId() >= static_cast<int64_t>(MappingId::LinearDim0);
+}
+
+int64_t GPUThreadMappingAttr::getRelativeIndex() const {
+  return isLinearMapping()
+             ? getMappingId() - static_cast<int64_t>(MappingId::LinearDim0)
+             : getMappingId();
+}
+
 int64_t GPUMemorySpaceMappingAttr::getMappingId() const {
   return static_cast<int64_t>(getAddressSpace());
+}
+
+bool GPUMemorySpaceMappingAttr::isLinearMapping() const {
+  llvm_unreachable("GPUMemorySpaceMappingAttr does not support linear mapping");
+}
+
+int64_t GPUMemorySpaceMappingAttr::getRelativeIndex() const {
+  llvm_unreachable("GPUMemorySpaceMappingAttr does not support relative index");
 }
 
 //===----------------------------------------------------------------------===//
@@ -1545,17 +1594,6 @@ void MemcpyOp::getCanonicalizationPatterns(RewritePatternSet &results,
 //===----------------------------------------------------------------------===//
 // GPU_SubgroupMmaLoadMatrixOp
 //===----------------------------------------------------------------------===//
-
-/// Return true if the last dimension of the MemRefType has unit stride. Also
-/// return true for memrefs with no strides.
-static bool isLastMemrefDimUnitStride(MemRefType type) {
-  int64_t offset;
-  SmallVector<int64_t> strides;
-  if (failed(getStridesAndOffset(type, strides, offset))) {
-    return false;
-  }
-  return strides.back() == 1;
-}
 
 LogicalResult SubgroupMmaLoadMatrixOp::verify() {
   auto srcType = getSrcMemref().getType();

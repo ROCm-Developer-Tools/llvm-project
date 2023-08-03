@@ -30,6 +30,13 @@ void PresburgerRelation::setSpace(const PresburgerSpace &oSpace) {
     disjunct.setSpaceExceptLocals(space);
 }
 
+void PresburgerRelation::insertVarInPlace(VarKind kind, unsigned pos,
+                                          unsigned num) {
+  for (IntegerRelation &cs : disjuncts)
+    cs.insertVar(kind, pos, num);
+  space.insertVar(kind, pos, num);
+}
+
 unsigned PresburgerRelation::getNumDisjuncts() const {
   return disjuncts.size();
 }
@@ -56,6 +63,24 @@ void PresburgerRelation::unionInPlace(const IntegerRelation &disjunct) {
 /// to this set.
 void PresburgerRelation::unionInPlace(const PresburgerRelation &set) {
   assert(space.isCompatible(set.getSpace()) && "Spaces should match");
+
+  if (isPlainEqual(set))
+    return;
+
+  if (isPlainEmpty()) {
+    disjuncts = set.disjuncts;
+    return;
+  }
+  if (set.isPlainEmpty())
+    return;
+
+  if (isPlainUniverse())
+    return;
+  if (set.isPlainUniverse()) {
+    disjuncts = set.disjuncts;
+    return;
+  }
+
   for (const IntegerRelation &disjunct : set.disjuncts)
     unionInPlace(disjunct);
 }
@@ -115,6 +140,26 @@ PresburgerRelation::intersect(const PresburgerRelation &set) const {
     }
   }
   return result;
+}
+
+PresburgerRelation PresburgerRelation::intersectRange(PresburgerSet &set) {
+  assert(space.getRangeSpace().isCompatible(set.getSpace()) &&
+         "Range of `this` must be compatible with range of `set`");
+
+  PresburgerRelation other = set;
+  other.insertVarInPlace(VarKind::Domain, 0, getNumDomainVars());
+  return intersect(other);
+}
+
+PresburgerRelation
+PresburgerRelation::intersectDomain(const PresburgerSet &set) {
+  assert(space.getDomainSpace().isCompatible(set.getSpace()) &&
+         "Domain of `this` must be compatible with range of `set`");
+
+  PresburgerRelation other = set;
+  other.insertVarInPlace(VarKind::Domain, 0, getNumDomainVars());
+  other.inverse();
+  return intersect(other);
 }
 
 void PresburgerRelation::inverse() {
@@ -484,6 +529,12 @@ PresburgerRelation
 PresburgerRelation::subtract(const PresburgerRelation &set) const {
   assert(space.isCompatible(set.getSpace()) && "Spaces should match");
   PresburgerRelation result(getSpace());
+
+  // If we know that the two sets are clearly equal, we can simply return the
+  // empty set.
+  if (isPlainEqual(set))
+    return result;
+
   // We compute (U_i t_i) \ (U_i set_i) as U_i (t_i \ V_i set_i).
   for (const IntegerRelation &disjunct : disjuncts)
     result.unionInPlace(getSetDifference(disjunct, set));
@@ -501,6 +552,22 @@ bool PresburgerRelation::isSubsetOf(const PresburgerRelation &set) const {
 bool PresburgerRelation::isEqual(const PresburgerRelation &set) const {
   assert(space.isCompatible(set.getSpace()) && "Spaces should match");
   return this->isSubsetOf(set) && set.isSubsetOf(*this);
+}
+
+bool PresburgerRelation::isPlainEqual(const PresburgerRelation &set) const {
+  if (!space.isCompatible(set.getSpace()))
+    return false;
+
+  if (getNumDisjuncts() != set.getNumDisjuncts())
+    return false;
+
+  // Compare each disjunct in this PresburgerRelation with the corresponding
+  // disjunct in the other PresburgerRelation.
+  for (unsigned int i = 0, n = getNumDisjuncts(); i < n; ++i) {
+    if (!getDisjunct(i).isPlainEqual(set.getDisjunct(i)))
+      return false;
+  }
+  return true;
 }
 
 /// Return true if the Presburger relation represents the universe set, false

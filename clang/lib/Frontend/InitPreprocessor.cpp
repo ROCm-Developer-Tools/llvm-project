@@ -588,12 +588,18 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
     Builder.defineMacro("__HIP_MEMORY_SCOPE_SYSTEM", "5");
     if (LangOpts.CUDAIsDevice) {
       Builder.defineMacro("__HIP_DEVICE_COMPILE__");
-      if (!TI.hasHIPImageSupport())
+      if (!TI.hasHIPImageSupport()) {
+        Builder.defineMacro("__HIP_NO_IMAGE_SUPPORT__", "1");
+        // Deprecated.
         Builder.defineMacro("__HIP_NO_IMAGE_SUPPORT", "1");
+      }
     }
     if (LangOpts.GPUDefaultStream ==
-        LangOptions::GPUDefaultStreamKind::PerThread)
+        LangOptions::GPUDefaultStreamKind::PerThread) {
+      Builder.defineMacro("__HIP_API_PER_THREAD_DEFAULT_STREAM__");
+      // Deprecated.
       Builder.defineMacro("HIP_API_PER_THREAD_DEFAULT_STREAM");
+    }
   }
 }
 
@@ -623,8 +629,10 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_constexpr_in_decltype", "201711L");
     Builder.defineMacro("__cpp_range_based_for",
                         LangOpts.CPlusPlus17 ? "201603L" : "200907");
-    Builder.defineMacro("__cpp_static_assert",
-                        LangOpts.CPlusPlus17 ? "201411L" : "200410");
+    Builder.defineMacro("__cpp_static_assert", LangOpts.CPlusPlus26 ? "202306L"
+                                               : LangOpts.CPlusPlus17
+                                                   ? "201411L"
+                                                   : "200410");
     Builder.defineMacro("__cpp_decltype", "200707L");
     Builder.defineMacro("__cpp_attributes", "200809L");
     Builder.defineMacro("__cpp_rvalue_references", "200610L");
@@ -1289,11 +1297,10 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     Builder.defineMacro("__CUDA_ARCH__");
   }
 
-  // We need to communicate this to our CUDA header wrapper, which in turn
-  // informs the proper CUDA headers of this choice.
-  if (LangOpts.CUDADeviceApproxTranscendentals || LangOpts.FastMath) {
-    Builder.defineMacro("__CLANG_CUDA_APPROX_TRANSCENDENTALS__");
-  }
+  // We need to communicate this to our CUDA/HIP header wrapper, which in turn
+  // informs the proper CUDA/HIP headers of this choice.
+  if (LangOpts.GPUDeviceApproxTranscendentals)
+    Builder.defineMacro("__CLANG_GPU_APPROX_TRANSCENDENTALS__");
 
   // Define a macro indicating that the source file is being compiled with a
   // SYCL device compiler which doesn't produce host binary.

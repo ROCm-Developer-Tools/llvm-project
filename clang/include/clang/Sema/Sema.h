@@ -1078,10 +1078,13 @@ public:
   public:
     SynthesizedFunctionScope(Sema &S, DeclContext *DC)
         : S(S), SavedContext(S, DC) {
+      auto *FD = dyn_cast<FunctionDecl>(DC);
       S.PushFunctionScope();
       S.PushExpressionEvaluationContext(
-          Sema::ExpressionEvaluationContext::PotentiallyEvaluated);
-      if (auto *FD = dyn_cast<FunctionDecl>(DC)) {
+          (FD && FD->isConsteval())
+              ? ExpressionEvaluationContext::ImmediateFunctionContext
+              : ExpressionEvaluationContext::PotentiallyEvaluated);
+      if (FD) {
         FD->setWillHaveBody(true);
         S.ExprEvalContexts.back().InImmediateFunctionContext =
             FD->isImmediateFunction();
@@ -1106,8 +1109,10 @@ public:
     ~SynthesizedFunctionScope() {
       if (PushedCodeSynthesisContext)
         S.popCodeSynthesisContext();
-      if (auto *FD = dyn_cast<FunctionDecl>(S.CurContext))
+      if (auto *FD = dyn_cast<FunctionDecl>(S.CurContext)) {
         FD->setWillHaveBody(false);
+        S.CheckImmediateEscalatingFunctionDefinition(FD, S.getCurFunction());
+      }
       S.PopExpressionEvaluationContext();
       S.PopFunctionScopeInfo();
     }
@@ -3887,8 +3892,17 @@ public:
     CCEK_TemplateArg,  ///< Value of a non-type template parameter.
     CCEK_ArrayBound,   ///< Array bound in array declarator or new-expression.
     CCEK_ExplicitBool, ///< Condition in an explicit(bool) specifier.
-    CCEK_Noexcept      ///< Condition in a noexcept(bool) specifier.
+    CCEK_Noexcept,     ///< Condition in a noexcept(bool) specifier.
+    CCEK_StaticAssertMessageSize, ///< Call to size() in a static assert
+                                  ///< message.
+    CCEK_StaticAssertMessageData, ///< Call to data() in a static assert
+                                  ///< message.
   };
+
+  ExprResult BuildConvertedConstantExpression(Expr *From, QualType T,
+                                              CCEKind CCE,
+                                              NamedDecl *Dest = nullptr);
+
   ExprResult CheckConvertedConstantExpression(Expr *From, QualType T,
                                               llvm::APSInt &Value, CCEKind CCE);
   ExprResult CheckConvertedConstantExpression(Expr *From, QualType T,
@@ -6569,11 +6583,11 @@ public:
   ExprResult CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl);
 
   bool CheckImmediateEscalatingFunctionDefinition(
-      FunctionDecl *FD, bool HasImmediateEscalatingExpression);
+      FunctionDecl *FD, const sema::FunctionScopeInfo *FSI);
 
   void MarkExpressionAsImmediateEscalating(Expr *E);
 
-  void DiagnoseImmediateEscalatingReason(const clang::FunctionDecl *FD);
+  void DiagnoseImmediateEscalatingReason(FunctionDecl *FD);
 
   bool CompleteConstructorCall(CXXConstructorDecl *Constructor,
                                QualType DeclInitType, MultiExprArg ArgsPtr,
@@ -7795,15 +7809,16 @@ public:
   void UnmarkAsLateParsedTemplate(FunctionDecl *FD);
   bool IsInsideALocalClassWithinATemplateFunction();
 
+  bool EvaluateStaticAssertMessageAsString(Expr *Message, std::string &Result,
+                                           ASTContext &Ctx,
+                                           bool ErrorOnInvalidMessage);
   Decl *ActOnStaticAssertDeclaration(SourceLocation StaticAssertLoc,
                                      Expr *AssertExpr,
                                      Expr *AssertMessageExpr,
                                      SourceLocation RParenLoc);
   Decl *BuildStaticAssertDeclaration(SourceLocation StaticAssertLoc,
-                                     Expr *AssertExpr,
-                                     StringLiteral *AssertMessageExpr,
-                                     SourceLocation RParenLoc,
-                                     bool Failed);
+                                     Expr *AssertExpr, Expr *AssertMessageExpr,
+                                     SourceLocation RParenLoc, bool Failed);
   void DiagnoseStaticAssertDetails(const Expr *E);
 
   FriendDecl *CheckFriendTypeDecl(SourceLocation LocStart,
@@ -10973,6 +10988,11 @@ public:
   bool ConstantFoldAttrArgs(const AttributeCommonInfo &CI,
                             MutableArrayRef<Expr *> Args);
 
+  /// Create an CUDALaunchBoundsAttr attribute.
+  CUDALaunchBoundsAttr *CreateLaunchBoundsAttr(const AttributeCommonInfo &CI,
+                                               Expr *MaxThreads,
+                                               Expr *MinBlocks);
+
   /// AddLaunchBoundsAttr - Adds a launch_bounds attribute to a particular
   /// declaration.
   void AddLaunchBoundsAttr(Decl *D, const AttributeCommonInfo &CI,
@@ -10989,10 +11009,20 @@ public:
   void AddXConsumedAttr(Decl *D, const AttributeCommonInfo &CI,
                         RetainOwnershipKind K, bool IsTemplateInstantiation);
 
+  /// Create an AMDGPUWavesPerEUAttr attribute.
+  AMDGPUFlatWorkGroupSizeAttr *
+  CreateAMDGPUFlatWorkGroupSizeAttr(const AttributeCommonInfo &CI, Expr *Min,
+                                    Expr *Max);
+
   /// addAMDGPUFlatWorkGroupSizeAttr - Adds an amdgpu_flat_work_group_size
   /// attribute to a particular declaration.
   void addAMDGPUFlatWorkGroupSizeAttr(Decl *D, const AttributeCommonInfo &CI,
                                       Expr *Min, Expr *Max);
+
+  /// Create an AMDGPUWavesPerEUAttr attribute.
+  AMDGPUWavesPerEUAttr *
+  CreateAMDGPUWavesPerEUAttr(const AttributeCommonInfo &CI, Expr *Min,
+                             Expr *Max);
 
   /// addAMDGPUWavePersEUAttr - Adds an amdgpu_waves_per_eu attribute to a
   /// particular declaration.
@@ -12326,6 +12356,12 @@ public:
                             ArrayRef<Expr *> VarList, SourceLocation StartLoc,
                             SourceLocation LParenLoc, SourceLocation EndLoc);
 
+  /// Called on a well-formed 'ompx_attribute' clause.
+  OMPClause *ActOnOpenMPXAttributeClause(ArrayRef<const Attr *> Attrs,
+                                         SourceLocation StartLoc,
+                                         SourceLocation LParenLoc,
+                                         SourceLocation EndLoc);
+
   /// The kind of conversion being performed.
   enum CheckedConversionKind {
     /// An implicit conversion.
@@ -12679,6 +12715,8 @@ public:
   QualType CheckBitwiseOperands( // C99 6.5.[10...12]
       ExprResult &LHS, ExprResult &RHS, SourceLocation Loc,
       BinaryOperatorKind Opc);
+  void diagnoseLogicalInsteadOfBitwise(Expr *Op1, Expr *Op2, SourceLocation Loc,
+                                       BinaryOperatorKind Opc);
   QualType CheckLogicalOperands( // C99 6.5.[13,14]
     ExprResult &LHS, ExprResult &RHS, SourceLocation Loc,
     BinaryOperatorKind Opc);

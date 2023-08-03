@@ -617,6 +617,11 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
                                 PluginName + Suffix,
                             Plugin);
     CmdArgs.push_back(Args.MakeArgString(Twine(PluginPrefix) + Plugin));
+  } else {
+    // Tell LLD to find and use .llvm.lto section in regular relocatable object
+    // files
+    if (Args.hasArg(options::OPT_ffat_lto_objects))
+      CmdArgs.push_back("--fat-lto-objects");
   }
 
   const char *PluginOptPrefix = IsOSAIX ? "-bplugin_opt:" : "-plugin-opt=";
@@ -666,8 +671,11 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
     CmdArgs.push_back(Args.MakeArgString(
         Twine(PluginOptPrefix) + "dwo_dir=" + Output.getFilename() + "_dwo"));
 
-  if (IsThinLTO)
+  if (IsThinLTO && !IsOSAIX)
     CmdArgs.push_back(Args.MakeArgString(Twine(PluginOptPrefix) + "thinlto"));
+  else if (IsThinLTO && IsOSAIX)
+    CmdArgs.push_back(Args.MakeArgString(Twine("-bdbg:thinlto")));
+
 
   StringRef Parallelism = getLTOParallelism(Args, D);
   if (!Parallelism.empty())

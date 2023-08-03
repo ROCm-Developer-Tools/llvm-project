@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "DependencyInfo.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/BinaryFormat/Magic.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Object/ArchiveWriter.h"
@@ -23,6 +24,7 @@
 #include "llvm/Option/Option.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/LLVMDriver.h"
 #include "llvm/Support/LineIterator.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/VirtualFileSystem.h"
@@ -30,6 +32,7 @@
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TextAPI/Architecture.h"
+#include <cstdlib>
 #include <map>
 #include <type_traits>
 
@@ -554,7 +557,7 @@ checkForDuplicates(const MembersPerArchitectureMap &MembersPerArch) {
   for (const auto &M : MembersPerArch) {
     ArrayRef<NewArchiveMember> Members = M.second.getMembers();
     ArrayRef<StringRef> Files = M.second.getFiles();
-    StringMap<std::vector<StringRef>> MembersToFiles;
+    MapVector<StringRef, SmallVector<StringRef, 1>> MembersToFiles;
     for (auto Iterators = std::make_pair(Members.begin(), Files.begin());
          Iterators.first != Members.end();
          ++Iterators.first, ++Iterators.second) {
@@ -565,12 +568,11 @@ checkForDuplicates(const MembersPerArchitectureMap &MembersPerArch) {
 
     std::string ErrorData;
     raw_string_ostream ErrorStream(ErrorData);
-    for (const auto &MemberToFile : MembersToFiles) {
-      if (MemberToFile.getValue().size() > 1) {
-        ErrorStream << "file '" << MemberToFile.getKey().str()
-                    << "' was specified multiple times.\n";
+    for (const auto &[Key, Value] : MembersToFiles) {
+      if (Value.size() > 1) {
+        ErrorStream << "file '" << Key << "' was specified multiple times.\n";
 
-        for (StringRef OriginalFile : MemberToFile.getValue())
+        for (StringRef OriginalFile : Value)
           ErrorStream << "in: " << OriginalFile.str() << '\n';
 
         ErrorStream << '\n';
@@ -733,7 +735,7 @@ static Expected<Config> parseCommandLine(int Argc, char **Argv) {
   return C;
 }
 
-int main(int Argc, char **Argv) {
+int llvm_libtool_darwin_main(int Argc, char **Argv, const llvm::ToolContext &) {
   InitLLVM X(Argc, Argv);
   Expected<Config> ConfigOrErr = parseCommandLine(Argc, Argv);
   if (!ConfigOrErr) {
@@ -760,4 +762,5 @@ int main(int Argc, char **Argv) {
     }
     break;
   }
+  return EXIT_SUCCESS;
 }

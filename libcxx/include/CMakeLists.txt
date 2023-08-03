@@ -95,6 +95,7 @@ set(files
   __algorithm/pstl_is_partitioned.h
   __algorithm/pstl_merge.h
   __algorithm/pstl_replace.h
+  __algorithm/pstl_sort.h
   __algorithm/pstl_stable_sort.h
   __algorithm/pstl_transform.h
   __algorithm/push_heap.h
@@ -248,6 +249,7 @@ set(files
   __bit/countr.h
   __bit/endian.h
   __bit/has_single_bit.h
+  __bit/invert_if.h
   __bit/popcount.h
   __bit/rotate.h
   __bit_reference
@@ -414,6 +416,7 @@ set(files
   __functional/unary_negate.h
   __functional/weak_result_type.h
   __fwd/array.h
+  __fwd/bit_reference.h
   __fwd/fstream.h
   __fwd/get.h
   __fwd/hash.h
@@ -465,6 +468,7 @@ set(files
   __iterator/permutable.h
   __iterator/prev.h
   __iterator/projected.h
+  __iterator/ranges_iterator_traits.h
   __iterator/readable_traits.h
   __iterator/reverse_access.h
   __iterator/reverse_iterator.h
@@ -477,11 +481,31 @@ set(files
   __locale_dir/locale_base_api/bsd_locale_defaults.h
   __locale_dir/locale_base_api/bsd_locale_fallbacks.h
   __locale_dir/locale_base_api/locale_guard.h
+  __math/abs.h
+  __math/copysign.h
+  __math/error_functions.h
+  __math/exponential_functions.h
+  __math/fdim.h
+  __math/fma.h
+  __math/gamma.h
+  __math/hyperbolic_functions.h
+  __math/hypot.h
+  __math/inverse_hyperbolic_functions.h
+  __math/inverse_trigonometric_functions.h
+  __math/logarithms.h
+  __math/min_max.h
+  __math/modulo.h
+  __math/remainder.h
+  __math/roots.h
+  __math/rounding_functions.h
+  __math/traits.h
+  __math/trigonometric_functions.h
   __mbstate_t.h
   __mdspan/default_accessor.h
   __mdspan/extents.h
   __mdspan/layout_left.h
   __mdspan/layout_right.h
+  __mdspan/mdspan.h
   __memory/addressof.h
   __memory/align.h
   __memory/aligned_alloc.h
@@ -636,6 +660,7 @@ set(files
   __ranges/rbegin.h
   __ranges/ref_view.h
   __ranges/rend.h
+  __ranges/repeat_view.h
   __ranges/reverse_view.h
   __ranges/single_view.h
   __ranges/size.h
@@ -643,11 +668,13 @@ set(files
   __ranges/subrange.h
   __ranges/take_view.h
   __ranges/take_while_view.h
+  __ranges/to.h
   __ranges/transform_view.h
   __ranges/view_interface.h
   __ranges/views.h
   __ranges/zip_view.h
   __split_buffer
+  __std_clang_module
   __std_mbstate_t.h
   __stop_token/atomic_unique_lock.h
   __stop_token/intrusive_list_view.h

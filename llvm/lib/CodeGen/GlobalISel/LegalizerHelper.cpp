@@ -119,8 +119,7 @@ LegalizerHelper::legalizeInstrStep(MachineInstr &MI,
 
   MIRBuilder.setInstrAndDebugLoc(MI);
 
-  if (MI.getOpcode() == TargetOpcode::G_INTRINSIC ||
-      MI.getOpcode() == TargetOpcode::G_INTRINSIC_W_SIDE_EFFECTS)
+  if (isa<GIntrinsic>(MI))
     return LI.legalizeIntrinsic(*this, MI) ? Legalized : UnableToLegalize;
   auto Step = LI.getAction(MI, MRI);
   switch (Step.Action) {
@@ -4946,6 +4945,19 @@ LegalizerHelper::moreElementsVector(MachineInstr &MI, unsigned TypeIdx,
   case TargetOpcode::G_TRUNC: {
     Observer.changingInstr(MI);
     moreElementsVectorSrc(MI, MoreTy, 1);
+    moreElementsVectorDst(MI, MoreTy, 0);
+    Observer.changedInstr(MI);
+    return Legalized;
+  }
+  case TargetOpcode::G_FPTRUNC:
+  case TargetOpcode::G_FPEXT: {
+    if (TypeIdx != 0)
+      return UnableToLegalize;
+    Observer.changingInstr(MI);
+    LLT SrcTy = LLT::fixed_vector(
+        MoreTy.getNumElements(),
+        MRI.getType(MI.getOperand(1).getReg()).getElementType());
+    moreElementsVectorSrc(MI, SrcTy, 1);
     moreElementsVectorDst(MI, MoreTy, 0);
     Observer.changedInstr(MI);
     return Legalized;

@@ -4355,16 +4355,23 @@ def FMOVS0 : Pseudo<(outs FPR32:$Rd), (ins), [(set f32:$Rd, (fpimm0))]>,
 def FMOVD0 : Pseudo<(outs FPR64:$Rd), (ins), [(set f64:$Rd, (fpimm0))]>,
     Sched<[WriteF]>;
 }
+
 // Similarly add aliases
 def : InstAlias<"fmov $Rd, #0.0", (FMOVWHr FPR16:$Rd, WZR), 0>,
     Requires<[HasFullFP16]>;
 def : InstAlias<"fmov $Rd, #0.0", (FMOVWSr FPR32:$Rd, WZR), 0>;
 def : InstAlias<"fmov $Rd, #0.0", (FMOVXDr FPR64:$Rd, XZR), 0>;
 
-// Pattern for FP16 immediates
+def : Pat<(bf16 fpimm0),
+          (FMOVH0)>;
+
+// Pattern for FP16 and BF16 immediates
 let Predicates = [HasFullFP16] in {
   def : Pat<(f16 fpimm:$in),
-    (FMOVWHr (MOVi32imm (bitcast_fpimm_to_i32 f16:$in)))>;
+            (FMOVWHr (MOVi32imm (bitcast_fpimm_to_i32 f16:$in)))>;
+
+  def : Pat<(bf16 fpimm:$in),
+            (FMOVWHr (MOVi32imm (bitcast_fpimm_to_i32 bf16:$in)))>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -4617,6 +4624,11 @@ let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 defm FMOV : FPMoveImmediate<"fmov">;
 }
 
+let Predicates = [HasFullFP16] in {
+  def : Pat<(bf16 fpimmbf16:$in),
+            (FMOVHi (fpimm16XForm bf16:$in))>;
+}
+
 //===----------------------------------------------------------------------===//
 // Advanced SIMD two vector instructions.
 //===----------------------------------------------------------------------===//
@@ -4690,11 +4702,16 @@ defm FCVTL  : SIMDFPWidenTwoVector<0, 0, 0b10111, "fcvtl">;
 def : Pat<(v4f32 (int_aarch64_neon_vcvthf2fp (v4i16 V64:$Rn))),
           (FCVTLv4i16 V64:$Rn)>;
 def : Pat<(v4f32 (int_aarch64_neon_vcvthf2fp (extract_subvector (v8i16 V128:$Rn),
-                                                              (i64 4)))),
+                                                                (i64 4)))),
           (FCVTLv8i16 V128:$Rn)>;
-def : Pat<(v2f64 (any_fpextend (v2f32 V64:$Rn))), (FCVTLv2i32 V64:$Rn)>;
-
-def : Pat<(v4f32 (any_fpextend (v4f16 V64:$Rn))), (FCVTLv4i16 V64:$Rn)>;
+def : Pat<(v2f64 (any_fpextend (v2f32 V64:$Rn))),
+          (FCVTLv2i32 V64:$Rn)>;
+def : Pat<(v2f64 (any_fpextend (v2f32 (extract_high_v4f32 (v4f32 V128:$Rn))))),
+          (FCVTLv4i32 V128:$Rn)>;
+def : Pat<(v4f32 (any_fpextend (v4f16 V64:$Rn))),
+          (FCVTLv4i16 V64:$Rn)>;
+def : Pat<(v4f32 (any_fpextend (v4f16 (extract_high_v8f16 (v8f16 V128:$Rn))))),
+          (FCVTLv8i16 V128:$Rn)>;
 
 defm FCVTMS : SIMDTwoVectorFPToInt<0,0,0b11011, "fcvtms",int_aarch64_neon_fcvtms>;
 defm FCVTMU : SIMDTwoVectorFPToInt<1,0,0b11011, "fcvtmu",int_aarch64_neon_fcvtmu>;

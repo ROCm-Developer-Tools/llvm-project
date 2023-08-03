@@ -200,7 +200,7 @@ public:
 
   /// The maximum number of bytes of a vector register we can vectorize
   /// the accesses safely with.
-  uint64_t getMaxSafeDepDistBytes() { return MaxSafeDepDistBytes; }
+  uint64_t getMaxSafeDepDistBytes() const { return MaxSafeDepDistBytes; }
 
   /// Return the number of elements that are safe to operate on
   /// simultaneously, multiplied by the size of the element in bits.
@@ -591,7 +591,6 @@ public:
   /// Returns true if value \p V is loop invariant.
   bool isInvariant(Value *V) const;
 
-  uint64_t getMaxSafeDepDistBytes() const { return MaxSafeDepDistBytes; }
   unsigned getNumStores() const { return NumStores; }
   unsigned getNumLoads() const { return NumLoads;}
 

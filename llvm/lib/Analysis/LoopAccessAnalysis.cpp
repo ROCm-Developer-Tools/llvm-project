@@ -232,6 +232,9 @@ void RuntimePointerChecking::insert(Loop *Lp, Value *Ptr, const SCEV *PtrExpr,
       ScEnd = SE->getUMaxExpr(AR->getStart(), ScEnd);
     }
   }
+  assert(SE->isLoopInvariant(ScStart, Lp) && "ScStart needs to be invariant");
+  assert(SE->isLoopInvariant(ScEnd, Lp)&& "ScEnd needs to be invariant");
+
   // Add the size of the pointed element to ScEnd.
   auto &DL = Lp->getHeader()->getModule()->getDataLayout();
   Type *IdxTy = DL.getIndexType(Ptr->getType());
@@ -1470,10 +1473,6 @@ std::optional<int> llvm::getPointersDiff(Type *ElemTyA, Value *PtrA,
                                          ScalarEvolution &SE, bool StrictCheck,
                                          bool CheckType) {
   assert(PtrA && PtrB && "Expected non-nullptr pointers.");
-  assert(cast<PointerType>(PtrA->getType())
-             ->isOpaqueOrPointeeTypeMatches(ElemTyA) && "Wrong PtrA type");
-  assert(cast<PointerType>(PtrB->getType())
-             ->isOpaqueOrPointeeTypeMatches(ElemTyB) && "Wrong PtrB type");
 
   // Make sure that A and B are different pointers.
   if (PtrA == PtrB)
@@ -2193,17 +2192,17 @@ void LoopAccessInfo::analyzeLoop(AAResults *AA, LoopInfo *LI,
       if (HasComplexMemInst)
         continue;
 
+      // Many math library functions read the rounding mode. We will only
+      // vectorize a loop if it contains known function calls that don't set
+      // the flag. Therefore, it is safe to ignore this read from memory.
+      auto *Call = dyn_cast<CallInst>(&I);
+      if (Call && getVectorIntrinsicIDForCall(Call, TLI))
+        continue;
+
       // If this is a load, save it. If this instruction can read from memory
       // but is not a load, then we quit. Notice that we don't handle function
       // calls that read or write.
       if (I.mayReadFromMemory()) {
-        // Many math library functions read the rounding mode. We will only
-        // vectorize a loop if it contains known function calls that don't set
-        // the flag. Therefore, it is safe to ignore this read from memory.
-        auto *Call = dyn_cast<CallInst>(&I);
-        if (Call && getVectorIntrinsicIDForCall(Call, TLI))
-          continue;
-
         // If the function has an explicit vectorized counterpart, we can safely
         // assume that it can be vectorized.
         if (Call && !Call->isNoBuiltin() && Call->getCalledFunction() &&

@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutor.h"
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutorImpl.h"
 #include "llvm/CodeGen/GlobalISel/GISelKnownBits.h"
+#include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/MIPatternMatch.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -268,10 +269,10 @@ bool AMDGPUPostLegalizerCombinerImpl::matchRcpSqrtToRsq(
 
   auto getRcpSrc = [=](const MachineInstr &MI) {
     MachineInstr *ResMI = nullptr;
-    if (MI.getOpcode() == TargetOpcode::G_INTRINSIC &&
-        MI.getIntrinsicID() == Intrinsic::amdgcn_rcp)
-      ResMI = MRI.getVRegDef(MI.getOperand(2).getReg());
-
+    if (auto *GI = dyn_cast<GIntrinsic>(&MI)) {
+      if (GI->is(Intrinsic::amdgcn_rcp))
+        ResMI = MRI.getVRegDef(MI.getOperand(2).getReg());
+    }
     return ResMI;
   };
 
@@ -287,7 +288,7 @@ bool AMDGPUPostLegalizerCombinerImpl::matchRcpSqrtToRsq(
   // rcp(sqrt(x))
   if ((RcpSrcMI = getRcpSrc(MI)) && (SqrtSrcMI = getSqrtSrc(*RcpSrcMI))) {
     MatchInfo = [SqrtSrcMI, &MI](MachineIRBuilder &B) {
-      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)}, false)
+      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)})
           .addUse(SqrtSrcMI->getOperand(0).getReg())
           .setMIFlags(MI.getFlags());
     };
@@ -297,7 +298,7 @@ bool AMDGPUPostLegalizerCombinerImpl::matchRcpSqrtToRsq(
   // sqrt(rcp(x))
   if ((SqrtSrcMI = getSqrtSrc(MI)) && (RcpSrcMI = getRcpSrc(*SqrtSrcMI))) {
     MatchInfo = [RcpSrcMI, &MI](MachineIRBuilder &B) {
-      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)}, false)
+      B.buildIntrinsic(Intrinsic::amdgcn_rsq, {MI.getOperand(0)})
           .addUse(RcpSrcMI->getOperand(0).getReg())
           .setMIFlags(MI.getFlags());
     };

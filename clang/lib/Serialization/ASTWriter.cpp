@@ -200,7 +200,9 @@ std::set<const FileEntry *> GetAffectingModuleMaps(const Preprocessor &PP,
     CB(F);
     FileID FID = SourceMgr.translateFile(F);
     SourceLocation Loc = SourceMgr.getIncludeLoc(FID);
-    while (Loc.isValid()) {
+    // The include location of inferred module maps can point into the header
+    // file that triggered the inferring. Cut off the walk if that's the case.
+    while (Loc.isValid() && isModuleMap(SourceMgr.getFileCharacteristic(Loc))) {
       FID = SourceMgr.getFileID(Loc);
       CB(*SourceMgr.getFileEntryRefForID(FID));
       Loc = SourceMgr.getIncludeLoc(FID);
@@ -209,11 +211,18 @@ std::set<const FileEntry *> GetAffectingModuleMaps(const Preprocessor &PP,
 
   auto ProcessModuleOnce = [&](const Module *M) {
     for (const Module *Mod = M; Mod; Mod = Mod->Parent)
-      if (ProcessedModules.insert(Mod).second)
+      if (ProcessedModules.insert(Mod).second) {
+        auto Insert = [&](FileEntryRef F) { ModuleMaps.insert(F); };
+        // The containing module map is affecting, because it's being pointed
+        // into by Module::DefinitionLoc.
+        if (auto ModuleMapFile = MM.getContainingModuleMapFile(Mod))
+          ForIncludeChain(*ModuleMapFile, Insert);
+        // For inferred modules, the module map that allowed inferring is not in
+        // the include chain of the virtual containing module map file. It did
+        // affect the compilation, though.
         if (auto ModuleMapFile = MM.getModuleMapFileForUniquing(Mod))
-          ForIncludeChain(*ModuleMapFile, [&](FileEntryRef F) {
-            ModuleMaps.insert(F);
-          });
+          ForIncludeChain(*ModuleMapFile, Insert);
+      }
   };
 
   for (const Module *CurrentModule : ModulesToProcess) {
@@ -2687,6 +2696,7 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // ID
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Parent
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 4)); // Kind
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // Definition location
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // IsFramework
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // IsExplicit
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // IsSystem
@@ -2787,12 +2797,16 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
       ParentID = SubmoduleIDs[Mod->Parent];
     }
 
+    uint64_t DefinitionLoc =
+        SourceLocationEncoding::encode(getAdjustedLocation(Mod->DefinitionLoc));
+
     // Emit the definition of the block.
     {
       RecordData::value_type Record[] = {SUBMODULE_DEFINITION,
                                          ID,
                                          ParentID,
                                          (RecordData::value_type)Mod->Kind,
+                                         DefinitionLoc,
                                          Mod->IsFramework,
                                          Mod->IsExplicit,
                                          Mod->IsSystem,
@@ -7155,6 +7169,13 @@ void OMPClauseWriter::VisitOMPDoacrossClause(OMPDoacrossClause *C) {
     Record.AddStmt(VE);
   for (unsigned I = 0, E = C->getNumLoops(); I < E; ++I)
     Record.AddStmt(C->getLoopData(I));
+}
+
+void OMPClauseWriter::VisitOMPXAttributeClause(OMPXAttributeClause *C) {
+  Record.AddAttributes(C->getAttrs());
+  Record.AddSourceLocation(C->getBeginLoc());
+  Record.AddSourceLocation(C->getLParenLoc());
+  Record.AddSourceLocation(C->getEndLoc());
 }
 
 void ASTRecordWriter::writeOMPTraitInfo(const OMPTraitInfo *TI) {

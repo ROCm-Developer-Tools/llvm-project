@@ -556,6 +556,12 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::STACKSAVE, MVT::Other, Expand);
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
 
+  // Lowering Funnel Shifts to EXTR
+  setOperationAction(ISD::FSHR, MVT::i32, Custom);
+  setOperationAction(ISD::FSHR, MVT::i64, Custom);
+  setOperationAction(ISD::FSHL, MVT::i32, Custom);
+  setOperationAction(ISD::FSHL, MVT::i64, Custom);
+
   if (Subtarget->isTargetWindows())
     setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i64, Custom);
   else
@@ -1091,6 +1097,7 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
 
     if (Subtarget->hasFullFP16()) {
       setOperationAction(ISD::ConstantFP, MVT::f16, Legal);
+      setOperationAction(ISD::ConstantFP, MVT::bf16, Legal);
 
       setOperationAction(ISD::SINT_TO_FP, MVT::v8i8, Custom);
       setOperationAction(ISD::UINT_TO_FP, MVT::v8i8, Custom);
@@ -2352,7 +2359,6 @@ const char *AArch64TargetLowering::getTargetNodeName(unsigned Opcode) const {
     MAKE_CASE(AArch64ISD::BICi)
     MAKE_CASE(AArch64ISD::ORRi)
     MAKE_CASE(AArch64ISD::BSP)
-    MAKE_CASE(AArch64ISD::EXTR)
     MAKE_CASE(AArch64ISD::ZIP1)
     MAKE_CASE(AArch64ISD::ZIP2)
     MAKE_CASE(AArch64ISD::UZP1)
@@ -5797,6 +5803,30 @@ static SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) {
   return SDValue();
 }
 
+// Treat FSHR with constant shifts as legal operation, otherwise it is expanded
+// FSHL is converted to FSHR before deciding what to do with it
+static SDValue LowerFunnelShift(SDValue Op, SelectionDAG &DAG) {
+  SDValue Shifts = Op.getOperand(2);
+  // Check if the shift amount is a constant
+  // If opcode is FSHL, convert it to FSHR
+  if (auto *ShiftNo = dyn_cast<ConstantSDNode>(Shifts)) {
+    SDLoc DL(Op);
+    MVT VT = Op.getSimpleValueType();
+
+    if (Op.getOpcode() == ISD::FSHL) {
+      unsigned int NewShiftNo =
+          VT.getFixedSizeInBits() - ShiftNo->getZExtValue();
+      return DAG.getNode(
+          ISD::FSHR, DL, VT, Op.getOperand(0), Op.getOperand(1),
+          DAG.getConstant(NewShiftNo, DL, Shifts.getValueType()));
+    } else if (Op.getOpcode() == ISD::FSHR) {
+      return Op;
+    }
+  }
+
+  return SDValue();
+}
+
 SDValue AArch64TargetLowering::LowerOperation(SDValue Op,
                                               SelectionDAG &DAG) const {
   LLVM_DEBUG(dbgs() << "Custom lowering: ");
@@ -6106,6 +6136,9 @@ SDValue AArch64TargetLowering::LowerOperation(SDValue Op,
 
     return Result;
   }
+  case ISD::FSHL:
+  case ISD::FSHR:
+    return LowerFunnelShift(Op, DAG);
   }
 }
 
@@ -9757,7 +9790,7 @@ bool AArch64TargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
     IsLegal = AArch64_AM::getFP64Imm(ImmInt) != -1 || Imm.isPosZero();
   else if (VT == MVT::f32)
     IsLegal = AArch64_AM::getFP32Imm(ImmInt) != -1 || Imm.isPosZero();
-  else if (VT == MVT::f16)
+  else if (VT == MVT::f16 || VT == MVT::bf16)
     IsLegal =
         (Subtarget->hasFullFP16() && AArch64_AM::getFP16Imm(ImmInt) != -1) ||
         Imm.isPosZero();
@@ -14273,6 +14306,16 @@ bool AArch64TargetLowering::shouldSinkOperands(
       if (isSplatShuffle(II->getOperand(1)))
         Ops.push_back(&II->getOperandUse(1));
       return !Ops.empty();
+    case Intrinsic::aarch64_neon_fmlal:
+    case Intrinsic::aarch64_neon_fmlal2:
+    case Intrinsic::aarch64_neon_fmlsl:
+    case Intrinsic::aarch64_neon_fmlsl2:
+      // Sink splats for index lane variants
+      if (isSplatShuffle(II->getOperand(1)))
+        Ops.push_back(&II->getOperandUse(1));
+      if (isSplatShuffle(II->getOperand(2)))
+        Ops.push_back(&II->getOperandUse(2));
+      return !Ops.empty();
     case Intrinsic::aarch64_sve_ptest_first:
     case Intrinsic::aarch64_sve_ptest_last:
       if (auto *IIOp = dyn_cast<IntrinsicInst>(II->getOperand(0)))
@@ -16668,70 +16711,6 @@ static SDValue performFDivCombine(SDNode *N, SelectionDAG &DAG,
                      DAG.getConstant(C, DL, MVT::i32));
 }
 
-/// An EXTR instruction is made up of two shifts, ORed together. This helper
-/// searches for and classifies those shifts.
-static bool findEXTRHalf(SDValue N, SDValue &Src, uint32_t &ShiftAmount,
-                         bool &FromHi) {
-  if (N.getOpcode() == ISD::SHL)
-    FromHi = false;
-  else if (N.getOpcode() == ISD::SRL)
-    FromHi = true;
-  else
-    return false;
-
-  if (!isa<ConstantSDNode>(N.getOperand(1)))
-    return false;
-
-  ShiftAmount = N->getConstantOperandVal(1);
-  Src = N->getOperand(0);
-  return true;
-}
-
-/// EXTR instruction extracts a contiguous chunk of bits from two existing
-/// registers viewed as a high/low pair. This function looks for the pattern:
-/// <tt>(or (shl VAL1, \#N), (srl VAL2, \#RegWidth-N))</tt> and replaces it
-/// with an EXTR. Can't quite be done in TableGen because the two immediates
-/// aren't independent.
-static SDValue tryCombineToEXTR(SDNode *N,
-                                TargetLowering::DAGCombinerInfo &DCI) {
-  SelectionDAG &DAG = DCI.DAG;
-  SDLoc DL(N);
-  EVT VT = N->getValueType(0);
-
-  assert(N->getOpcode() == ISD::OR && "Unexpected root");
-
-  if (VT != MVT::i32 && VT != MVT::i64)
-    return SDValue();
-
-  SDValue LHS;
-  uint32_t ShiftLHS = 0;
-  bool LHSFromHi = false;
-  if (!findEXTRHalf(N->getOperand(0), LHS, ShiftLHS, LHSFromHi))
-    return SDValue();
-
-  SDValue RHS;
-  uint32_t ShiftRHS = 0;
-  bool RHSFromHi = false;
-  if (!findEXTRHalf(N->getOperand(1), RHS, ShiftRHS, RHSFromHi))
-    return SDValue();
-
-  // If they're both trying to come from the high part of the register, they're
-  // not really an EXTR.
-  if (LHSFromHi == RHSFromHi)
-    return SDValue();
-
-  if (ShiftLHS + ShiftRHS != VT.getSizeInBits())
-    return SDValue();
-
-  if (LHSFromHi) {
-    std::swap(LHS, RHS);
-    std::swap(ShiftLHS, ShiftRHS);
-  }
-
-  return DAG.getNode(AArch64ISD::EXTR, DL, VT, LHS, RHS,
-                     DAG.getConstant(ShiftRHS, DL, MVT::i64));
-}
-
 static SDValue tryCombineToBSL(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
                                const AArch64TargetLowering &TLI) {
   EVT VT = N->getValueType(0);
@@ -16914,10 +16893,6 @@ static SDValue performORCombine(SDNode *N, TargetLowering::DAGCombinerInfo &DCI,
 
   if (!DAG.getTargetLoweringInfo().isTypeLegal(VT))
     return SDValue();
-
-  // Attempt to form an EXTR from (or (shl VAL1, #N), (srl VAL2, #RegWidth-N))
-  if (SDValue Res = tryCombineToEXTR(N, DCI))
-    return Res;
 
   if (SDValue Res = tryCombineToBSL(N, DCI, TLI))
     return Res;
@@ -22107,15 +22082,19 @@ static SDValue performDUPCombine(SDNode *N,
   // 128bit vector version.
   if (VT.is64BitVector() && DCI.isAfterLegalizeDAG()) {
     EVT LVT = VT.getDoubleNumVectorElementsVT(*DCI.DAG.getContext());
-    if (SDNode *LN = DCI.DAG.getNodeIfExists(
-            N->getOpcode(), DCI.DAG.getVTList(LVT), {N->getOperand(0)})) {
+    SmallVector<SDValue> Ops(N->ops());
+    if (SDNode *LN = DCI.DAG.getNodeIfExists(N->getOpcode(),
+                                             DCI.DAG.getVTList(LVT), Ops)) {
       SDLoc DL(N);
       return DCI.DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, VT, SDValue(LN, 0),
                              DCI.DAG.getConstant(0, DL, MVT::i64));
     }
   }
 
-  return performPostLD1Combine(N, DCI, false);
+  if (N->getOpcode() == AArch64ISD::DUP)
+    return performPostLD1Combine(N, DCI, false);
+
+  return SDValue();
 }
 
 /// Get rid of unnecessary NVCASTs (that don't change the type).
@@ -23043,6 +23022,10 @@ SDValue AArch64TargetLowering::PerformDAGCombine(SDNode *N,
   case AArch64ISD::CSEL:
     return performCSELCombine(N, DCI, DAG);
   case AArch64ISD::DUP:
+  case AArch64ISD::DUPLANE8:
+  case AArch64ISD::DUPLANE16:
+  case AArch64ISD::DUPLANE32:
+  case AArch64ISD::DUPLANE64:
     return performDUPCombine(N, DCI);
   case AArch64ISD::DUPLANE128:
     return performDupLane128Combine(N, DAG);
@@ -25858,7 +25841,8 @@ bool AArch64TargetLowering::isConstantUnsignedBitfieldExtractLegal(
 }
 
 bool AArch64TargetLowering::isComplexDeinterleavingSupported() const {
-  return Subtarget->hasSVE() || Subtarget->hasComplxNum();
+  return Subtarget->hasSVE() || Subtarget->hasSVE2() ||
+         Subtarget->hasComplxNum();
 }
 
 bool AArch64TargetLowering::isComplexDeinterleavingOperationSupported(
@@ -25884,6 +25868,11 @@ bool AArch64TargetLowering::isComplexDeinterleavingOperationSupported(
       !llvm::isPowerOf2_32(VTyWidth))
     return false;
 
+  if (ScalarTy->isIntegerTy() && Subtarget->hasSVE2()) {
+    unsigned ScalarWidth = ScalarTy->getScalarSizeInBits();
+    return 8 <= ScalarWidth && ScalarWidth <= 64;
+  }
+
   return (ScalarTy->isHalfTy() && Subtarget->hasFullFP16()) ||
          ScalarTy->isFloatTy() || ScalarTy->isDoubleTy();
 }
@@ -25894,6 +25883,7 @@ Value *AArch64TargetLowering::createComplexDeinterleavingIR(
     Value *Accumulator) const {
   VectorType *Ty = cast<VectorType>(InputA->getType());
   bool IsScalable = Ty->isScalableTy();
+  bool IsInt = Ty->getElementType()->isIntegerTy();
 
   unsigned TyWidth =
       Ty->getScalarSizeInBits() * Ty->getElementCount().getKnownMinValue();
@@ -25929,10 +25919,15 @@ Value *AArch64TargetLowering::createComplexDeinterleavingIR(
 
   if (OperationType == ComplexDeinterleavingOperation::CMulPartial) {
     if (Accumulator == nullptr)
-      Accumulator = ConstantFP::get(Ty, 0);
+      Accumulator = Constant::getNullValue(Ty);
 
     if (IsScalable) {
-      auto *Mask = B.CreateVectorSplat(Ty->getElementCount(), B.getInt1(true));
+      if (IsInt)
+        return B.CreateIntrinsic(
+            Intrinsic::aarch64_sve_cmla_x, Ty,
+            {Accumulator, InputA, InputB, B.getInt32((int)Rotation * 90)});
+
+      auto *Mask = B.getAllOnesMask(Ty->getElementCount());
       return B.CreateIntrinsic(
           Intrinsic::aarch64_sve_fcmla, Ty,
           {Mask, Accumulator, InputA, InputB, B.getInt32((int)Rotation * 90)});
@@ -25950,12 +25945,18 @@ Value *AArch64TargetLowering::createComplexDeinterleavingIR(
 
   if (OperationType == ComplexDeinterleavingOperation::CAdd) {
     if (IsScalable) {
-      auto *Mask = B.CreateVectorSplat(Ty->getElementCount(), B.getInt1(true));
       if (Rotation == ComplexDeinterleavingRotation::Rotation_90 ||
-          Rotation == ComplexDeinterleavingRotation::Rotation_270)
+          Rotation == ComplexDeinterleavingRotation::Rotation_270) {
+        if (IsInt)
+          return B.CreateIntrinsic(
+              Intrinsic::aarch64_sve_cadd_x, Ty,
+              {InputA, InputB, B.getInt32((int)Rotation * 90)});
+
+        auto *Mask = B.getAllOnesMask(Ty->getElementCount());
         return B.CreateIntrinsic(
             Intrinsic::aarch64_sve_fcadd, Ty,
             {Mask, InputA, InputB, B.getInt32((int)Rotation * 90)});
+      }
       return nullptr;
     }
 

@@ -558,7 +558,7 @@ public:
 
   /// Fetch the type representing a pointer to an 8-bit integer value.
   PointerType *getInt8PtrTy(unsigned AddrSpace = 0) {
-    return Type::getInt8PtrTy(Context, AddrSpace);
+    return getPtrTy(AddrSpace);
   }
 
   /// Fetch the type of an integer with size at least as big as that of a
@@ -1020,8 +1020,6 @@ private:
   CallInst *CreateMaskedIntrinsic(Intrinsic::ID Id, ArrayRef<Value *> Ops,
                                   ArrayRef<Type *> OverloadedTypes,
                                   const Twine &Name = "");
-
-  Value *getCastedInt8PtrValue(Value *Ptr);
 
   //===--------------------------------------------------------------------===//
   // Instruction creation methods: Terminators

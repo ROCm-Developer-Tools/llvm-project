@@ -227,8 +227,7 @@ void AsyncInfoWrapperTy::finalize(Error &Err) {
 
 Error GenericKernelTy::init(GenericDeviceTy &GenericDevice,
                             DeviceImageTy &Image) {
-  PreferredNumThreads = getDefaultNumThreads(GenericDevice);
-
+  PreferredNumThreads = GenericDevice.getDefaultNumThreads();
   MaxNumThreads = GenericDevice.getThreadLimit();
 
   return initImpl(GenericDevice, Image);
@@ -318,7 +317,7 @@ uint64_t GenericKernelTy::getNumBlocks(GenericDeviceTy &GenericDevice,
     return std::min(NumTeamsClause[0], GenericDevice.getBlockLimit());
   }
 
-  uint64_t DefaultNumBlocks = getDefaultNumBlocks(GenericDevice);
+  uint64_t DefaultNumBlocks = GenericDevice.getDefaultNumBlocks();
   uint64_t TripCountNumBlocks = std::numeric_limits<uint64_t>::max();
   if (LoopTripCount > 0) {
     if (isSPMDMode()) {
@@ -396,9 +395,9 @@ GenericDeviceTy::GenericDeviceTy(int32_t DeviceId, int32_t NumDevices,
       // device initialization. These cannot be consulted until the device is
       // initialized correctly. We intialize them in GenericDeviceTy::init().
       OMPX_TargetStackSize(), OMPX_TargetHeapSize(),
-      // By default, the initial number of streams and events are 32.
-      OMPX_InitialNumStreams("LIBOMPTARGET_NUM_INITIAL_STREAMS", 32),
-      OMPX_InitialNumEvents("LIBOMPTARGET_NUM_INITIAL_EVENTS", 32),
+      // By default, the initial number of streams and events is 1.
+      OMPX_InitialNumStreams("LIBOMPTARGET_NUM_INITIAL_STREAMS", 1),
+      OMPX_InitialNumEvents("LIBOMPTARGET_NUM_INITIAL_EVENTS", 1),
       DeviceId(DeviceId), GridValues(OMPGridValues),
       PeerAccesses(NumDevices, PeerAccessState::PENDING), PeerAccessesLock(),
       PinnedAllocs(*this), RPCServer(nullptr) {
@@ -406,10 +405,11 @@ GenericDeviceTy::GenericDeviceTy(int32_t DeviceId, int32_t NumDevices,
   OmptInitialized.store(false);
   // Bind the callbacks to this device's member functions
 #define bindOmptCallback(Name, Type, Code)                                     \
-  if (ompt::lookupCallbackByCode)                                              \
+  if (ompt::Initialized && ompt::lookupCallbackByCode) {                       \
     ompt::lookupCallbackByCode((ompt_callbacks_t)(Code),                       \
                                ((ompt_callback_t *)&(Name##_fn)));             \
-  DP("OMPT: class bound %s=%p\n", #Name, ((void *)(uint64_t)Name##_fn));
+    DP("OMPT: class bound %s=%p\n", #Name, ((void *)(uint64_t)Name##_fn));     \
+  }
 
   FOREACH_OMPT_DEVICE_EVENT(bindOmptCallback);
 #undef bindOmptCallback
@@ -422,14 +422,16 @@ Error GenericDeviceTy::init(GenericPluginTy &Plugin) {
     return Err;
 
 #ifdef OMPT_SUPPORT
-  bool ExpectedStatus = false;
-  if (OmptInitialized.compare_exchange_strong(ExpectedStatus, true))
-    performOmptCallback(device_initialize,
-                        /* device_num */ DeviceId,
-                        /* type */ getComputeUnitKind().c_str(),
-                        /* device */ reinterpret_cast<ompt_device_t *>(this),
-                        /* lookup */ ompt::lookupCallbackByName,
-                        /* documentation */ nullptr);
+  if (ompt::Initialized) {
+    bool ExpectedStatus = false;
+    if (OmptInitialized.compare_exchange_strong(ExpectedStatus, true))
+      performOmptCallback(device_initialize,
+                          /* device_num */ DeviceId,
+                          /* type */ getComputeUnitKind().c_str(),
+                          /* device */ reinterpret_cast<ompt_device_t *>(this),
+                          /* lookup */ ompt::lookupCallbackByName,
+                          /* documentation */ nullptr);
+  }
 #endif
 
   // Read and reinitialize the envars that depend on the device initialization.
@@ -488,9 +490,11 @@ Error GenericDeviceTy::deinit() {
       return Err;
 
 #ifdef OMPT_SUPPORT
-  bool ExpectedStatus = true;
-  if (OmptInitialized.compare_exchange_strong(ExpectedStatus, false))
-    performOmptCallback(device_finalize, /* device_num */ DeviceId);
+  if (ompt::Initialized) {
+    bool ExpectedStatus = true;
+    if (OmptInitialized.compare_exchange_strong(ExpectedStatus, false))
+      performOmptCallback(device_finalize, /* device_num */ DeviceId);
+  }
 #endif
 
   return deinitImpl();
@@ -536,16 +540,19 @@ GenericDeviceTy::loadBinary(GenericPluginTy &Plugin,
     return std::move(Err);
 
 #ifdef OMPT_SUPPORT
-  size_t Bytes = getPtrDiff(InputTgtImage->ImageEnd, InputTgtImage->ImageStart);
-  performOmptCallback(device_load,
-                      /* device_num */ DeviceId,
-                      /* FileName */ nullptr,
-                      /* File Offset */ 0,
-                      /* VmaInFile */ nullptr,
-                      /* ImgSize */ Bytes,
-                      /* HostAddr */ InputTgtImage->ImageStart,
-                      /* DeviceAddr */ nullptr,
-                      /* FIXME: ModuleId */ 0);
+  if (ompt::Initialized) {
+    size_t Bytes =
+        getPtrDiff(InputTgtImage->ImageEnd, InputTgtImage->ImageStart);
+    performOmptCallback(device_load,
+                        /* device_num */ DeviceId,
+                        /* FileName */ nullptr,
+                        /* File Offset */ 0,
+                        /* VmaInFile */ nullptr,
+                        /* ImgSize */ Bytes,
+                        /* HostAddr */ InputTgtImage->ImageStart,
+                        /* DeviceAddr */ nullptr,
+                        /* FIXME: ModuleId */ 0);
+  }
 #endif
 
   // Return the pointer to the table of entries.
@@ -698,32 +705,43 @@ Error GenericDeviceTy::registerKernelOffloadEntry(
   return Plugin::success();
 }
 
+Expected<KernelEnvironmentTy>
+GenericDeviceTy::getKernelEnvironmentForKernel(StringRef Name,
+                                               DeviceImageTy &Image) {
+  // Create a metadata object for the kernel environment object.
+  StaticGlobalTy<KernelEnvironmentTy> KernelEnv(Name.data(),
+                                                "_kernel_environment");
+
+  // Retrieve kernel environment object for the kernel.
+  GenericGlobalHandlerTy &GHandler = Plugin::get().getGlobalHandler();
+  if (auto Err = GHandler.readGlobalFromImage(*this, Image, KernelEnv))
+    return Err;
+
+  return KernelEnv.getValue();
+}
+
 Expected<OMPTgtExecModeFlags>
 GenericDeviceTy::getExecutionModeForKernel(StringRef Name,
                                            DeviceImageTy &Image) {
-  // Create a metadata object for the exec mode global (auto-generated).
-  StaticGlobalTy<llvm::omp::OMPTgtExecModeFlags> ExecModeGlobal(Name.data(),
-                                                                "_exec_mode");
-
-  // Retrieve execution mode for the kernel. This may fail since some kernels
-  // may not have an execution mode.
-  GenericGlobalHandlerTy &GHandler = Plugin::get().getGlobalHandler();
-  if (auto Err = GHandler.readGlobalFromImage(*this, Image, ExecModeGlobal)) {
-    // Consume the error since it is acceptable to fail.
-    [[maybe_unused]] std::string ErrStr = toString(std::move(Err));
-    DP("Failed to read execution mode for '%s': %s\n"
+  auto KernelEnvOrError = getKernelEnvironmentForKernel(Name, Image);
+  if (!KernelEnvOrError) {
+    [[maybe_unused]] std::string ErrStr =
+        toString(KernelEnvOrError.takeError());
+    DP("Failed to read kernel environment for '%s': %s\n"
        "Using default SPMD (2) execution mode\n",
        Name.data(), ErrStr.data());
-
     return OMP_TGT_EXEC_MODE_SPMD;
   }
 
-  // Check that the retrieved execution mode is valid.
-  if (!GenericKernelTy::isValidExecutionMode(ExecModeGlobal.getValue()))
-    return Plugin::error("Invalid execution mode %d for '%s'",
-                         ExecModeGlobal.getValue(), Name.data());
+  auto &KernelEnv = *KernelEnvOrError;
+  auto ExecMode = KernelEnv.Configuration.ExecMode;
 
-  return ExecModeGlobal.getValue();
+  // Check that the retrieved execution mode is valid.
+  if (!GenericKernelTy::isValidExecutionMode(ExecMode))
+    return Plugin::error("Invalid execution mode %d for '%s'", ExecMode,
+                         Name.data());
+
+  return ExecMode;
 }
 
 Error PinnedAllocationMapTy::insertEntry(void *HstPtr, void *DevAccessiblePtr,

@@ -1727,6 +1727,15 @@ llvm.func @passthrough() attributes {passthrough = ["noinline", ["alignstack", "
 
 // -----
 
+// CHECK-LABEL: @my_allocator
+// CHECK: #[[ALLOC_ATTRS:[0-9]*]]
+llvm.func @my_allocator(i64) attributes {passthrough = [["allocsize", "4294967295"]]}
+
+// CHECK: attributes #[[ALLOC_ATTRS]] = {
+// CHECK-DAG: allocsize(0)
+
+// -----
+
 // CHECK-LABEL: @functionEntryCount
 // CHECK-SAME: !prof ![[PROF_ID:[0-9]*]]
 llvm.func @functionEntryCount() attributes {function_entry_count = 4242 : i64} {
@@ -1802,7 +1811,7 @@ llvm.func @foo() {
 // Check that branch weight attributes are exported properly as metadata.
 llvm.func @cond_br_weights(%cond : i1, %arg0 : i32,  %arg1 : i32) -> i32 {
   // CHECK: !prof ![[NODE:[0-9]+]]
-  llvm.cond_br %cond weights(dense<[5, 10]> : vector<2xi32>), ^bb1, ^bb2
+  llvm.cond_br %cond weights([5, 10]), ^bb1, ^bb2
 ^bb1:  // pred: ^bb0
   llvm.return %arg0 : i32
 ^bb2:  // pred: ^bb0
@@ -1818,7 +1827,7 @@ llvm.func @fn()
 // CHECK-LABEL: @call_branch_weights
 llvm.func @call_branch_weights() {
   // CHECK: !prof ![[NODE:[0-9]+]]
-  llvm.call @fn() {branch_weights = dense<42> : vector<1xi32>} : () -> ()
+  llvm.call @fn() {branch_weights = array<i32 : 42>} : () -> ()
   llvm.return
 }
 
@@ -1833,7 +1842,7 @@ llvm.func @__gxx_personality_v0(...) -> i32
 llvm.func @invoke_branch_weights() -> i32 attributes {personality = @__gxx_personality_v0} {
   %0 = llvm.mlir.constant(1 : i32) : i32
   // CHECK: !prof ![[NODE:[0-9]+]]
-  llvm.invoke @foo() to ^bb2 unwind ^bb1 {branch_weights = dense<[42, 99]> : vector<2xi32>} : () -> ()
+  llvm.invoke @foo() to ^bb2 unwind ^bb1 {branch_weights = array<i32 : 42, 99>} : () -> ()
 ^bb1:  // pred: ^bb0
   %1 = llvm.landingpad cleanup : !llvm.struct<(ptr<i8>, i32)>
   llvm.br ^bb2
@@ -2011,11 +2020,30 @@ llvm.func @fastmathFlags(%arg0: f32, %arg1 : vector<2xf32>) {
   %21 = llvm.intr.vector.reduce.fmax(%arg1) {fastmathFlags = #llvm.fastmath<nnan>} : (vector<2xf32>) -> f32
   %22 = llvm.intr.vector.reduce.fmin(%arg1) {fastmathFlags = #llvm.fastmath<nnan>} : (vector<2xf32>) -> f32
 
+// CHECK: call nnan float @llvm.vector.reduce.fmaximum.v2f32(<2 x float> {{.*}})
+// CHECK: call nnan float @llvm.vector.reduce.fminimum.v2f32(<2 x float> {{.*}})
+  %23 = llvm.intr.vector.reduce.fmaximum(%arg1) {fastmathFlags = #llvm.fastmath<nnan>} : (vector<2xf32>) -> f32
+  %24 = llvm.intr.vector.reduce.fminimum(%arg1) {fastmathFlags = #llvm.fastmath<nnan>} : (vector<2xf32>) -> f32
 
-  %23 = llvm.mlir.constant(true) : i1
+  %25 = llvm.mlir.constant(true) : i1
 // CHECK: select contract i1
-  %24 = llvm.select %23, %arg0, %20 {fastmathFlags = #llvm.fastmath<contract>} : i1, f32
+  %26 = llvm.select %25, %arg0, %20 {fastmathFlags = #llvm.fastmath<contract>} : i1, f32
   llvm.return
+}
+
+// -----
+
+// CHECK-LABEL: @switch_empty
+llvm.func @switch_empty(%arg0 : i32) -> i32 {
+  // CHECK:      switch i32 %[[SWITCH_arg0:[0-9]+]], label %[[SWITCHDEFAULT_bb1:[0-9]+]] [
+  // CHECK-NEXT: ]
+  llvm.switch %arg0 : i32, ^bb1 [
+  ]
+
+  // CHECK:      [[SWITCHDEFAULT_bb1]]:
+  // CHECK-NEXT:   ret i32 %[[SWITCH_arg0]]
+^bb1:
+  llvm.return %arg0 : i32
 }
 
 // -----
@@ -2062,7 +2090,7 @@ llvm.func @switch_weights(%arg0: i32) -> i32 {
   llvm.switch %arg0 : i32, ^bb1(%0 : i32) [
     9: ^bb2(%1, %2 : i32, i32),
     99: ^bb3
-  ] {branch_weights = dense<[13, 17, 19]> : vector<3xi32>}
+  ] {branch_weights = array<i32 : 13, 17, 19>}
 
 ^bb1(%3: i32):  // pred: ^bb0
   llvm.return %3 : i32

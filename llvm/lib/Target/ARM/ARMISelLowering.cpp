@@ -11485,6 +11485,11 @@ ARMTargetLowering::EmitStructByval(MachineInstr &MI,
   MF->insert(It, loopMBB);
   MF->insert(It, exitMBB);
 
+  // Set the call frame size on entry to the new basic blocks.
+  unsigned CallFrameSize = TII->getCallFrameSizeAt(MI);
+  loopMBB->setCallFrameSize(CallFrameSize);
+  exitMBB->setCallFrameSize(CallFrameSize);
+
   // Transfer the remainder of BB and its successor edges to exitMBB.
   exitMBB->splice(exitMBB->begin(), BB,
                   std::next(MachineBasicBlock::iterator(MI)), BB->end());
@@ -11493,18 +11498,12 @@ ARMTargetLowering::EmitStructByval(MachineInstr &MI,
   // Load an immediate to varEnd.
   Register varEnd = MRI.createVirtualRegister(TRC);
   if (Subtarget->useMovt()) {
-    unsigned Vtmp = varEnd;
-    if ((LoopSize & 0xFFFF0000) != 0)
-      Vtmp = MRI.createVirtualRegister(TRC);
-    BuildMI(BB, dl, TII->get(IsThumb ? ARM::t2MOVi16 : ARM::MOVi16), Vtmp)
-        .addImm(LoopSize & 0xFFFF)
-        .add(predOps(ARMCC::AL));
-
-    if ((LoopSize & 0xFFFF0000) != 0)
-      BuildMI(BB, dl, TII->get(IsThumb ? ARM::t2MOVTi16 : ARM::MOVTi16), varEnd)
-          .addReg(Vtmp)
-          .addImm(LoopSize >> 16)
-          .add(predOps(ARMCC::AL));
+    BuildMI(BB, dl, TII->get(IsThumb ? ARM::t2MOVi32imm : ARM::MOVi32imm),
+            varEnd)
+        .addImm(LoopSize);
+  } else if (Subtarget->genExecuteOnly()) {
+    assert(IsThumb && "Non-thumb expected to have used movt");
+    BuildMI(BB, dl, TII->get(ARM::tMOVi32imm), varEnd).addImm(LoopSize);
   } else {
     MachineConstantPool *ConstantPool = MF->getConstantPool();
     Type *Int32Ty = Type::getInt32Ty(MF->getFunction().getContext());
@@ -12086,6 +12085,11 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     MachineBasicBlock *sinkMBB  = F->CreateMachineBasicBlock(LLVM_BB);
     F->insert(It, copy0MBB);
     F->insert(It, sinkMBB);
+
+    // Set the call frame size on entry to the new basic blocks.
+    unsigned CallFrameSize = TII->getCallFrameSizeAt(MI);
+    copy0MBB->setCallFrameSize(CallFrameSize);
+    sinkMBB->setCallFrameSize(CallFrameSize);
 
     // Check whether CPSR is live past the tMOVCCr_pseudo.
     const TargetRegisterInfo *TRI = Subtarget->getRegisterInfo();

@@ -2052,6 +2052,12 @@ void Clang::AddPPCTargetArgs(const ArgList &Args,
     } else if (V == "vec-extabi") {
       VecExtabi = true;
       A->claim();
+    } else if (V == "elfv1") {
+      ABIName = "elfv1";
+      A->claim();
+    } else if (V == "elfv2") {
+      ABIName = "elfv2";
+      A->claim();
     } else if (V != "altivec")
       // The ppc64 linux abis are all "altivec" abis by default. Accept and ignore
       // the option if given as we don't have backend support for any targets
@@ -5562,7 +5568,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Enable -mconstructor-aliases except on darwin, where we have to work around
-  // a linker bug, and CUDA device code, where aliases aren't supported.
+  // a linker bug (see https://openradar.appspot.com/7198997), and CUDA device
+  // code, where aliases aren't supported.
   if (!RawTriple.isOSDarwin() && !RawTriple.isNVPTX())
     CmdArgs.push_back("-mconstructor-aliases");
 
@@ -6866,6 +6873,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.addOptOutFlag(CmdArgs, options::OPT_fassume_sane_operator_new,
                      options::OPT_fno_assume_sane_operator_new);
 
+  // -fassume-unique-vtables is on by default.
+  Args.addOptOutFlag(CmdArgs, options::OPT_fassume_unique_vtables,
+                     options::OPT_fno_assume_unique_vtables);
+
   // -frelaxed-template-template-args is off by default, as it is a severe
   // breaking change until a corresponding change to template partial ordering
   // is provided.
@@ -7178,7 +7189,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       Args.hasFlag(options::OPT_frecord_command_line,
                    options::OPT_fno_record_command_line, false);
   if (FRecordSwitches && !Triple.isOSBinFormatELF() &&
-      !Triple.isOSBinFormatXCOFF())
+      !Triple.isOSBinFormatXCOFF() && !Triple.isOSBinFormatMachO())
     D.Diag(diag::err_drv_unsupported_opt_for_target)
         << Args.getLastArg(options::OPT_frecord_command_line)->getAsString(Args)
         << TripleStr;
@@ -7240,12 +7251,27 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     auto CUID = cast<InputAction>(SourceAction)->getId();
     if (!CUID.empty())
       CmdArgs.push_back(Args.MakeArgString(Twine("-cuid=") + Twine(CUID)));
+
+    // -ffast-math turns on -fgpu-approx-transcendentals implicitly, but will
+    // be overriden by -fno-gpu-approx-transcendentals.
+    bool UseApproxTranscendentals = Args.hasFlag(
+        options::OPT_ffast_math, options::OPT_fno_fast_math, false);
+    if (Args.hasFlag(options::OPT_fgpu_approx_transcendentals,
+                     options::OPT_fno_gpu_approx_transcendentals,
+                     UseApproxTranscendentals))
+      CmdArgs.push_back("-fgpu-approx-transcendentals");
+  } else {
+    Args.claimAllArgs(options::OPT_fgpu_approx_transcendentals,
+                      options::OPT_fno_gpu_approx_transcendentals);
   }
 
   if (IsHIP) {
     CmdArgs.push_back("-fcuda-allow-variadic-functions");
     Args.AddLastArg(CmdArgs, options::OPT_fgpu_default_stream_EQ);
   }
+
+  Args.AddLastArg(CmdArgs, options::OPT_foffload_uniform_block,
+                  options::OPT_fno_offload_uniform_block);
 
   if (IsCudaDevice || IsHIPDevice) {
     StringRef InlineThresh =
@@ -7353,6 +7379,22 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                                                     << "-fsanitize=cfi";
   if (SplitLTOUnit)
     CmdArgs.push_back("-fsplit-lto-unit");
+
+  if (Arg *A = Args.getLastArg(options::OPT_ffat_lto_objects,
+                               options::OPT_fno_fat_lto_objects)) {
+    if (IsUsingLTO && A->getOption().matches(options::OPT_ffat_lto_objects)) {
+      assert(LTOMode == LTOK_Full || LTOMode == LTOK_Thin);
+      if (!Triple.isOSBinFormatELF()) {
+        D.Diag(diag::err_drv_unsupported_opt_for_target)
+            << A->getAsString(Args) << TC.getTripleString();
+      }
+      CmdArgs.push_back(Args.MakeArgString(
+          Twine("-flto=") + (LTOMode == LTOK_Thin ? "thin" : "full")));
+      CmdArgs.push_back("-flto-unit");
+      CmdArgs.push_back("-ffat-lto-objects");
+      A->render(Args, CmdArgs);
+    }
+  }
 
   if (Arg *A = Args.getLastArg(options::OPT_fglobal_isel,
                                options::OPT_fno_global_isel)) {
@@ -7894,6 +7936,9 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
       CmdArgs.push_back("-fms-memptr-rep=virtual");
   }
 
+  if (Args.hasArg(options::OPT_regcall4))
+    CmdArgs.push_back("-regcall4");
+
   // Parse the default calling convention options.
   if (Arg *CCArg =
           Args.getLastArg(options::OPT__SLASH_Gd, options::OPT__SLASH_Gr,
@@ -7929,6 +7974,9 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
     if (ArchSupported && DCCFlag)
       CmdArgs.push_back(DCCFlag);
   }
+
+  if (Args.hasArg(options::OPT__SLASH_Gregcall4))
+    CmdArgs.push_back("-regcall4");
 
   Args.AddLastArg(CmdArgs, options::OPT_vtordisp_mode_EQ);
 

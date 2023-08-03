@@ -17,7 +17,7 @@
 #include <unordered_map>
 
 #include "Debug.h"
-#include "DeviceEnvironment.h"
+#include "Environment.h"
 #include "GlobalHandler.h"
 #include "PluginInterface.h"
 #include "omptarget.h"
@@ -83,10 +83,6 @@ struct GenELF64KernelTy : public GenericKernelTy {
 
     return Plugin::success();
   }
-
-  /// Get the default number of blocks and threads for the kernel.
-  uint32_t getDefaultNumBlocks(GenericDeviceTy &) const override { return 1; }
-  uint32_t getDefaultNumThreads(GenericDeviceTy &) const override { return 1; }
 
 private:
   /// The kernel function to execute.
@@ -322,6 +318,7 @@ private:
       1, // GV_Slot_Size
       1, // GV_Warp_Size
       1, // GV_Max_Teams
+      1, // GV_Default_Num_Teams
       1, // GV_SimpleBufferSize
       1, // GV_Max_WG_Size
       1, // GV_Default_WG_Size

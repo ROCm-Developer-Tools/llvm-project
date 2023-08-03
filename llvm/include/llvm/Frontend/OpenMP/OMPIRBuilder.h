@@ -1188,10 +1188,7 @@ public:
                   AtomicReductionGenTy AtomicReductionGen)
         : ElementType(ElementType), Variable(Variable),
           PrivateVariable(PrivateVariable), ReductionGen(ReductionGen),
-          AtomicReductionGen(AtomicReductionGen) {
-      assert(cast<PointerType>(Variable->getType())
-          ->isOpaqueOrPointeeTypeMatches(ElementType) && "Invalid elem type");
-    }
+          AtomicReductionGen(AtomicReductionGen) {}
 
     /// Reduction element type, must match pointee type of variable.
     Type *ElementType;
@@ -1472,7 +1469,7 @@ public:
   /// <critical_section_name> + ".var" for "omp critical" directives; 2)
   /// <mangled_name_for_global_var> + ".cache." for cache for threadprivate
   /// variables.
-  StringMap<Constant*, BumpPtrAllocator> InternalVars;
+  StringMap<GlobalVariable *, BumpPtrAllocator> InternalVars;
 
   /// Computes the size of type in bytes.
   Value *getSizeInBytes(Value *BasePtr);
@@ -2000,8 +1997,7 @@ public:
   /// Create a runtime call for kmpc_target_deinit
   ///
   /// \param Loc The insert and source location description.
-  /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
-  void createTargetDeinit(const LocationDescription &Loc, bool IsSPMD);
+  void createTargetDeinit(const LocationDescription &Loc);
 
   ///}
 

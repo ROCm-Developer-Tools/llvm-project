@@ -3234,6 +3234,12 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   case Builtin::BI__builtin_elementwise_log10:
     return RValue::get(
         emitUnaryBuiltin(*this, E, llvm::Intrinsic::log10, "elt.log10"));
+  case Builtin::BI__builtin_elementwise_pow: {
+    return RValue::get(emitBinaryBuiltin(*this, E, llvm::Intrinsic::pow));
+  }
+  case Builtin::BI__builtin_elementwise_bitreverse:
+    return RValue::get(emitUnaryBuiltin(*this, E, llvm::Intrinsic::bitreverse,
+                                        "elt.bitreverse"));
   case Builtin::BI__builtin_elementwise_cos:
     return RValue::get(
         emitUnaryBuiltin(*this, E, llvm::Intrinsic::cos, "elt.cos"));
@@ -3511,6 +3517,12 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     return RValue::get(Result);
   }
 
+  // An alloca will always return a pointer to the alloca (stack) address
+  // space. This address space need not be the same as the AST / Language
+  // default (e.g. in C / C++ auto vars are in the generic address space). At
+  // the AST level this is handled within CreateTempAlloca et al., but for the
+  // builtin / dynamic alloca we have to handle it here. We use an explicit cast
+  // instead of passing an AS to CreateAlloca so as to not inhibit optimisation.
   case Builtin::BIalloca:
   case Builtin::BI_alloca:
   case Builtin::BI__builtin_alloca_uninitialized:
@@ -3526,6 +3538,13 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     AI->setAlignment(SuitableAlignmentInBytes);
     if (BuiltinID != Builtin::BI__builtin_alloca_uninitialized)
       initializeAlloca(*this, AI, Size, SuitableAlignmentInBytes);
+    LangAS AAS = getASTAllocaAddressSpace();
+    LangAS EAS = E->getType()->getPointeeType().getAddressSpace();
+    if (AAS != EAS) {
+      llvm::Type *Ty = CGM.getTypes().ConvertType(E->getType());
+      return RValue::get(getTargetHooks().performAddrSpaceCast(*this, AI, AAS,
+                                                               EAS, Ty));
+    }
     return RValue::get(AI);
   }
 
@@ -3541,6 +3560,13 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     AI->setAlignment(AlignmentInBytes);
     if (BuiltinID != Builtin::BI__builtin_alloca_with_align_uninitialized)
       initializeAlloca(*this, AI, Size, AlignmentInBytes);
+    LangAS AAS = getASTAllocaAddressSpace();
+    LangAS EAS = E->getType()->getPointeeType().getAddressSpace();
+    if (AAS != EAS) {
+      llvm::Type *Ty = CGM.getTypes().ConvertType(E->getType());
+      return RValue::get(getTargetHooks().performAddrSpaceCast(*this, AI, AAS,
+                                                               EAS, Ty));
+    }
     return RValue::get(AI);
   }
 
@@ -7744,6 +7770,18 @@ enum SpecialRegisterAccessKind {
   Write,
 };
 
+static Value *EmitAMDGCNBallotForExec(CodeGenFunction &CGF, const CallExpr *E,
+                                      llvm::Type *RegisterType,
+                                      llvm::Type *ValueType) {
+  CodeGen::CGBuilderTy &Builder = CGF.Builder;
+  CodeGen::CodeGenModule &CGM = CGF.CGM;
+
+  llvm::Type *ResultType = CGF.ConvertType(E->getType());
+  Function *F = CGM.getIntrinsic(Intrinsic::amdgcn_ballot, {ResultType});
+  llvm::Value *Call = Builder.CreateCall(F, {Builder.getInt1(true)});
+  return Call;
+}
+
 // Generates the IR for the read/write special register builtin,
 // ValueType is the type of the value that is to be written or read,
 // RegisterType is the type of the register being written to or read from.
@@ -9478,6 +9516,49 @@ Value *CodeGenFunction::EmitSMELd1St1(SVETypeFlags TypeFlags,
   return Builder.CreateCall(F, NewOps);
 }
 
+Value *CodeGenFunction::EmitSMEReadWrite(SVETypeFlags TypeFlags,
+                                         SmallVectorImpl<Value *> &Ops,
+                                         unsigned IntID) {
+  auto *VecTy = getSVEType(TypeFlags);
+  Function *F = CGM.getIntrinsic(IntID, VecTy);
+  if (TypeFlags.isReadZA()) {
+    Ops[1] = EmitSVEPredicateCast(Ops[1], VecTy);
+    Ops[3] = EmitTileslice(Ops[4], Ops[3]);
+    Ops.erase(&Ops[4]);
+  } else if (TypeFlags.isWriteZA()) {
+    Ops[1] = EmitTileslice(Ops[2], Ops[1]);
+    Ops[2] = EmitSVEPredicateCast(Ops[3], VecTy);
+    Ops.erase(&Ops[3]);
+  }
+  return Builder.CreateCall(F, Ops);
+}
+
+Value *CodeGenFunction::EmitSMEZero(SVETypeFlags TypeFlags,
+                                    SmallVectorImpl<Value *> &Ops,
+                                    unsigned IntID) {
+  // svzero_za() intrinsic zeros the entire za tile and has no paramters.
+  if (Ops.size() == 0)
+    Ops.push_back(llvm::ConstantInt::get(Int32Ty, 255));
+  Function *F = CGM.getIntrinsic(IntID, {});
+  return Builder.CreateCall(F, Ops);
+}
+
+Value *CodeGenFunction::EmitSMELdrStr(SVETypeFlags TypeFlags,
+                                      SmallVectorImpl<Value *> &Ops,
+                                      unsigned IntID) {
+  Function *Cntsb = CGM.getIntrinsic(Intrinsic::aarch64_sme_cntsb);
+  llvm::Value *CntsbCall = Builder.CreateCall(Cntsb, {}, "svlb");
+  llvm::Value *MulVL = Builder.CreateMul(
+      CntsbCall,
+      Builder.getInt64(cast<llvm::ConstantInt>(Ops[1])->getZExtValue()),
+      "mulvl");
+  Ops[2] = Builder.CreateGEP(Int8Ty, Ops[2], MulVL);
+  Ops[0] = EmitTileslice(Ops[1], Ops[0]);
+  Ops.erase(&Ops[1]);
+  Function *F = CGM.getIntrinsic(IntID, {});
+  return Builder.CreateCall(F, Ops);
+}
+
 // Limit the usage of scalable llvm IR generated by the ACLE by using the
 // sve dup.x intrinsic instead of IRBuilder::CreateVectorSplat.
 Value *CodeGenFunction::EmitSVEDupX(Value *Scalar, llvm::Type *Ty) {
@@ -9912,6 +9993,7 @@ Value *CodeGenFunction::EmitAArch64SMEBuiltinExpr(unsigned BuiltinID,
   getContext().GetBuiltinType(BuiltinID, Error, &ICEArguments);
   assert(Error == ASTContext::GE_None && "Should not codegen an error");
 
+  llvm::Type *Ty = ConvertType(E->getType());
   llvm::SmallVector<Value *, 4> Ops;
   for (unsigned i = 0, e = E->getNumArgs(); i != e; i++) {
     if ((ICEArguments & (1 << i)) == 0)
@@ -9936,6 +10018,26 @@ Value *CodeGenFunction::EmitAArch64SMEBuiltinExpr(unsigned BuiltinID,
   SVETypeFlags TypeFlags(Builtin->TypeModifier);
   if (TypeFlags.isLoad() || TypeFlags.isStore())
     return EmitSMELd1St1(TypeFlags, Ops, Builtin->LLVMIntrinsic);
+  else if (TypeFlags.isReadZA() || TypeFlags.isWriteZA())
+    return EmitSMEReadWrite(TypeFlags, Ops, Builtin->LLVMIntrinsic);
+  else if (BuiltinID == SME::BI__builtin_sme_svzero_mask_za ||
+           BuiltinID == SME::BI__builtin_sme_svzero_za)
+    return EmitSMEZero(TypeFlags, Ops, Builtin->LLVMIntrinsic);
+  else if (BuiltinID == SME::BI__builtin_sme_svldr_vnum_za ||
+           BuiltinID == SME::BI__builtin_sme_svstr_vnum_za)
+    return EmitSMELdrStr(TypeFlags, Ops, Builtin->LLVMIntrinsic);
+  else if (Builtin->LLVMIntrinsic != 0) {
+    // Predicates must match the main datatype.
+    for (unsigned i = 0, e = Ops.size(); i != e; ++i)
+      if (auto PredTy = dyn_cast<llvm::VectorType>(Ops[i]->getType()))
+        if (PredTy->getElementType()->isIntegerTy(1))
+          Ops[i] = EmitSVEPredicateCast(Ops[i], getSVEType(TypeFlags));
+
+    Function *F = CGM.getIntrinsic(Builtin->LLVMIntrinsic,
+                                   getSVEOverloadTypes(TypeFlags, Ty, Ops));
+    Value *Call = Builder.CreateCall(F, Ops);
+    return Call;
+  }
 
   /// Should not happen
   return nullptr;
@@ -10657,7 +10759,7 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
                                      CharUnits::fromQuantity(16));
   }
   case NEON::BI__builtin_neon_vstrq_p128: {
-    llvm::Type *Int128PTy = llvm::Type::getIntNPtrTy(getLLVMContext(), 128);
+    llvm::Type *Int128PTy = llvm::PointerType::getUnqual(getLLVMContext());
     Value *Ptr = Builder.CreateBitCast(Ops[0], Int128PTy);
     return Builder.CreateDefaultAlignedStore(EmitScalarExpr(E->getArg(1)), Ptr);
   }
@@ -17412,20 +17514,10 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
     llvm::Function *F = CGM.getIntrinsic(IID, {ArgTy});
     return Builder.CreateCall(F, {Addr, Val, ZeroI32, ZeroI32, ZeroI1});
   }
-  case AMDGPU::BI__builtin_amdgcn_read_exec: {
-    CallInst *CI = cast<CallInst>(
-      EmitSpecialRegisterBuiltin(*this, E, Int64Ty, Int64Ty, NormalRead, "exec"));
-    CI->setConvergent();
-    return CI;
-  }
+  case AMDGPU::BI__builtin_amdgcn_read_exec:
   case AMDGPU::BI__builtin_amdgcn_read_exec_lo:
   case AMDGPU::BI__builtin_amdgcn_read_exec_hi: {
-    StringRef RegName = BuiltinID == AMDGPU::BI__builtin_amdgcn_read_exec_lo ?
-      "exec_lo" : "exec_hi";
-    CallInst *CI = cast<CallInst>(
-      EmitSpecialRegisterBuiltin(*this, E, Int32Ty, Int32Ty, NormalRead, RegName));
-    CI->setConvergent();
-    return CI;
+    return EmitAMDGCNBallotForExec(*this, E, Int64Ty, Int64Ty);
   }
   case AMDGPU::BI__builtin_amdgcn_image_bvh_intersect_ray:
   case AMDGPU::BI__builtin_amdgcn_image_bvh_intersect_ray_h:
@@ -20265,39 +20357,31 @@ Value *CodeGenFunction::EmitRISCVBuiltinExpr(unsigned BuiltinID,
   // Zknh
   case RISCV::BI__builtin_riscv_sha256sig0:
     ID = Intrinsic::riscv_sha256sig0;
-    IntrinsicTypes = {ResultType};
     break;
   case RISCV::BI__builtin_riscv_sha256sig1:
     ID = Intrinsic::riscv_sha256sig1;
-    IntrinsicTypes = {ResultType};
     break;
   case RISCV::BI__builtin_riscv_sha256sum0:
     ID = Intrinsic::riscv_sha256sum0;
-    IntrinsicTypes = {ResultType};
     break;
   case RISCV::BI__builtin_riscv_sha256sum1:
     ID = Intrinsic::riscv_sha256sum1;
-    IntrinsicTypes = {ResultType};
     break;
 
   // Zksed
   case RISCV::BI__builtin_riscv_sm4ks:
     ID = Intrinsic::riscv_sm4ks;
-    IntrinsicTypes = {ResultType};
     break;
   case RISCV::BI__builtin_riscv_sm4ed:
     ID = Intrinsic::riscv_sm4ed;
-    IntrinsicTypes = {ResultType};
     break;
 
   // Zksh
   case RISCV::BI__builtin_riscv_sm3p0:
     ID = Intrinsic::riscv_sm3p0;
-    IntrinsicTypes = {ResultType};
     break;
   case RISCV::BI__builtin_riscv_sm3p1:
     ID = Intrinsic::riscv_sm3p1;
-    IntrinsicTypes = {ResultType};
     break;
 
   // Zihintntl
