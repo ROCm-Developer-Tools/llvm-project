@@ -1687,6 +1687,26 @@ bool Sema::IsFunctionConversion(QualType FromType, QualType ToType,
     Changed = true;
   }
 
+  // Drop the 'arm_preserves_za' if not present in the target type (we can do
+  // that because it is merely a hint).
+  if (const auto *FromFPT = dyn_cast<FunctionProtoType>(FromFn)) {
+    FunctionProtoType::ExtProtoInfo ExtInfo = FromFPT->getExtProtoInfo();
+    if (ExtInfo.AArch64SMEAttributes &
+        FunctionType::SME_PStateZAPreservedMask) {
+      unsigned ToFlags = 0;
+      if (const auto *ToFPT = dyn_cast<FunctionProtoType>(ToFn))
+        ToFlags = ToFPT->getExtProtoInfo().AArch64SMEAttributes;
+      if (!(ToFlags & FunctionType::SME_PStateZAPreservedMask)) {
+        ExtInfo.setArmSMEAttribute(FunctionType::SME_PStateZAPreservedMask,
+                                   false);
+        QualType QT = Context.getFunctionType(
+            FromFPT->getReturnType(), FromFPT->getParamTypes(), ExtInfo);
+        FromFn = QT->getAs<FunctionType>();
+        Changed = true;
+      }
+    }
+  }
+
   // Drop 'noexcept' if not present in target type.
   if (const auto *FromFPT = dyn_cast<FunctionProtoType>(FromFn)) {
     const auto *ToFPT = cast<FunctionProtoType>(ToFn);
@@ -9850,7 +9870,7 @@ getImplicitObjectParamType(ASTContext &Context, const FunctionDecl *F) {
 }
 
 static bool haveSameParameterTypes(ASTContext &Context, const FunctionDecl *F1,
-                                   const FunctionDecl *F2, unsigned NumParams) {
+                                   const FunctionDecl *F2) {
   if (declaresSameEntity(F1, F2))
     return true;
 
@@ -9863,8 +9883,14 @@ static bool haveSameParameterTypes(ASTContext &Context, const FunctionDecl *F1,
     return F->getParamDecl(I++)->getType();
   };
 
+  unsigned F1NumParams = F1->getNumParams() + isa<CXXMethodDecl>(F1);
+  unsigned F2NumParams = F2->getNumParams() + isa<CXXMethodDecl>(F2);
+
+  if (F1NumParams != F2NumParams)
+    return false;
+
   unsigned I1 = 0, I2 = 0;
-  for (unsigned I = 0; I != NumParams; ++I) {
+  for (unsigned I = 0; I != F1NumParams; ++I) {
     QualType T1 = NextParam(F1, I1, I == 0);
     QualType T2 = NextParam(F2, I2, I == 0);
     assert(!T1.isNull() && !T2.isNull() && "Unexpected null param types");
@@ -10032,8 +10058,7 @@ bool clang::isBetterOverloadCandidate(
     case ImplicitConversionSequence::Worse:
       if (Cand1.Function && Cand2.Function &&
           Cand1.isReversed() != Cand2.isReversed() &&
-          haveSameParameterTypes(S.Context, Cand1.Function, Cand2.Function,
-                                 NumArgs)) {
+          haveSameParameterTypes(S.Context, Cand1.Function, Cand2.Function)) {
         // Work around large-scale breakage caused by considering reversed
         // forms of operator== in C++20:
         //
@@ -13997,6 +14022,10 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
         std::swap(Args[0], Args[1]);
 
       if (FnDecl) {
+
+        if (FnDecl->isInvalidDecl())
+          return ExprError();
+
         Expr *Base = nullptr;
         // We matched an overloaded operator. Build a call to that
         // operator.
@@ -14029,7 +14058,7 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
           llvm::SmallVector<FunctionDecl*, 4> AmbiguousWith;
           for (OverloadCandidate &Cand : CandidateSet) {
             if (Cand.Viable && Cand.Function && Cand.isReversed() &&
-                haveSameParameterTypes(Context, Cand.Function, FnDecl, 2)) {
+                haveSameParameterTypes(Context, Cand.Function, FnDecl)) {
               for (unsigned ArgIdx = 0; ArgIdx < 2; ++ArgIdx) {
                 if (CompareImplicitConversionSequences(
                         *this, OpLoc, Cand.Conversions[ArgIdx],

@@ -54,6 +54,9 @@ _warningFlags = [
 
     # TODO(philnik) This fails with the PSTL.
     "-Wno-unknown-pragmas",
+    # Don't fail compilation in case the compiler fails to perform the requested
+    # loop vectorization.
+    "-Wno-pass-failed",
 ]
 
 _allStandards = ["c++03", "c++11", "c++14", "c++17", "c++20", "c++23", "c++26"]
@@ -298,8 +301,7 @@ DEFAULT_PARAMETERS = [
             [
                 AddCompileFlag("-D_LIBCPP_ENABLE_HARDENED_MODE=1") if hardening_mode == "hardened" else None,
                 AddCompileFlag("-D_LIBCPP_ENABLE_DEBUG_MODE=1")    if hardening_mode == "debug" else None,
-                AddFeature("libcpp-has-hardened-mode")             if hardening_mode == "hardened" else None,
-                AddFeature("libcpp-has-debug-mode")                if hardening_mode == "debug" else None,
+                AddFeature("libcpp-hardening-mode={}".format(hardening_mode)),
             ],
         ),
     ),
