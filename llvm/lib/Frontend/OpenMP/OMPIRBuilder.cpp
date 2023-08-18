@@ -522,27 +522,51 @@ void OpenMPIRBuilder::finalizeFunction(Function *Fn) {
 
     Function *OuterFn = OI.getFunction();
     CodeExtractorAnalysisCache CEAC(*OuterFn);
-    CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr,
-                            /* AggregateArgs */ true,
-                            /* BlockFrequencyInfo */ nullptr,
-                            /* BranchProbabilityInfo */ nullptr,
-                            /* AssumptionCache */ nullptr,
-                            /* AllowVarArgs */ true,
-                            /* AllowAlloca */ true,
-                            /* AllocaBlock*/ OI.OuterAllocaBB,
-                            /* Suffix */ ".omp_par");
+    Function *OutlinedFn = nullptr;
+    if (Config.isTargetDevice()) {
+      // Use extractor which does not aggregate args
+      CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr,
+                              /* AggregateArgs */ false,
+                              /* BlockFrequencyInfo */ nullptr,
+                              /* BranchProbabilityInfo */ nullptr,
+                              /* AssumptionCache */ nullptr,
+                              /* AllowVarArgs */ true,
+                              /* AllowAlloca */ true,
+                              /* AllocaBlock*/ OI.OuterAllocaBB,
+                              /* Suffix */ ".omp_par");
 
-    LLVM_DEBUG(dbgs() << "Before     outlining: " << *OuterFn << "\n");
-    LLVM_DEBUG(dbgs() << "Entry " << OI.EntryBB->getName()
-                      << " Exit: " << OI.ExitBB->getName() << "\n");
-    assert(Extractor.isEligible() &&
-           "Expected OpenMP outlining to be possible!");
+      LLVM_DEBUG(dbgs() << "Before     outlining: " << *OuterFn << "\n");
+      LLVM_DEBUG(dbgs() << "Entry " << OI.EntryBB->getName()
+                        << " Exit: " << OI.ExitBB->getName() << "\n");
+      assert(Extractor.isEligible() &&
+             "Expected OpenMP outlining to be possible!");
 
-    for (auto *V : OI.ExcludeArgsFromAggregate)
-      Extractor.excludeArgFromAggregate(V);
+      for (auto *V : OI.ExcludeArgsFromAggregate)
+        Extractor.excludeArgFromAggregate(V);
 
-    Function *OutlinedFn = Extractor.extractCodeRegion(CEAC);
+      OutlinedFn = Extractor.extractCodeRegion(CEAC);
+    } else {
+      CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr,
+                              /* AggregateArgs */ true,
+                              /* BlockFrequencyInfo */ nullptr,
+                              /* BranchProbabilityInfo */ nullptr,
+                              /* AssumptionCache */ nullptr,
+                              /* AllowVarArgs */ true,
+                              /* AllowAlloca */ true,
+                              /* AllocaBlock*/ OI.OuterAllocaBB,
+                              /* Suffix */ ".omp_par");
 
+      LLVM_DEBUG(dbgs() << "Before     outlining: " << *OuterFn << "\n");
+      LLVM_DEBUG(dbgs() << "Entry " << OI.EntryBB->getName()
+                        << " Exit: " << OI.ExitBB->getName() << "\n");
+      assert(Extractor.isEligible() &&
+             "Expected OpenMP outlining to be possible!");
+
+      for (auto *V : OI.ExcludeArgsFromAggregate)
+        Extractor.excludeArgFromAggregate(V);
+
+      OutlinedFn = Extractor.extractCodeRegion(CEAC);
+    }
     LLVM_DEBUG(dbgs() << "After      outlining: " << *OuterFn << "\n");
     LLVM_DEBUG(dbgs() << "   Outlined function: " << *OutlinedFn << "\n");
     assert(OutlinedFn->getReturnType()->isVoidTy() &&
@@ -1060,9 +1084,18 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(
   // Change the location to the outer alloca insertion point to create and
   // initialize the allocas we pass into the parallel region.
   Builder.restoreIP(OuterAllocaIP);
-  AllocaInst *TIDAddr = Builder.CreateAlloca(Int32, nullptr, "tid.addr");
-  AllocaInst *ZeroAddr = Builder.CreateAlloca(Int32, nullptr, "zero.addr");
-
+  AllocaInst *TIDAddr;
+  AllocaInst *ZeroAddr;
+  if (Config.isTargetDevice()) {
+    // make sure that both variables are allocated in address space 0
+    TIDAddr =
+        Builder.CreateAlloca(Int32, 0 /* address space */, nullptr, "tid.addr");
+    ZeroAddr = Builder.CreateAlloca(Int32, 0 /* address space */, nullptr,
+                                    "zero.addr");
+  } else {
+    TIDAddr = Builder.CreateAlloca(Int32, nullptr, "tid.addr");
+    ZeroAddr = Builder.CreateAlloca(Int32, nullptr, "zero.addr");
+  }
   // We only need TIDAddr and ZeroAddr for modeling purposes to get the
   // associated arguments in the outlined function, so we delete them later.
   ToBeDeleted.push_back(TIDAddr);
@@ -1135,11 +1168,14 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(
 
   LLVM_DEBUG(dbgs() << "After  body codegen: " << *OuterFn << "\n");
   FunctionCallee RTLFn;
-  if (IfCondition)
-    RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_fork_call_if);
-  else
-    RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_fork_call);
-
+  if (Config.isTargetDevice()) {
+    RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_parallel_51);
+  } else {
+    if (IfCondition)
+      RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_fork_call_if);
+    else
+      RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_fork_call);
+  }
   if (auto *F = dyn_cast<llvm::Function>(RTLFn.getCallee())) {
     if (!F->hasMetadata(llvm::LLVMContext::MD_callback)) {
       llvm::LLVMContext &Ctx = F->getContext();
@@ -1158,63 +1194,141 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(
   }
 
   OutlineInfo OI;
-  OI.PostOutlineCB = [=](Function &OutlinedFn) {
-    // Add some known attributes.
-    OutlinedFn.addParamAttr(0, Attribute::NoAlias);
-    OutlinedFn.addParamAttr(1, Attribute::NoAlias);
-    OutlinedFn.addFnAttr(Attribute::NoUnwind);
-    OutlinedFn.addFnAttr(Attribute::NoRecurse);
+  if (Config.isTargetDevice()) {
+    // Generate OpenMP target specific runtime call
+    OI.PostOutlineCB = [=](Function &OutlinedFn) {
+      // Add some known attributes.
+      OutlinedFn.addParamAttr(0, Attribute::NoAlias);
+      OutlinedFn.addParamAttr(1, Attribute::NoAlias);
+      OutlinedFn.addParamAttr(0, Attribute::NoUndef);
+      OutlinedFn.addParamAttr(1, Attribute::NoUndef);
+      OutlinedFn.addFnAttr(Attribute::NoUnwind);
+      OutlinedFn.addFnAttr(Attribute::NoRecurse);
 
-    assert(OutlinedFn.arg_size() >= 2 &&
-           "Expected at least tid and bounded tid as arguments");
-    unsigned NumCapturedVars =
-        OutlinedFn.arg_size() - /* tid & bounded tid */ 2;
+      assert(OutlinedFn.arg_size() >= 2 &&
+             "Expected at least tid and bounded tid as arguments");
+      unsigned NumCapturedVars =
+          OutlinedFn.arg_size() - /* tid & bounded tid */ 2;
 
-    CallInst *CI = cast<CallInst>(OutlinedFn.user_back());
-    CI->getParent()->setName("omp_parallel");
-    Builder.SetInsertPoint(CI);
+      CallInst *CI = cast<CallInst>(OutlinedFn.user_back());
+      CI->getParent()->setName("omp_parallel");
+      Builder.SetInsertPoint(CI);
 
-    // Build call __kmpc_fork_call[_if](Ident, n, microtask, var1, .., varn);
-    Value *ForkCallArgs[] = {
-        Ident, Builder.getInt32(NumCapturedVars),
-        Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr)};
-
-    SmallVector<Value *, 16> RealArgs;
-    RealArgs.append(std::begin(ForkCallArgs), std::end(ForkCallArgs));
-    if (IfCondition) {
-      Value *Cond = Builder.CreateSExtOrTrunc(IfCondition,
-                                              Type::getInt32Ty(M.getContext()));
-      RealArgs.push_back(Cond);
-    }
-    RealArgs.append(CI->arg_begin() + /* tid & bound tid */ 2, CI->arg_end());
-
-    // __kmpc_fork_call_if always expects a void ptr as the last argument
-    // If there are no arguments, pass a null pointer.
-    auto PtrTy = Type::getInt8PtrTy(M.getContext());
-    if (IfCondition && NumCapturedVars == 0) {
+      // Build call __kmpc_parallel_51
+      auto PtrTy = Type::getInt8PtrTy(M.getContext());
       llvm::Value *Void = ConstantPointerNull::get(PtrTy);
-      RealArgs.push_back(Void);
-    }
-    if (IfCondition && RealArgs.back()->getType() != PtrTy)
-      RealArgs.back() = Builder.CreateBitCast(RealArgs.back(), PtrTy);
+      // Add alloca for kernel args. Put this instruction at the beginning
+      // of the function.
+      InsertPointTy CurrentIP = Builder.saveIP();
+      Builder.SetInsertPoint(&OuterFn->front(),
+                             OuterFn->front().getFirstInsertionPt());
+      AllocaInst *ArgsAlloca =
+          Builder.CreateAlloca(ArrayType::get(PtrTy, NumCapturedVars));
+      Value *Args = Builder.CreatePointerCast(
+          ArgsAlloca, Type::getInt8PtrTy(M.getContext()));
+      Builder.restoreIP(CurrentIP);
+      // Store cpatured vars which are used by kmpc_parallel_51
+      if (NumCapturedVars) {
+        for (unsigned Idx = 0; Idx < NumCapturedVars; Idx++) {
+          Value *V = *(CI->arg_begin() + 2 + Idx);
+          Value *StoreAddress = Builder.CreateConstInBoundsGEP2_64(
+              ArrayType::get(PtrTy, NumCapturedVars), Args, 0, Idx);
+          Builder.CreateStore(V, StoreAddress);
+        }
+      }
+      Value *Parallel51CallArgs[] = {
+          /*identifier*/ Ident,
+          /*global thread num*/ ThreadID,
+          Builder.getInt32(1),
+          Builder.getInt32(-1),
+          Builder.getInt32(-1),
+          /* outlined function */
+          Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
+          Void,
+          Args,
+          Builder.getInt64(NumCapturedVars)};
 
-    Builder.CreateCall(RTLFn, RealArgs);
+      SmallVector<Value *, 16> RealArgs;
+      RealArgs.append(std::begin(Parallel51CallArgs),
+                      std::end(Parallel51CallArgs));
 
-    LLVM_DEBUG(dbgs() << "With fork_call placed: "
-                      << *Builder.GetInsertBlock()->getParent() << "\n");
+      Builder.CreateCall(RTLFn, RealArgs);
 
-    InsertPointTy ExitIP(PRegExitBB, PRegExitBB->end());
+      LLVM_DEBUG(dbgs() << "With kmpc_parallel_51 placed: "
+                        << *Builder.GetInsertBlock()->getParent() << "\n");
 
-    // Initialize the local TID stack location with the argument value.
-    Builder.SetInsertPoint(PrivTID);
-    Function::arg_iterator OutlinedAI = OutlinedFn.arg_begin();
-    Builder.CreateStore(Builder.CreateLoad(Int32, OutlinedAI), PrivTIDAddr);
+      InsertPointTy ExitIP(PRegExitBB, PRegExitBB->end());
 
-    CI->eraseFromParent();
+      // Initialize the local TID stack location with the argument value.
+      Builder.SetInsertPoint(PrivTID);
+      Function::arg_iterator OutlinedAI = OutlinedFn.arg_begin();
+      Builder.CreateStore(Builder.CreateLoad(Int32, OutlinedAI), PrivTIDAddr);
 
-    for (Instruction *I : ToBeDeleted)
-      I->eraseFromParent();
-  };
+      CI->eraseFromParent();
+
+      for (Instruction *I : ToBeDeleted)
+        I->eraseFromParent();
+    };
+  } else {
+    // Generate OpenMP host runtime call
+    OI.PostOutlineCB = [=](Function &OutlinedFn) {
+      // Add some known attributes.
+      OutlinedFn.addParamAttr(0, Attribute::NoAlias);
+      OutlinedFn.addParamAttr(1, Attribute::NoAlias);
+      OutlinedFn.addFnAttr(Attribute::NoUnwind);
+      OutlinedFn.addFnAttr(Attribute::NoRecurse);
+
+      assert(OutlinedFn.arg_size() >= 2 &&
+             "Expected at least tid and bounded tid as arguments");
+      unsigned NumCapturedVars =
+          OutlinedFn.arg_size() - /* tid & bounded tid */ 2;
+
+      CallInst *CI = cast<CallInst>(OutlinedFn.user_back());
+      CI->getParent()->setName("omp_parallel");
+      Builder.SetInsertPoint(CI);
+
+      // Build call __kmpc_fork_call[_if](Ident, n, microtask, var1, .., varn);
+      Value *ForkCallArgs[] = {
+          Ident, Builder.getInt32(NumCapturedVars),
+          Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr)};
+
+      SmallVector<Value *, 16> RealArgs;
+      RealArgs.append(std::begin(ForkCallArgs), std::end(ForkCallArgs));
+      if (IfCondition) {
+        Value *Cond = Builder.CreateSExtOrTrunc(
+            IfCondition, Type::getInt32Ty(M.getContext()));
+        RealArgs.push_back(Cond);
+      }
+      RealArgs.append(CI->arg_begin() + /* tid & bound tid */ 2, CI->arg_end());
+
+      // __kmpc_fork_call_if always expects a void ptr as the last argument
+      // If there are no arguments, pass a null pointer.
+      auto PtrTy = Type::getInt8PtrTy(M.getContext());
+      if (IfCondition && NumCapturedVars == 0) {
+        llvm::Value *Void = ConstantPointerNull::get(PtrTy);
+        RealArgs.push_back(Void);
+      }
+      if (IfCondition && RealArgs.back()->getType() != PtrTy)
+        RealArgs.back() = Builder.CreateBitCast(RealArgs.back(), PtrTy);
+
+      Builder.CreateCall(RTLFn, RealArgs);
+
+      LLVM_DEBUG(dbgs() << "With fork_call placed: "
+                        << *Builder.GetInsertBlock()->getParent() << "\n");
+
+      InsertPointTy ExitIP(PRegExitBB, PRegExitBB->end());
+
+      // Initialize the local TID stack location with the argument value.
+      Builder.SetInsertPoint(PrivTID);
+      Function::arg_iterator OutlinedAI = OutlinedFn.arg_begin();
+      Builder.CreateStore(Builder.CreateLoad(Int32, OutlinedAI), PrivTIDAddr);
+
+      CI->eraseFromParent();
+
+      for (Instruction *I : ToBeDeleted)
+        I->eraseFromParent();
+    };
+  }
 
   // Adjust the finalization stack, verify the adjustment, and call the
   // finalize function a last time to finalize values between the pre-fini
@@ -1358,7 +1472,6 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(
 
   InsertPointTy AfterIP(UI->getParent(), UI->getParent()->end());
   UI->eraseFromParent();
-
   return AfterIP;
 }
 

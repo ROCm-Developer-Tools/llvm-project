@@ -519,6 +519,7 @@ struct OMPInformationCache : public InformationCache {
   void recollectUses() {
     for (int Idx = 0; Idx < RFIs.size(); ++Idx)
       recollectUsesForFunction(static_cast<RuntimeFunction>(Idx));
+    OMPBuilder.Config.IsTargetDevice = isOpenMPDevice(OMPBuilder.M);
   }
 
   // Helper function to inherit the calling convention of the function callee.
