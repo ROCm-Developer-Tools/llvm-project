@@ -591,9 +591,89 @@ TEST_F(OpenMPIRBuilderTest, DbgLoc) {
   EXPECT_EQ(SrcSrc->getAsCString(), ";/src/test.dbg;foo;3;7;;");
 }
 
+TEST_F(OpenMPIRBuilderTest, ParallelSimpleGPU) {
+  using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
+  OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = true;
+  OMPBuilder.initialize();
+  F->setName("func");
+  IRBuilder<> Builder(BB);
+  BasicBlock *EnterBB = BasicBlock::Create(Ctx, "parallel.enter", F);
+  Builder.CreateBr(EnterBB);
+  Builder.SetInsertPoint(EnterBB);
+  OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
+  Loc = OMPBuilder.createTargetInit(Loc, true);
+  OMPBuilder.M.print(errs(), nullptr);
+
+  AllocaInst *PrivAI = nullptr;
+
+  unsigned NumBodiesGenerated = 0;
+  unsigned NumPrivatizedVars = 0;
+  unsigned NumFinalizationPoints = 0;
+
+  auto BodyGenCB = [&](InsertPointTy AllocaIP, InsertPointTy CodeGenIP) {
+    ++NumBodiesGenerated;
+
+    Builder.restoreIP(AllocaIP);
+    PrivAI = Builder.CreateAlloca(F->arg_begin()->getType());
+    Builder.CreateStore(F->arg_begin(), PrivAI);
+
+    Builder.restoreIP(CodeGenIP);
+    Value *PrivLoad =
+        Builder.CreateLoad(PrivAI->getAllocatedType(), PrivAI, "local.use");
+    Value *Cmp = Builder.CreateICmpNE(F->arg_begin(), PrivLoad);
+    Instruction *ThenTerm, *ElseTerm;
+    SplitBlockAndInsertIfThenElse(Cmp, CodeGenIP.getBlock()->getTerminator(),
+                                  &ThenTerm, &ElseTerm);
+  };
+
+  auto PrivCB = [&](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                    Value &Orig, Value &Inner,
+                    Value *&ReplacementValue) -> InsertPointTy {
+    ++NumPrivatizedVars;
+
+    if (!isa<AllocaInst>(Orig)) {
+      EXPECT_EQ(&Orig, F->arg_begin());
+      ReplacementValue = &Inner;
+      return CodeGenIP;
+    }
+
+    // Since the original value is an allocation, it has a pointer type and
+    // therefore no additional wrapping should happen.
+    EXPECT_EQ(&Orig, &Inner);
+
+    // Trivial copy (=firstprivate).
+    Builder.restoreIP(AllocaIP);
+    Type *VTy = ReplacementValue->getType();
+    Value *V = Builder.CreateLoad(VTy, &Inner, Orig.getName() + ".reload");
+    ReplacementValue = Builder.CreateAlloca(VTy, 0, Orig.getName() + ".copy");
+    Builder.restoreIP(CodeGenIP);
+    Builder.CreateStore(V, ReplacementValue);
+    return CodeGenIP;
+  };
+
+  auto FiniCB = [&](InsertPointTy CodeGenIP) { ++NumFinalizationPoints; };
+
+  IRBuilder<>::InsertPoint AllocaIP(&F->getEntryBlock(),
+                                    F->getEntryBlock().getFirstInsertionPt());
+  IRBuilder<>::InsertPoint AfterIP =
+      OMPBuilder.createParallel(Loc, AllocaIP, BodyGenCB, PrivCB, FiniCB,
+                                nullptr, nullptr, OMP_PROC_BIND_default, false);
+
+  Builder.restoreIP(AfterIP);
+  OMPBuilder.createTargetDeinit(Builder);
+  Builder.CreateRetVoid();
+
+  OMPBuilder.finalizeModule();
+  OMPBuilder.M.print(llvm::errs(), nullptr);
+  Function *OutlinedFn = PrivAI->getFunction();
+  EXPECT_FALSE(verifyModule(*M, &errs()));
+  EXPECT_NE(OutlinedFn, F);
+}
 TEST_F(OpenMPIRBuilderTest, ParallelSimple) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -699,6 +779,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelSimple) {
 TEST_F(OpenMPIRBuilderTest, ParallelNested) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -793,6 +874,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelNested) {
 TEST_F(OpenMPIRBuilderTest, ParallelNested2Inner) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -902,6 +984,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelNested2Inner) {
 TEST_F(OpenMPIRBuilderTest, ParallelIfCond) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -1006,6 +1089,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelIfCond) {
 TEST_F(OpenMPIRBuilderTest, ParallelCancelBarrier) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -1119,6 +1203,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelCancelBarrier) {
 
 TEST_F(OpenMPIRBuilderTest, ParallelForwardAsPointers) {
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -4131,6 +4216,7 @@ xorAtomicReduction(OpenMPIRBuilder::InsertPointTy IP, Type *Ty, Value *LHS,
 TEST_F(OpenMPIRBuilderTest, CreateReductions) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -4363,6 +4449,7 @@ TEST_F(OpenMPIRBuilderTest, CreateReductions) {
 TEST_F(OpenMPIRBuilderTest, CreateTwoReductions) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5324,6 +5411,7 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
 TEST_F(OpenMPIRBuilderTest, CreateTask) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5449,6 +5537,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTask) {
 TEST_F(OpenMPIRBuilderTest, CreateTaskNoArgs) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5471,6 +5560,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskNoArgs) {
 TEST_F(OpenMPIRBuilderTest, CreateTaskUntied) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5500,6 +5590,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskUntied) {
 TEST_F(OpenMPIRBuilderTest, CreateTaskDepend) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5573,6 +5664,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskDepend) {
 TEST_F(OpenMPIRBuilderTest, CreateTaskFinal) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5626,6 +5718,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskFinal) {
 TEST_F(OpenMPIRBuilderTest, CreateTaskIfCondition) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5785,6 +5878,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskgroup) {
 TEST_F(OpenMPIRBuilderTest, CreateTaskgroupWithTasks) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
