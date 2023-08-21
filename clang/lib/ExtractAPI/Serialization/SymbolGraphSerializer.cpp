@@ -328,7 +328,13 @@ serializeDeclarationFragments(const DeclarationFragments &DF) {
 ///     Objective-C methods). Can be used as sub-headings for documentation.
 Object serializeNames(const APIRecord &Record) {
   Object Names;
-  Names["title"] = Record.Name;
+  if (auto *CategoryRecord =
+          dyn_cast_or_null<const ObjCCategoryRecord>(&Record))
+    Names["title"] =
+        (CategoryRecord->Interface.Name + " (" + Record.Name + ")").str();
+  else
+    Names["title"] = Record.Name;
+
   serializeArray(Names, "subHeading",
                  serializeDeclarationFragments(Record.SubHeading));
   DeclarationFragments NavigatorFragments;
@@ -354,6 +360,26 @@ Object serializeSymbolKind(APIRecord::RecordKind RK, Language Lang) {
   case APIRecord::RK_GlobalFunction:
     Kind["identifier"] = AddLangPrefix("func");
     Kind["displayName"] = "Function";
+    break;
+  case APIRecord::RK_GlobalFunctionTemplate:
+    Kind["identifier"] = AddLangPrefix("func");
+    Kind["displayName"] = "Function Template";
+    break;
+  case APIRecord::RK_GlobalFunctionTemplateSpecialization:
+    Kind["identifier"] = AddLangPrefix("func");
+    Kind["displayName"] = "Function Template Specialization";
+    break;
+  case APIRecord::RK_GlobalVariableTemplate:
+    Kind["identifier"] = AddLangPrefix("var");
+    Kind["displayName"] = "Global Variable Template";
+    break;
+  case APIRecord::RK_GlobalVariableTemplateSpecialization:
+    Kind["identifier"] = AddLangPrefix("var");
+    Kind["displayName"] = "Global Variable Template Specialization";
+    break;
+  case APIRecord::RK_GlobalVariableTemplatePartialSpecialization:
+    Kind["identifier"] = AddLangPrefix("var");
+    Kind["displayName"] = "Global Variable Template Partial Specialization";
     break;
   case APIRecord::RK_GlobalVariable:
     Kind["identifier"] = AddLangPrefix("var");
@@ -387,9 +413,16 @@ Object serializeSymbolKind(APIRecord::RecordKind RK, Language Lang) {
     Kind["identifier"] = AddLangPrefix("type.property");
     Kind["displayName"] = "Type Property";
     break;
+  case APIRecord::RK_ClassTemplate:
+  case APIRecord::RK_ClassTemplateSpecialization:
+  case APIRecord::RK_ClassTemplatePartialSpecialization:
   case APIRecord::RK_CXXClass:
     Kind["identifier"] = AddLangPrefix("class");
     Kind["displayName"] = "Class";
+    break;
+  case APIRecord::RK_Concept:
+    Kind["identifier"] = AddLangPrefix("concept");
+    Kind["displayName"] = "Concept";
     break;
   case APIRecord::RK_CXXStaticMethod:
     Kind["identifier"] = AddLangPrefix("type.method");
@@ -432,9 +465,12 @@ Object serializeSymbolKind(APIRecord::RecordKind RK, Language Lang) {
     Kind["displayName"] = "Class";
     break;
   case APIRecord::RK_ObjCCategory:
-    // We don't serialize out standalone Objective-C category symbols yet.
-    llvm_unreachable("Serializing standalone Objective-C category symbols is "
-                     "not supported.");
+    Kind["identifier"] = AddLangPrefix("class.extension");
+    Kind["displayName"] = "Class Extension";
+    break;
+  case APIRecord::RK_ObjCCategoryModule:
+    Kind["identifier"] = AddLangPrefix("module.extension");
+    Kind["displayName"] = "Module Extension";
     break;
   case APIRecord::RK_ObjCProtocol:
     Kind["identifier"] = AddLangPrefix("protocol");
@@ -536,6 +572,52 @@ void serializeAccessMixin(Object &Paren, const RecordTy &Record) {
   serializeString(Paren, "accessLevel", accessLevel);
 }
 
+template <typename RecordTy>
+std::optional<Object> serializeTemplateMixinImpl(const RecordTy &Record,
+                                                 std::true_type) {
+  const auto &Template = Record.Templ;
+  if (Template.empty())
+    return std::nullopt;
+
+  Object Generics;
+  Array GenericParameters;
+  for (const auto Param : Template.getParameters()) {
+    Object Parameter;
+    Parameter["name"] = Param.Name;
+    Parameter["index"] = Param.Index;
+    Parameter["depth"] = Param.Depth;
+    GenericParameters.emplace_back(std::move(Parameter));
+  }
+  if (!GenericParameters.empty())
+    Generics["parameters"] = std::move(GenericParameters);
+
+  Array GenericConstraints;
+  for (const auto Constr : Template.getConstraints()) {
+    Object Constraint;
+    Constraint["kind"] = Constr.Kind;
+    Constraint["lhs"] = Constr.LHS;
+    Constraint["rhs"] = Constr.RHS;
+    GenericConstraints.emplace_back(std::move(Constraint));
+  }
+
+  if (!GenericConstraints.empty())
+    Generics["constraints"] = std::move(GenericConstraints);
+
+  return Generics;
+}
+
+template <typename RecordTy>
+std::optional<Object> serializeTemplateMixinImpl(const RecordTy &Record,
+                                                 std::false_type) {
+  return std::nullopt;
+}
+
+template <typename RecordTy>
+void serializeTemplateMixin(Object &Paren, const RecordTy &Record) {
+  serializeObject(Paren, "swiftGenerics",
+                  serializeTemplateMixinImpl(Record, has_template<RecordTy>()));
+}
+
 struct PathComponent {
   StringRef USR;
   StringRef Name;
@@ -563,14 +645,16 @@ bool generatePathComponents(
     if (!ParentRecord)
       ParentRecord = API.findRecordForUSR(CurrentParent->ParentUSR);
 
-    // If the parent is a category then we need to pretend this belongs to the
-    // associated interface.
+    // If the parent is a category extended from internal module then we need to
+    // pretend this belongs to the associated interface.
     if (auto *CategoryRecord =
             dyn_cast_or_null<ObjCCategoryRecord>(ParentRecord)) {
-      ParentRecord = API.findRecordForUSR(CategoryRecord->Interface.USR);
-      CurrentParentComponent = PathComponent(CategoryRecord->Interface.USR,
-                                             CategoryRecord->Interface.Name,
-                                             APIRecord::RK_ObjCInterface);
+      if (!CategoryRecord->IsFromExternalModule) {
+        ParentRecord = API.findRecordForUSR(CategoryRecord->Interface.USR);
+        CurrentParentComponent = PathComponent(CategoryRecord->Interface.USR,
+                                               CategoryRecord->Interface.Name,
+                                               APIRecord::RK_ObjCInterface);
+      }
     }
 
     // The parent record doesn't exist which means the symbol shouldn't be
@@ -680,6 +764,7 @@ SymbolGraphSerializer::serializeAPIRecord(const RecordTy &Record) const {
 
   serializeFunctionSignatureMixin(Obj, Record);
   serializeAccessMixin(Obj, Record);
+  serializeTemplateMixin(Obj, Record);
 
   return Obj;
 }
@@ -709,8 +794,20 @@ StringRef SymbolGraphSerializer::getRelationshipString(RelationshipKind Kind) {
     return "inheritsFrom";
   case RelationshipKind::ConformsTo:
     return "conformsTo";
+  case RelationshipKind::ExtensionTo:
+    return "extensionTo";
   }
   llvm_unreachable("Unhandled relationship kind");
+}
+
+StringRef SymbolGraphSerializer::getConstraintString(ConstraintKind Kind) {
+  switch (Kind) {
+  case ConstraintKind::Conformance:
+    return "conformance";
+  case ConstraintKind::ConditionalConformance:
+    return "conditionalConformance";
+  }
+  llvm_unreachable("Unhandled constraint kind");
 }
 
 void SymbolGraphSerializer::serializeRelationship(RelationshipKind Kind,
@@ -783,6 +880,97 @@ void SymbolGraphSerializer::visitCXXClassRecord(const CXXClassRecord &Record) {
     serializeRelationship(RelationshipKind::InheritsFrom, Record, Base);
 }
 
+void SymbolGraphSerializer::visitClassTemplateRecord(
+    const ClassTemplateRecord &Record) {
+  auto Class = serializeAPIRecord(Record);
+  if (!Class)
+    return;
+
+  Symbols.emplace_back(std::move(*Class));
+  serializeMembers(Record, Record.Fields);
+  serializeMembers(Record, Record.Methods);
+
+  for (const auto Base : Record.Bases)
+    serializeRelationship(RelationshipKind::InheritsFrom, Record, Base);
+}
+
+void SymbolGraphSerializer::visitClassTemplateSpecializationRecord(
+    const ClassTemplateSpecializationRecord &Record) {
+  auto Class = serializeAPIRecord(Record);
+  if (!Class)
+    return;
+
+  Symbols.emplace_back(std::move(*Class));
+  serializeMembers(Record, Record.Fields);
+  serializeMembers(Record, Record.Methods);
+
+  for (const auto Base : Record.Bases)
+    serializeRelationship(RelationshipKind::InheritsFrom, Record, Base);
+}
+
+void SymbolGraphSerializer::visitClassTemplatePartialSpecializationRecord(
+    const ClassTemplatePartialSpecializationRecord &Record) {
+  auto Class = serializeAPIRecord(Record);
+  if (!Class)
+    return;
+
+  Symbols.emplace_back(std::move(*Class));
+  serializeMembers(Record, Record.Fields);
+  serializeMembers(Record, Record.Methods);
+
+  for (const auto Base : Record.Bases)
+    serializeRelationship(RelationshipKind::InheritsFrom, Record, Base);
+}
+
+void SymbolGraphSerializer::visitConceptRecord(const ConceptRecord &Record) {
+  auto Concept = serializeAPIRecord(Record);
+  if (!Concept)
+    return;
+
+  Symbols.emplace_back(std::move(*Concept));
+}
+
+void SymbolGraphSerializer::visitGlobalVariableTemplateRecord(
+    const GlobalVariableTemplateRecord &Record) {
+  auto GlobalVariableTemplate = serializeAPIRecord(Record);
+  if (!GlobalVariableTemplate)
+    return;
+  Symbols.emplace_back(std::move(*GlobalVariableTemplate));
+}
+
+void SymbolGraphSerializer::visitGlobalVariableTemplateSpecializationRecord(
+    const GlobalVariableTemplateSpecializationRecord &Record) {
+  auto GlobalVariableTemplateSpecialization = serializeAPIRecord(Record);
+  if (!GlobalVariableTemplateSpecialization)
+    return;
+  Symbols.emplace_back(std::move(*GlobalVariableTemplateSpecialization));
+}
+
+void SymbolGraphSerializer::
+    visitGlobalVariableTemplatePartialSpecializationRecord(
+        const GlobalVariableTemplatePartialSpecializationRecord &Record) {
+  auto GlobalVariableTemplatePartialSpecialization = serializeAPIRecord(Record);
+  if (!GlobalVariableTemplatePartialSpecialization)
+    return;
+  Symbols.emplace_back(std::move(*GlobalVariableTemplatePartialSpecialization));
+}
+
+void SymbolGraphSerializer::visitGlobalFunctionTemplateRecord(
+    const GlobalFunctionTemplateRecord &Record) {
+  auto GlobalFunctionTemplate = serializeAPIRecord(Record);
+  if (!GlobalFunctionTemplate)
+    return;
+  Symbols.emplace_back(std::move(*GlobalFunctionTemplate));
+}
+
+void SymbolGraphSerializer::visitGlobalFunctionTemplateSpecializationRecord(
+    const GlobalFunctionTemplateSpecializationRecord &Record) {
+  auto GlobalFunctionTemplateSpecialization = serializeAPIRecord(Record);
+  if (!GlobalFunctionTemplateSpecialization)
+    return;
+  Symbols.emplace_back(std::move(*GlobalFunctionTemplateSpecialization));
+}
+
 void SymbolGraphSerializer::visitObjCContainerRecord(
     const ObjCContainerRecord &Record) {
   auto ObjCContainer = serializeAPIRecord(Record);
@@ -818,6 +1006,45 @@ void SymbolGraphSerializer::visitObjCContainerRecord(
         serializeRelationship(RelationshipKind::ConformsTo, Record, Protocol);
     }
   }
+}
+
+void SymbolGraphSerializer::visitObjCCategoryRecord(
+    const ObjCCategoryRecord &Record) {
+  if (!Record.IsFromExternalModule)
+    return;
+
+  // Check if the current Category' parent has been visited before, if so skip.
+  if (!visitedCategories.contains(Record.Interface.Name)) {
+    visitedCategories.insert(Record.Interface.Name);
+    Object Obj;
+    serializeObject(Obj, "identifier",
+                    serializeIdentifier(Record, API.getLanguage()));
+    serializeObject(Obj, "kind",
+                    serializeSymbolKind(APIRecord::RK_ObjCCategoryModule,
+                                        API.getLanguage()));
+    Obj["accessLevel"] = "public";
+    Symbols.emplace_back(std::move(Obj));
+  }
+
+  Object Relationship;
+  Relationship["source"] = Record.USR;
+  Relationship["target"] = Record.Interface.USR;
+  Relationship["targetFallback"] = Record.Interface.Name;
+  Relationship["kind"] = getRelationshipString(RelationshipKind::ExtensionTo);
+  Relationships.emplace_back(std::move(Relationship));
+
+  auto ObjCCategory = serializeAPIRecord(Record);
+
+  if (!ObjCCategory)
+    return;
+
+  Symbols.emplace_back(std::move(*ObjCCategory));
+  serializeMembers(Record, Record.Methods);
+  serializeMembers(Record, Record.Properties);
+
+  // Surface the protocols of the category to the interface.
+  for (const auto &Protocol : Record.Protocols)
+    serializeRelationship(RelationshipKind::ConformsTo, Record, Protocol);
 }
 
 void SymbolGraphSerializer::visitMacroDefinitionRecord(
@@ -857,6 +1084,9 @@ void SymbolGraphSerializer::serializeSingleRecord(const APIRecord *Record) {
     break;
   case APIRecord::RK_ObjCProtocol:
     visitObjCContainerRecord(*cast<ObjCProtocolRecord>(Record));
+    break;
+  case APIRecord::RK_ObjCCategory:
+    visitObjCCategoryRecord(*cast<ObjCCategoryRecord>(Record));
     break;
   case APIRecord::RK_MacroDefinition:
     visitMacroDefinitionRecord(*cast<MacroDefinitionRecord>(Record));
@@ -924,9 +1154,6 @@ SymbolGraphSerializer::serializeSingleSymbolSGF(StringRef USR,
                                                 const APISet &API) {
   APIRecord *Record = API.findRecordForUSR(USR);
   if (!Record)
-    return {};
-
-  if (isa<ObjCCategoryRecord>(Record))
     return {};
 
   Object Root;

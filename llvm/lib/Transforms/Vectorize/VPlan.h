@@ -820,10 +820,16 @@ class VPRecipeWithIRFlags : public VPRecipeBase {
     FPMathOp,
     Other
   };
+
+public:
   struct WrapFlagsTy {
     char HasNUW : 1;
     char HasNSW : 1;
+
+    WrapFlagsTy(bool HasNUW, bool HasNSW) : HasNUW(HasNUW), HasNSW(HasNSW) {}
   };
+
+private:
   struct ExactFlagsTy {
     char IsExact : 1;
   };
@@ -838,6 +844,8 @@ class VPRecipeWithIRFlags : public VPRecipeBase {
     char AllowReciprocal : 1;
     char AllowContract : 1;
     char ApproxFunc : 1;
+
+    FastMathFlagsTy(const FastMathFlags &FMF);
   };
 
   OperationType OpType;
@@ -863,8 +871,7 @@ public:
       : VPRecipeWithIRFlags(SC, Operands) {
     if (auto *Op = dyn_cast<OverflowingBinaryOperator>(&I)) {
       OpType = OperationType::OverflowingBinOp;
-      WrapFlags.HasNUW = Op->hasNoUnsignedWrap();
-      WrapFlags.HasNSW = Op->hasNoSignedWrap();
+      WrapFlags = {Op->hasNoUnsignedWrap(), Op->hasNoSignedWrap()};
     } else if (auto *Op = dyn_cast<PossiblyExactOperator>(&I)) {
       OpType = OperationType::PossiblyExactOp;
       ExactFlags.IsExact = Op->isExact();
@@ -873,19 +880,25 @@ public:
       GEPFlags.IsInBounds = GEP->isInBounds();
     } else if (auto *Op = dyn_cast<FPMathOperator>(&I)) {
       OpType = OperationType::FPMathOp;
-      FastMathFlags FMF = Op->getFastMathFlags();
-      FMFs.AllowReassoc = FMF.allowReassoc();
-      FMFs.NoNaNs = FMF.noNaNs();
-      FMFs.NoInfs = FMF.noInfs();
-      FMFs.NoSignedZeros = FMF.noSignedZeros();
-      FMFs.AllowReciprocal = FMF.allowReciprocal();
-      FMFs.AllowContract = FMF.allowContract();
-      FMFs.ApproxFunc = FMF.approxFunc();
+      FMFs = Op->getFastMathFlags();
     }
   }
 
+  template <typename IterT>
+  VPRecipeWithIRFlags(const unsigned char SC, IterT Operands,
+                      WrapFlagsTy WrapFlags)
+      : VPRecipeBase(SC, Operands), OpType(OperationType::OverflowingBinOp),
+        WrapFlags(WrapFlags) {}
+
+  template <typename IterT>
+  VPRecipeWithIRFlags(const unsigned char SC, IterT Operands,
+                      FastMathFlags FMFs)
+      : VPRecipeBase(SC, Operands), OpType(OperationType::FPMathOp),
+        FMFs(FMFs) {}
+
   static inline bool classof(const VPRecipeBase *R) {
-    return R->getVPDefID() == VPRecipeBase::VPWidenSC ||
+    return R->getVPDefID() == VPRecipeBase::VPInstructionSC ||
+           R->getVPDefID() == VPRecipeBase::VPWidenSC ||
            R->getVPDefID() == VPRecipeBase::VPWidenGEPSC ||
            R->getVPDefID() == VPRecipeBase::VPReplicateSC;
   }
@@ -947,7 +960,22 @@ public:
     return GEPFlags.IsInBounds;
   }
 
+  /// Returns true if the recipe has fast-math flags.
+  bool hasFastMathFlags() const { return OpType == OperationType::FPMathOp; }
+
   FastMathFlags getFastMathFlags() const;
+
+  bool hasNoUnsignedWrap() const {
+    assert(OpType == OperationType::OverflowingBinOp &&
+           "recipe doesn't have a NUW flag");
+    return WrapFlags.HasNUW;
+  }
+
+  bool hasNoSignedWrap() const {
+    assert(OpType == OperationType::OverflowingBinOp &&
+           "recipe doesn't have a NSW flag");
+    return WrapFlags.HasNSW;
+  }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   void printFlags(raw_ostream &O) const;
@@ -958,7 +986,7 @@ public:
 /// While as any Recipe it may generate a sequence of IR instructions when
 /// executed, these instructions would always form a single-def expression as
 /// the VPInstruction is also a single def-use vertex.
-class VPInstruction : public VPRecipeBase, public VPValue {
+class VPInstruction : public VPRecipeWithIRFlags, public VPValue {
   friend class VPlanSlp;
 
 public:
@@ -974,11 +1002,9 @@ public:
     ActiveLaneMask,
     CalculateTripCountMinusVF,
     CanonicalIVIncrement,
-    CanonicalIVIncrementNUW,
-    // The next two are similar to the above, but instead increment the
+    // The next op is similar to the above, but instead increment the
     // canonical IV separately for each unrolled part.
     CanonicalIVIncrementForPart,
-    CanonicalIVIncrementForPartNUW,
     BranchOnCount,
     BranchOnCond
   };
@@ -986,7 +1012,6 @@ public:
 private:
   typedef unsigned char OpcodeTy;
   OpcodeTy Opcode;
-  FastMathFlags FMF;
   DebugLoc DL;
 
   /// An optional name that can be used for the generated IR instruction.
@@ -998,18 +1023,32 @@ private:
   /// one.
   Value *generateInstruction(VPTransformState &State, unsigned Part);
 
+#if !defined(NDEBUG)
+  /// Return true if the VPInstruction is a floating point math operation, i.e.
+  /// has fast-math flags.
+  bool isFPMathOp() const;
+#endif
+
 protected:
   void setUnderlyingInstr(Instruction *I) { setUnderlyingValue(I); }
 
 public:
   VPInstruction(unsigned Opcode, ArrayRef<VPValue *> Operands, DebugLoc DL,
                 const Twine &Name = "")
-      : VPRecipeBase(VPDef::VPInstructionSC, Operands), VPValue(this),
+      : VPRecipeWithIRFlags(VPDef::VPInstructionSC, Operands), VPValue(this),
         Opcode(Opcode), DL(DL), Name(Name.str()) {}
 
   VPInstruction(unsigned Opcode, std::initializer_list<VPValue *> Operands,
                 DebugLoc DL = {}, const Twine &Name = "")
       : VPInstruction(Opcode, ArrayRef<VPValue *>(Operands), DL, Name) {}
+
+  VPInstruction(unsigned Opcode, std::initializer_list<VPValue *> Operands,
+                WrapFlagsTy WrapFlags, DebugLoc DL = {}, const Twine &Name = "")
+      : VPRecipeWithIRFlags(VPDef::VPInstructionSC, Operands, WrapFlags),
+        VPValue(this), Opcode(Opcode), DL(DL), Name(Name.str()) {}
+
+  VPInstruction(unsigned Opcode, std::initializer_list<VPValue *> Operands,
+                FastMathFlags FMFs, DebugLoc DL = {}, const Twine &Name = "");
 
   VP_CLASSOF_IMPL(VPDef::VPInstructionSC)
 
@@ -1064,9 +1103,6 @@ public:
     }
   }
 
-  /// Set the fast-math flags.
-  void setFastMathFlags(FastMathFlags FMFNew);
-
   /// Returns true if the recipe only uses the first lane of operand \p Op.
   bool onlyFirstLaneUsed(const VPValue *Op) const override {
     assert(is_contained(operands(), Op) &&
@@ -1079,9 +1115,7 @@ public:
     case VPInstruction::ActiveLaneMask:
     case VPInstruction::CalculateTripCountMinusVF:
     case VPInstruction::CanonicalIVIncrement:
-    case VPInstruction::CanonicalIVIncrementNUW:
     case VPInstruction::CanonicalIVIncrementForPart:
-    case VPInstruction::CanonicalIVIncrementForPartNUW:
     case VPInstruction::BranchOnCount:
       return true;
     };
@@ -1693,12 +1727,12 @@ public:
 /// The Operands are {ChainOp, VecOp, [Condition]}.
 class VPReductionRecipe : public VPRecipeBase, public VPValue {
   /// The recurrence decriptor for the reduction in question.
-  const RecurrenceDescriptor *RdxDesc;
+  const RecurrenceDescriptor &RdxDesc;
   /// Pointer to the TTI, needed to create the target reduction
   const TargetTransformInfo *TTI;
 
 public:
-  VPReductionRecipe(const RecurrenceDescriptor *R, Instruction *I,
+  VPReductionRecipe(const RecurrenceDescriptor &R, Instruction *I,
                     VPValue *ChainOp, VPValue *VecOp, VPValue *CondOp,
                     const TargetTransformInfo *TTI)
       : VPRecipeBase(VPDef::VPReductionSC, {ChainOp, VecOp}), VPValue(this, I),
@@ -2105,19 +2139,24 @@ public:
 /// an IV with different start and step values, using Start + CanonicalIV *
 /// Step.
 class VPDerivedIVRecipe : public VPRecipeBase, public VPValue {
-  /// The type of the result value. It may be smaller than the type of the
-  /// induction and in this case it will get truncated to ResultTy.
-  Type *ResultTy;
+  /// If not nullptr, the result of the induction will get truncated to
+  /// TruncResultTy.
+  Type *TruncResultTy;
 
-  /// Induction descriptor for the induction the canonical IV is transformed to.
-  const InductionDescriptor &IndDesc;
+  /// Kind of the induction.
+  const InductionDescriptor::InductionKind Kind;
+  /// If not nullptr, the floating point induction binary operator. Must be set
+  /// for floating point inductions.
+  const FPMathOperator *FPBinOp;
 
 public:
   VPDerivedIVRecipe(const InductionDescriptor &IndDesc, VPValue *Start,
                     VPCanonicalIVPHIRecipe *CanonicalIV, VPValue *Step,
-                    Type *ResultTy)
+                    Type *TruncResultTy)
       : VPRecipeBase(VPDef::VPDerivedIVSC, {Start, CanonicalIV, Step}),
-        VPValue(this), ResultTy(ResultTy), IndDesc(IndDesc) {}
+        VPValue(this), TruncResultTy(TruncResultTy), Kind(IndDesc.getKind()),
+        FPBinOp(dyn_cast_or_null<FPMathOperator>(IndDesc.getInductionBinOp())) {
+  }
 
   ~VPDerivedIVRecipe() override = default;
 

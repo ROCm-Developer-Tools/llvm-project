@@ -57,6 +57,14 @@ _warningFlags = [
     # Don't fail compilation in case the compiler fails to perform the requested
     # loop vectorization.
     "-Wno-pass-failed",
+
+    # TODO: Find out why GCC warns in lots of places (is this a problem with always_inline?)
+    "-Wno-dangling-reference",
+    "-Wno-mismatched-new-delete",
+    "-Wno-redundant-move",
+
+    # This doesn't make sense in real code, but we have to test it because the standard requires us to not break
+    "-Wno-self-move",
 ]
 
 _allStandards = ["c++03", "c++11", "c++14", "c++17", "c++20", "c++23", "c++26"]
@@ -127,6 +135,10 @@ DEFAULT_PARAMETERS = [
             AddFeature("modules-build"),
             AddCompileFlag("-fmodules"),
             AddCompileFlag("-fcxx-modules"), # AppleClang disregards -fmodules entirely when compiling C++. This enables modules for C++.
+            # Note: We use a custom modules cache path to make sure that we don't reuse
+            #       the default one, which can be shared across CI builds with different
+            #       configurations.
+            AddCompileFlag(lambda cfg: f"-fmodules-cache-path={cfg.test_exec_root}/ModuleCache"),
         ]
         if enable_modules == "clang"
         else [

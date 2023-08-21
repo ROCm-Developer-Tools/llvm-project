@@ -2744,7 +2744,15 @@ TEST_F(OpenMPIRBuilderTest, CriticalDirective) {
   PointerType *CriticalNamePtrTy =
       PointerType::getUnqual(ArrayType::get(Type::getInt32Ty(Ctx), 8));
   EXPECT_EQ(CriticalEndCI->getArgOperand(2), CriticalEntryCI->getArgOperand(2));
-  EXPECT_EQ(CriticalEndCI->getArgOperand(2)->getType(), CriticalNamePtrTy);
+  GlobalVariable *GV =
+      dyn_cast<GlobalVariable>(CriticalEndCI->getArgOperand(2));
+  ASSERT_NE(GV, nullptr);
+  EXPECT_EQ(GV->getType(), CriticalNamePtrTy);
+  const DataLayout &DL = M->getDataLayout();
+  const llvm::Align TypeAlign = DL.getABITypeAlign(CriticalNamePtrTy);
+  const llvm::Align PtrAlign = DL.getPointerABIAlignment(GV->getAddressSpace());
+  if (const llvm::MaybeAlign Alignment = GV->getAlign())
+    EXPECT_EQ(*Alignment, std::max(TypeAlign, PtrAlign));
 }
 
 TEST_F(OpenMPIRBuilderTest, OrderedDirectiveDependSource) {
@@ -5096,33 +5104,24 @@ TEST_F(OpenMPIRBuilderTest, TargetDataRegion) {
 }
 
 namespace {
-
 // Some basic handling of argument mapping for the moment
-void CreateDefaultMapInfos(llvm::OpenMPIRBuilder &ompBuilder,
-                           llvm::SmallVectorImpl<llvm::Value *> &args,
-                           llvm::OpenMPIRBuilder::MapInfosTy &combinedInfo) {
-  for (auto arg : args) {
-    if (!arg->getType()->isPointerTy()) {
-      combinedInfo.BasePointers.clear();
-      combinedInfo.Pointers.clear();
-      combinedInfo.Sizes.clear();
-      combinedInfo.Types.clear();
-      combinedInfo.Names.clear();
-      return;
-    }
-    combinedInfo.BasePointers.emplace_back(arg);
-    combinedInfo.Pointers.emplace_back(arg);
+void CreateDefaultMapInfos(llvm::OpenMPIRBuilder &OmpBuilder,
+                           llvm::SmallVectorImpl<llvm::Value *> &Args,
+                           llvm::OpenMPIRBuilder::MapInfosTy &CombinedInfo) {
+  for (auto Arg : Args) {
+    CombinedInfo.BasePointers.emplace_back(Arg);
+    CombinedInfo.Pointers.emplace_back(Arg);
     uint32_t SrcLocStrSize;
-    combinedInfo.Names.emplace_back(ompBuilder.getOrCreateSrcLocStr(
+    CombinedInfo.Names.emplace_back(OmpBuilder.getOrCreateSrcLocStr(
         "Unknown loc - stub implementation", SrcLocStrSize));
-    combinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(
+    CombinedInfo.Types.emplace_back(llvm::omp::OpenMPOffloadMappingFlags(
+        llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TO |
         llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_FROM |
         llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM));
-    combinedInfo.Sizes.emplace_back(ompBuilder.Builder.getInt64(
-        ompBuilder.M.getDataLayout().getTypeAllocSize(arg->getType())));
+    CombinedInfo.Sizes.emplace_back(OmpBuilder.Builder.getInt64(
+        OmpBuilder.M.getDataLayout().getTypeAllocSize(Arg->getType())));
   }
 }
-
 } // namespace
 
 TEST_F(OpenMPIRBuilderTest, TargetRegion) {
@@ -5165,28 +5164,43 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
 
   TargetRegionEntryInfo EntryInfo("func", 42, 4711, 17);
   OpenMPIRBuilder::LocationDescription OmpLoc({Builder.saveIP(), DL});
-
   Builder.restoreIP(OMPBuilder.createTarget(OmpLoc, Builder.saveIP(),
-                                            Builder.saveIP(), EntryInfo, -1, -1,
+                                            Builder.saveIP(), EntryInfo, -1, 0,
                                             Inputs, GenMapInfoCB, BodyGenCB));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
 
-  // Check the outlined call
+  // Check the kernel launch sequence
   auto Iter = F->getEntryBlock().rbegin();
-  CallInst *Call = dyn_cast<CallInst>(&*(++Iter));
-  EXPECT_NE(Call, nullptr);
+  EXPECT_TRUE(isa<BranchInst>(&*(Iter)));
+  BranchInst *Branch = dyn_cast<BranchInst>(&*(Iter));
+  EXPECT_TRUE(isa<CmpInst>(&*(++Iter)));
+  EXPECT_TRUE(isa<CallInst>(&*(++Iter)));
+  CallInst *Call = dyn_cast<CallInst>(&*(Iter));
+
+  // Check that the kernel launch function is called
+  Function *KernelLaunchFunc = Call->getCalledFunction();
+  EXPECT_NE(KernelLaunchFunc, nullptr);
+  StringRef FunctionName = KernelLaunchFunc->getName();
+  EXPECT_TRUE(FunctionName.startswith("__tgt_target_kernel"));
+
+  // Check the fallback call
+  BasicBlock *FallbackBlock = Branch->getSuccessor(0);
+  Iter = FallbackBlock->rbegin();
+  CallInst *FCall = dyn_cast<CallInst>(&*(++Iter));
+  EXPECT_NE(FCall, nullptr);
 
   // Check that the correct aguments are passed in
-  for (auto ArgInput : zip(Call->args(), Inputs)) {
+  for (auto ArgInput : zip(FCall->args(), Inputs)) {
     EXPECT_EQ(std::get<0>(ArgInput), std::get<1>(ArgInput));
   }
 
   // Check that the outlined function exists with the expected prefix
-  Function *OutlinedFunc = Call->getCalledFunction();
+  Function *OutlinedFunc = FCall->getCalledFunction();
   EXPECT_NE(OutlinedFunc, nullptr);
-  StringRef FunctionName = OutlinedFunc->getName();
-  EXPECT_TRUE(FunctionName.startswith("__omp_offloading"));
+  StringRef FunctionName2 = OutlinedFunc->getName();
+  EXPECT_TRUE(FunctionName2.startswith("__omp_offloading"));
+
   EXPECT_FALSE(verifyModule(*M, &errs()));
 }
 
@@ -5228,7 +5242,7 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
 
   Builder.restoreIP(OMPBuilder.createTarget(
       Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
-      /*NumThreads=*/-1, CapturedArgs, GenMapInfoCB, BodyGenCB));
+      /*NumThreads=*/0, CapturedArgs, GenMapInfoCB, BodyGenCB));
 
   Builder.CreateRetVoid();
   OMPBuilder.finalize();
