@@ -2093,9 +2093,30 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
     return combinedInfos;
   };
 
+  // We assume that if there is an omp parallel operation
+  // inside target region, then we have SPMD kernel.
+  // This assumption works correctly for code:
+  // #pragma omp  target{
+  //   #pragma omp parallel {
+  //       // user code
+  //   }
+  // }
+  // but it fails for the code:
+  // #pragma omp  target{
+  //   #pragma omp parallel {
+  //       // user code
+  //   }
+  //   //user code
+  // }
+  // For such kernel we should assume that we have
+  // generic kernel
+  // TODO: Fix assumption
+  bool IsSPMD = false;
+  opInst.walk([&IsSPMD](omp::ParallelOp parallelOp) { IsSPMD = true; });
+
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
       ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
-      defaultValThreads, inputs, genMapInfoCB, bodyCB));
+      defaultValThreads, inputs, genMapInfoCB, bodyCB, IsSPMD));
 
   // Remap access operations to declare target reference pointers for the
   // device, essentially generating extra loadop's as necessary
