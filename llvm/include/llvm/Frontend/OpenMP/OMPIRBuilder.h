@@ -2148,7 +2148,7 @@ public:
                              int32_t NumThreads,
                              SmallVectorImpl<Value *> &Inputs,
                              GenMapInfoCallbackTy GenMapInfoCB,
-                             TargetBodyGenCallbackTy BodyGenCB);
+                             TargetBodyGenCallbackTy BodyGenCB, bool IsSPMD);
 
   /// Returns __kmpc_for_static_init_* runtime function for the specified
   /// size \a IVSize and sign \a IVSigned. Will create a distribute call
