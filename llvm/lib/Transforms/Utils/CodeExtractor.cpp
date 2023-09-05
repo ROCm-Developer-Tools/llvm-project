@@ -865,7 +865,7 @@ Function *CodeExtractor::constructFunction(const ValueSet &inputs,
   StructType *StructTy = nullptr;
   if (AggregateArgs && !AggParamTy.empty()) {
     StructTy = StructType::get(M->getContext(), AggParamTy);
-    ParamTy.push_back(PointerType::get(StructTy, DL.getAllocaAddrSpace()));
+    ParamTy.push_back(PointerType::get(StructTy, 0/*DL.getAllocaAddrSpace()*/));
   }
 
   LLVM_DEBUG({
@@ -1182,7 +1182,7 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
     // Allocate a struct at the beginning of this function
     StructArgTy = StructType::get(newFunction->getContext(), ArgTypes);
     Struct = new AllocaInst(
-        StructArgTy, DL.getAllocaAddrSpace(), nullptr, "structArg",
+        StructArgTy, 0/*DL.getAllocaAddrSpace()*/, nullptr, "structArg",
         AllocationBlock ? &*AllocationBlock->getFirstInsertionPt()
                         : &codeReplacer->getParent()->front().front());
     params.push_back(Struct);
