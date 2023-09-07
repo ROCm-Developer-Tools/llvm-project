@@ -326,4 +326,10 @@ def OMPFunctionFiltering : Pass<"omp-function-filtering"> {
   ];
 }
 
+def OMPWsLoopIndexMemToReg : Pass<"omp-wsloop-index-mem2reg", "mlir::func::FuncOp"> {
+  let summary = "TODO";
+  let constructor = "::fir::createOMPWsLoopIndexMemToRegPass()";
+  let dependentDialects = ["fir::FIROpsDialect", "mlir::omp::OpenMPDialect"];
+}
+
 #endif // FLANG_OPTIMIZER_TRANSFORMS_PASSES

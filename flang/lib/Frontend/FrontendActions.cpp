@@ -318,6 +318,7 @@ bool CodeGenAction::beginSourceFileAction() {
       pm.addPass(fir::createOMPEarlyOutliningPass());
       pm.addPass(fir::createOMPFunctionFilteringPass());
     }
+    pm.addPass(fir::createOMPWsLoopIndexMemToRegPass());
   }
 
   pm.enableVerifier(/*verifyPasses=*/true);
