@@ -6,8 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// TODO
-// This file implements transforms to
+// This file implements transforms to remove `fir.alloca`s, together with their
+// associated `fir.load` and `fir.store` operations, when they are only used to
+// store the index variable of an `omp.wsloop` and never passed by reference.
 //
 //===----------------------------------------------------------------------===//
 
@@ -88,12 +89,10 @@ public:
           // operation.
           for (OpOperand &use : store.getUses()) {
             Operation *owner = use.getOwner();
-            if (isa<fir::StoreOp>(owner)) {
+            if (isa<fir::StoreOp>(owner))
               toDelete.insert(owner);
-            } else if (isa<fir::LoadOp>(owner)) {
+            else if (isa<fir::LoadOp>(owner))
               toDelete.insert(owner);
-              owner->replaceAllUsesWith(ValueRange(arg));
-            }
           }
 
           // Delete now-unused fir.alloca.
@@ -104,6 +103,10 @@ public:
         // Only consider marked operations if all fir.{load,store,alloca}
         // operations associated with the given loop index can be removed.
         opsToDelete.insert(toDelete.begin(), toDelete.end());
+
+        for (Operation *op : toDelete)
+          if (isa<fir::LoadOp>(op))
+            op->replaceAllUsesWith(ValueRange(arg));
       };
 
       for (auto it : llvm::zip(loopArgs, storeAddresses))
