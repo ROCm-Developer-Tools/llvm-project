@@ -632,6 +632,26 @@ def YieldOp : OpenMP_Op<"yield",
 }
 
 //===----------------------------------------------------------------------===//
+// 2.9.4 distribute Construct
+//===----------------------------------------------------------------------===//
+def DistributeOp : OpenMP_Op<"distribute", [RecursiveMemoryEffects]> {
+  let summary = "distribute construct";
+  let description = [{
+    TODO Replace placeholder with upstream definition
+  }];
+
+  let arguments = (ins);
+
+  let regions = (region AnyRegion:$region);
+
+  let assemblyFormat = [{
+    $region attr-dict
+  }];
+
+  let hasVerifier = 0;
+}
+
+//===----------------------------------------------------------------------===//
 // 2.10.1 task Construct
 //===----------------------------------------------------------------------===//
 

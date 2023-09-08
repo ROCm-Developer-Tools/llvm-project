@@ -2085,6 +2085,16 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
       .Case([&](omp::TargetOp) {
         return convertOmpTarget(*op, builder, moduleTranslation);
       })
+      .Case([&](omp::TeamsOp) {
+        // TODO return convertOmpTeams(*op, builder, moduleTranslation);
+        op->emitError("'teams' translation to LLVM IR not supported");
+        return failure();
+      })
+      .Case([&](omp::DistributeOp) {
+        // TODO convertOmpDistribute(*op, builder, moduleTranslation);
+        op->emitError("'distribute' translation to LLVM IR not supported");
+        return failure();
+      })
       .Default([&](Operation *inst) {
         return inst->emitError("unsupported OpenMP operation: ")
                << inst->getName();

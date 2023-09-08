@@ -2416,6 +2416,21 @@ genTeamsOp(Fortran::lower::AbstractConverter &converter,
                                  reductionDeclSymbols));
 }
 
+static mlir::omp::DistributeOp
+genDistributeOp(Fortran::lower::AbstractConverter &converter,
+                Fortran::lower::pft::Evaluation &eval,
+                mlir::Location currentLocation,
+                const Fortran::parser::OmpClauseList &clauseList,
+                bool outerCombined = false) {
+  // TODO Process clauses
+  // ClauseProcessor cp(converter, clauseList);
+  // cp.processAllocate(allocatorOperands, allocateOperands);
+  // ...
+
+  return genOpWithBody<mlir::omp::DistributeOp>(
+      converter, eval, currentLocation, outerCombined, &clauseList);
+}
+
 //===----------------------------------------------------------------------===//
 // genOMP() Code generation helper functions
 //===----------------------------------------------------------------------===//
@@ -2545,7 +2560,9 @@ static void genOMP(Fortran::lower::AbstractConverter &converter,
     }
     if (llvm::omp::allDistributeSet.test(ompDirective)) {
       validDirective = true;
-      TODO(currentLocation, "Distribute construct");
+      bool outerCombined = llvm::omp::topDistributeSet.test(ompDirective);
+      genDistributeOp(converter, eval, currentLocation, loopOpClauseList,
+                      outerCombined);
     }
     if ((llvm::omp::allParallelSet & llvm::omp::loopConstructSet)
             .test(ompDirective)) {
