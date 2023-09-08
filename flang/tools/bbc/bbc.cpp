@@ -329,6 +329,8 @@ static mlir::LogicalResult convertFortranSourceToMLIR(
   // Otherwise run the default passes.
   mlir::PassManager pm(mlirModule->getName(),
                        mlir::OpPassManager::Nesting::Implicit);
+  if (enableOpenMP)
+    fir::createOpenMPFIRPassPipeline(pm, enableOpenMPDevice);
   pm.enableVerifier(/*verifyPasses=*/true);
   (void)mlir::applyPassManagerCLOptions(pm);
   if (passPipeline.hasAnyOccurrences()) {

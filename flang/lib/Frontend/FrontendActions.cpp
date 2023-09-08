@@ -111,6 +111,8 @@ static bool saveMLIRTempFile(const CompilerInvocation &ci,
   return true;
 }
 
+#include "flang/Tools/CLOptions.inc"
+
 //===----------------------------------------------------------------------===//
 // Custom BeginSourceFileAction
 //===----------------------------------------------------------------------===//
@@ -312,13 +314,7 @@ bool CodeGenAction::beginSourceFileAction() {
     if (auto offloadMod = llvm::dyn_cast<mlir::omp::OffloadModuleInterface>(
             mlirModule->getOperation()))
       isDevice = offloadMod.getIsTargetDevice();
-
-    pm.addPass(fir::createOMPMarkDeclareTargetPass());
-    if (isDevice) {
-      pm.addPass(fir::createOMPEarlyOutliningPass());
-      pm.addPass(fir::createOMPFunctionFilteringPass());
-    }
-    pm.addPass(fir::createOMPWsLoopIndexMemToRegPass());
+    fir::createOpenMPFIRPassPipeline(pm, isDevice);
   }
 
   pm.enableVerifier(/*verifyPasses=*/true);
@@ -650,8 +646,6 @@ void GetSymbolsSourcesAction::executeAction() {
 //===----------------------------------------------------------------------===//
 
 CodeGenAction::~CodeGenAction() = default;
-
-#include "flang/Tools/CLOptions.inc"
 
 static llvm::OptimizationLevel
 mapToLevel(const Fortran::frontend::CodeGenOptions &opts) {
