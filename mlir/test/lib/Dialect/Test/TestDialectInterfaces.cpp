@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "TestDialect.h"
+#include "mlir/Interfaces/CSEInterfaces.h"
 #include "mlir/Interfaces/FoldInterfaces.h"
 #include "mlir/Reducer/ReductionPatternInterface.h"
 #include "mlir/Transforms/InliningUtils.h"
@@ -269,6 +270,16 @@ struct TestDialectFoldInterface : public DialectFoldInterface {
   }
 };
 
+struct TestDialectCSEInterface : public DialectCSEInterface {
+  using DialectCSEInterface::DialectCSEInterface;
+
+  bool subexpressionExtractionAllowed(Operation *op) const final {
+    // Don't allow extracting common subexpressions from the region of these
+    // operations.
+    return !isa<NoCSEOneRegionOp>(op);
+  }
+};
+
 /// This class defines the interface for handling inlining with standard
 /// operations.
 struct TestInlinerInterface : public DialectInlinerInterface {
@@ -381,6 +392,7 @@ void TestDialect::registerInterfaces() {
   auto &blobInterface = addInterface<TestResourceBlobManagerInterface>();
   addInterface<TestOpAsmInterface>(blobInterface);
 
-  addInterfaces<TestDialectFoldInterface, TestInlinerInterface,
-                TestReductionPatternInterface, TestBytecodeDialectInterface>();
+  addInterfaces<TestDialectFoldInterface, TestDialectCSEInterface,
+                TestInlinerInterface, TestReductionPatternInterface,
+                TestBytecodeDialectInterface>();
 }
