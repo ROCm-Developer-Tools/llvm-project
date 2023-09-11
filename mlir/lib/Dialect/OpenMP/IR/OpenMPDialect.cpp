@@ -52,7 +52,7 @@ struct OpenMPDialectCSEInterface : public DialectCSEInterface {
 
   bool subexpressionExtractionAllowed(Operation *op) const final {
     // Avoid extracting common subexpressions across op boundaries
-    return !isa<TargetOp, TeamsOp, ParallelOp>(op);
+    return !isa<TargetOp, TeamsOp, DistributeOp, ParallelOp>(op);
   }
 };
 
@@ -61,7 +61,8 @@ struct OpenMPDialectFoldInterface : public DialectFoldInterface {
 
   bool shouldMaterializeInto(Region *region) const final {
     // Avoid folding constants across target regions
-    return isa<TargetOp, TeamsOp, ParallelOp>(region->getParentOp());
+    return isa<TargetOp, TeamsOp, DistributeOp, ParallelOp>(
+        region->getParentOp());
   }
 };
 } // namespace
