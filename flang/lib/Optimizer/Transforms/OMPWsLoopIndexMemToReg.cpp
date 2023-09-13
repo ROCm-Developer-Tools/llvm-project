@@ -62,32 +62,48 @@ public:
                             llvm::ArrayRef<Value> argStores) {
         llvm::SmallPtrSet<Operation *, 4> toDelete;
         for (Value store : argStores) {
+          Operation *allocaOp = store.getDefiningOp();
+
           // Skip argument if storage not defined by a fir.alloca.
-          if (!isa_and_nonnull<fir::AllocaOp>(store.getDefiningOp()))
+          if (!isa_and_nonnull<fir::AllocaOp>(allocaOp))
             return;
 
           // Check that uses of the pointer are all fir.load and fir.store
           // inside of the omp.wsloop currently being visited.
-          bool patternApplicable = true;
+          bool allUsesInsideWsLoop = true, patternApplicable = true;
           for (OpOperand &use : store.getUses()) {
             Operation *owner = use.getOwner();
-            if (owner->getParentOfType<omp::WsLoopOp>() !=
-                    loop.getOperation() ||
-                (!isa<fir::LoadOp>(owner) && !isa<fir::StoreOp>(owner))) {
+            bool insideWsLoop =
+                owner->getParentOfType<omp::WsLoopOp>() == loop.getOperation();
+            if (!insideWsLoop) {
+              allUsesInsideWsLoop = false;
               patternApplicable = false;
               break;
             }
+            if (!isa<fir::LoadOp>(owner) && !isa<fir::StoreOp>(owner))
+              patternApplicable = false;
           }
 
-          // Do not make any modifications if some uses of the pointer are
-          // outside of the omp.wsloop.
+          // Push fir.alloca into the beginning of the loop region.
+          if (allUsesInsideWsLoop) {
+            OpBuilder builder(loop.getRegion());
+            Operation *allocaClone = builder.clone(*allocaOp);
+            allocaOp->replaceAllUsesWith(allocaClone);
+            allocaOp->erase();
+            allocaOp = allocaClone;
+          }
+
+          // Do not make any further modifications if an address to the index
+          // is necessary. Otherwise, the values can be used directly from the
+          // loop region first block's arguments.
           if (!patternApplicable)
             return;
 
           // Remove fir.store operations for that address and replace all
           // fir.load operations with the index as returned by the omp.wsloop
           // operation.
-          for (OpOperand &use : store.getUses()) {
+          for (OpOperand &use :
+               cast<fir::AllocaOp>(allocaOp).getResult().getUses()) {
             Operation *owner = use.getOwner();
             if (isa<fir::StoreOp>(owner))
               toDelete.insert(owner);
@@ -96,8 +112,8 @@ public:
           }
 
           // Delete now-unused fir.alloca.
-          toDelete.insert(store.getDefiningOp());
-          store.dropAllUses();
+          toDelete.insert(allocaOp);
+          allocaOp->dropAllUses();
         }
 
         // Only consider marked operations if all fir.{load,store,alloca}
