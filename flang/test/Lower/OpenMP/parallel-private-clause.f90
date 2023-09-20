@@ -352,9 +352,7 @@ subroutine simd_loop_1
   ! FIRDialect: omp.simdloop for (%[[I:.*]]) : i32 = (%[[LB]]) to (%[[UB]]) inclusive step (%[[STEP]]) {
   !$OMP SIMD PRIVATE(r)
   do i=1, 9
-  ! FIRDialect:     fir.store %[[I]] to %[[LOCAL:.*]] : !fir.ref<i32>
-  ! FIRDialect:     %[[LOAD_IV:.*]] = fir.load %[[LOCAL]] : !fir.ref<i32>
-  ! FIRDialect:     fir.call @_FortranAioOutputInteger32({{.*}}, %[[LOAD_IV]]) {{.*}}: (!fir.ref<i8>, i32) -> i1
+  ! FIRDialect:     fir.call @_FortranAioOutputInteger32({{.*}}, %[[I]]) {{.*}}: (!fir.ref<i8>, i32) -> i1
     print*, i
   end do
   !$OMP END SIMD

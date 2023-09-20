@@ -1,4 +1,6 @@
-// RUN: fir-opt --omp-wsloop-index-mem2reg %s | FileCheck %s
+// RUN: fir-opt --omp-loop-index-mem2reg %s | FileCheck %s
+
+func.func private @foo(%arg0 : !fir.ref<i32>) -> i32
 
 // CHECK-LABEL: @remove_alloca
 func.func @remove_alloca() {
@@ -23,11 +25,9 @@ func.func @remove_alloca() {
       omp.yield
     }
     omp.terminator
-  }
+  }// TODO Add simdloop
   return
 }
-
-func.func private @foo(%arg0 : !fir.ref<i32>) -> i32
 
 // CHECK-LABEL: @push_alloca
 func.func @push_alloca() {
@@ -54,6 +54,8 @@ func.func @push_alloca() {
       omp.yield
     }
     omp.terminator
-  }
+  } // TODO Add simdloop
   return
 }
+
+// TODO Add HLFIR variants

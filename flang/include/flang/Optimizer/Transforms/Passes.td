@@ -326,11 +326,12 @@ def OMPFunctionFiltering : Pass<"omp-function-filtering"> {
   ];
 }
 
-def OMPWsLoopIndexMemToReg : Pass<"omp-wsloop-index-mem2reg", "mlir::func::FuncOp"> {
-  let summary = "Removes allocations for index variables of worksharing loop "
+def OMPLoopIndexMemToReg : Pass<"omp-loop-index-mem2reg", "mlir::func::FuncOp"> {
+  let summary = "Removes allocations for index variables of OpenMP loops "
                 "that are never passed by reference, and instead the indices "
-                "as returned by the `omp.wsloop` operation are used directly.";
-  let constructor = "::fir::createOMPWsLoopIndexMemToRegPass()";
+                "as defined in the form of entry block arguments by the loop "
+                "operation are used directly.";
+  let constructor = "::fir::createOMPLoopIndexMemToRegPass()";
   let dependentDialects = ["fir::FIROpsDialect", "mlir::omp::OpenMPDialect"];
 }
 
