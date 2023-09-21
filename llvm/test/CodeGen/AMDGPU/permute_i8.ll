@@ -2794,6 +2794,41 @@ define hidden void @extract3744(ptr addrspace(1) %in0, ptr addrspace(1) %in1, pt
   ret void
 }
 
+declare i32 @llvm.amdgcn.perm(i32, i32, i32)
+
+define hidden void @extract_perm_3744(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: extract_perm_3744:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v6, v7, 0x3070404
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: extract_perm_3744:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x3070404
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v6, v7, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <4 x i8>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <4 x i8>, ptr addrspace(1) %in1, align 4
+  %cast1 = bitcast <4 x i8> %vec1 to i32
+  %cast2 = bitcast <4 x i8> %vec2 to i32
+  %lo24 = call i32 @llvm.amdgcn.perm(i32 %cast1, i32 %cast1, i32 201523200)
+  %hi8 = call i32 @llvm.amdgcn.perm(i32 %cast2, i32 %cast2, i32 51121164)
+  %res = or i32 %hi8, %lo24
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
 define hidden void @extract1347_v2i16(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
 ; GFX10-LABEL: extract1347_v2i16:
 ; GFX10:       ; %bb.0:
@@ -2844,6 +2879,411 @@ define hidden void @extract1347_v2i16(ptr addrspace(1) %in0, ptr addrspace(1) %i
   %tmp0 = or i32 %byte0, %byte1
   %tmp1 = or i32 %tmp0, %byte2
   %res = or i32 %tmp1, %byte3
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+
+declare i16 @llvm.fshr.i16(i16, i16, i16)
+
+define hidden void @fshri16_8(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshri16_8:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x30407
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshri16_8:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x30407
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshr.i16(i16 %v2e0, i16 %v2e1, i16 8)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshr.i16(i16 %v1e0, i16 %v1e1, i16 8)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshri16_16(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshri16_16:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x3020706
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshri16_16:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x3020706
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshr.i16(i16 %v2e0, i16 %v2e1, i16 16)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshr.i16(i16 %v1e0, i16 %v1e1, i16 16)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshri16_24(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshri16_24:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x30407
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshri16_24:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x30407
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshr.i16(i16 %v2e0, i16 %v2e1, i16 24)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshr.i16(i16 %v1e0, i16 %v1e1, i16 24)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshri16_32(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshri16_32:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x3020706
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshri16_32:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x3020706
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshr.i16(i16 %v2e0, i16 %v2e1, i16 32)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshr.i16(i16 %v1e0, i16 %v1e1, i16 32)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshri16_88(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshri16_88:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x30407
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshri16_88:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x30407
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshr.i16(i16 %v2e0, i16 %v2e1, i16 88)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshr.i16(i16 %v1e0, i16 %v1e1, i16 88)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+declare i16 @llvm.fshl.i16(i16, i16, i16)
+
+define hidden void @fshli16_1347(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshli16_1347:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x30407
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshli16_1347:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x30407
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshl.i16(i16 %v2e0, i16 %v2e1, i16 8)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshl.i16(i16 %v1e0, i16 %v1e1, i16 8)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshli16_16(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshli16_16:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x1000504
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshli16_16:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x1000504
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshl.i16(i16 %v2e0, i16 %v2e1, i16 16)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshl.i16(i16 %v1e0, i16 %v1e1, i16 16)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshli16_24(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshli16_24:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x30407
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshli16_24:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x30407
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshl.i16(i16 %v2e0, i16 %v2e1, i16 24)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshl.i16(i16 %v1e0, i16 %v1e1, i16 24)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshli16_32(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshli16_32:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x1000504
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshli16_32:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x1000504
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshl.i16(i16 %v2e0, i16 %v2e1, i16 32)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshl.i16(i16 %v1e0, i16 %v1e1, i16 32)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
+  store i32 %res, ptr addrspace(1) %out0, align 4
+  ret void
+}
+
+define hidden void @fshli16_88(ptr addrspace(1) %in0, ptr addrspace(1) %in1, ptr addrspace(1) %out0) {
+; GFX10-LABEL: fshli16_88:
+; GFX10:       ; %bb.0:
+; GFX10-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX10-NEXT:    global_load_dword v6, v[0:1], off
+; GFX10-NEXT:    global_load_dword v7, v[2:3], off
+; GFX10-NEXT:    s_waitcnt vmcnt(0)
+; GFX10-NEXT:    v_perm_b32 v0, v7, v6, 0x30407
+; GFX10-NEXT:    global_store_dword v[4:5], v0, off
+; GFX10-NEXT:    s_setpc_b64 s[30:31]
+;
+; GFX9-LABEL: fshli16_88:
+; GFX9:       ; %bb.0:
+; GFX9-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+; GFX9-NEXT:    global_load_dword v6, v[0:1], off
+; GFX9-NEXT:    global_load_dword v7, v[2:3], off
+; GFX9-NEXT:    s_mov_b32 s4, 0x30407
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    v_perm_b32 v0, v7, v6, s4
+; GFX9-NEXT:    global_store_dword v[4:5], v0, off
+; GFX9-NEXT:    s_waitcnt vmcnt(0)
+; GFX9-NEXT:    s_setpc_b64 s[30:31]
+  %vec1 = load <2 x i16>, ptr addrspace(1) %in0, align 4
+  %vec2 = load <2 x i16>, ptr addrspace(1) %in1, align 4
+  %v1e0 = extractelement <2 x i16> %vec1, i64 0
+  %v1e1 = extractelement <2 x i16> %vec1, i64 1
+  %v2e0 = extractelement <2 x i16> %vec2, i64 0
+  %v2e1 = extractelement <2 x i16> %vec2, i64 1
+
+  %tmp01.0 = call i16 @llvm.fshl.i16(i16 %v2e0, i16 %v2e1, i16 88)
+  %byte01 = zext i16 %tmp01.0 to i32
+
+  %tmp23.0 = call i16 @llvm.fshl.i16(i16 %v1e0, i16 %v1e1, i16 88)
+  %tmp23.1 = zext i16 %tmp23.0 to i32
+  %byte23 = shl i32 %tmp23.1, 16
+  %res = or i32 %byte01, %byte23
   store i32 %res, ptr addrspace(1) %out0, align 4
   ret void
 }

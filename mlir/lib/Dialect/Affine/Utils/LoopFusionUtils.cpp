@@ -361,7 +361,7 @@ static LogicalResult promoteSingleIterReductionLoop(AffineForOp forOp,
   std::optional<uint64_t> tripCount = getConstantTripCount(forOp);
   if (!tripCount || *tripCount != 1)
     return failure();
-  auto iterOperands = forOp.getIterOperands();
+  auto iterOperands = forOp.getInits();
   auto *parentOp = forOp->getParentOp();
   if (!isa<AffineForOp>(parentOp))
     return failure();
@@ -605,7 +605,7 @@ bool mlir::affine::getFusionComputeCost(AffineForOp srcForOp,
     // 'insertPointParent'.
     for (Value memref : storeMemrefs) {
       for (auto *user : memref.getUsers()) {
-        if (auto loadOp = dyn_cast<AffineReadOpInterface>(user)) {
+        if (dyn_cast<AffineReadOpInterface>(user)) {
           SmallVector<AffineForOp, 4> loops;
           // Check if any loop in loop nest surrounding 'user' is
           // 'insertPointParent'.

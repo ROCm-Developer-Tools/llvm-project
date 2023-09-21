@@ -10,6 +10,8 @@
 
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Bufferization/IR/UnstructuredControlFlow.h"
+#include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -99,43 +101,79 @@ struct ConditionOpInterface
   }
 };
 
+/// Return the unique scf.yield op. If there are multiple or no scf.yield ops,
+/// return an empty op.
+static scf::YieldOp getUniqueYieldOp(scf::ExecuteRegionOp executeRegionOp) {
+  scf::YieldOp result;
+  for (Block &block : executeRegionOp.getRegion()) {
+    if (auto yieldOp = dyn_cast<scf::YieldOp>(block.getTerminator())) {
+      if (result)
+        return {};
+      result = yieldOp;
+    }
+  }
+  return result;
+}
+
 /// Bufferization of scf.execute_region. Can be analyzed, but bufferization not
 /// fully implemented at the moment.
 struct ExecuteRegionOpInterface
-    : public BufferizableOpInterface::ExternalModel<ExecuteRegionOpInterface,
-                                                    scf::ExecuteRegionOp> {
+    : public OpWithUnstructuredControlFlowBufferizableOpInterfaceExternalModel<
+          ExecuteRegionOpInterface, scf::ExecuteRegionOp> {
+
+  static bool supportsUnstructuredControlFlow() { return true; }
+
+  bool isWritable(Operation *op, Value value,
+                  const AnalysisState &state) const {
+    return true;
+  }
+
+  LogicalResult verifyAnalysis(Operation *op,
+                               const AnalysisState &state) const {
+    auto executeRegionOp = cast<scf::ExecuteRegionOp>(op);
+    // TODO: scf.execute_region with multiple yields are not supported.
+    if (!getUniqueYieldOp(executeRegionOp))
+      return op->emitOpError("op without unique scf.yield is not supported");
+    return success();
+  }
+
   AliasingOpOperandList
   getAliasingOpOperands(Operation *op, Value value,
                         const AnalysisState &state) const {
+    if (auto bbArg = dyn_cast<BlockArgument>(value))
+      return getAliasingBranchOpOperands(op, bbArg, state);
+
     // ExecuteRegionOps do not have tensor OpOperands. The yielded value can be
     // any SSA value that is in scope. To allow for use-def chain traversal
     // through ExecuteRegionOps in the analysis, the corresponding yield value
     // is considered to be aliasing with the result.
     auto executeRegionOp = cast<scf::ExecuteRegionOp>(op);
-    size_t resultNum = std::distance(op->getOpResults().begin(),
-                                     llvm::find(op->getOpResults(), value));
-    // TODO: Support multiple blocks.
-    assert(executeRegionOp.getRegion().getBlocks().size() == 1 &&
-           "expected exactly 1 block");
-    auto yieldOp = dyn_cast<scf::YieldOp>(
-        executeRegionOp.getRegion().front().getTerminator());
-    assert(yieldOp && "expected scf.yield terminator in scf.execute_region");
+    auto it = llvm::find(op->getOpResults(), value);
+    assert(it != op->getOpResults().end() && "invalid value");
+    size_t resultNum = std::distance(op->getOpResults().begin(), it);
+    auto yieldOp = getUniqueYieldOp(executeRegionOp);
+    // Note: If there is no unique scf.yield op, `verifyAnalysis` will fail.
+    if (!yieldOp)
+      return {};
     return {{&yieldOp->getOpOperand(resultNum), BufferRelation::Equivalent}};
   }
 
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
                           const BufferizationOptions &options) const {
     auto executeRegionOp = cast<scf::ExecuteRegionOp>(op);
-    assert(executeRegionOp.getRegion().getBlocks().size() == 1 &&
-           "only 1 block supported");
-    auto yieldOp =
-        cast<scf::YieldOp>(executeRegionOp.getRegion().front().getTerminator());
+    auto yieldOp = getUniqueYieldOp(executeRegionOp);
     TypeRange newResultTypes(yieldOp.getResults());
 
     // Create new op and move over region.
     auto newOp =
         rewriter.create<scf::ExecuteRegionOp>(op->getLoc(), newResultTypes);
     newOp.getRegion().takeBody(executeRegionOp.getRegion());
+
+    // Bufferize every block.
+    for (Block &block : newOp.getRegion())
+      if (failed(bufferization::bufferizeBlockSignature(&block, rewriter,
+                                                        options)))
+        return failure();
 
     // Update all uses of the old op.
     rewriter.setInsertionPointAfter(newOp);
@@ -287,7 +325,7 @@ DenseSet<int64_t> getEquivalentBuffers(Block::BlockArgListType bbArgs,
 /// Helper function for loop bufferization. Return the bufferized values of the
 /// given OpOperands. If an operand is not a tensor, return the original value.
 static FailureOr<SmallVector<Value>>
-getBuffers(RewriterBase &rewriter, MutableArrayRef<OpOperand> operands,
+getBuffers(RewriterBase &rewriter, MutableOperandRange operands,
            const BufferizationOptions &options) {
   SmallVector<Value> result;
   for (OpOperand &opOperand : operands) {
@@ -451,8 +489,7 @@ struct ForOpInterface
     auto forOp = cast<scf::ForOp>(op);
     OpOperand &forOperand = forOp.getOpOperandForResult(opResult);
     auto bbArg = forOp.getRegionIterArgForOpOperand(forOperand);
-    auto yieldOp =
-        cast<scf::YieldOp>(forOp.getLoopBody().front().getTerminator());
+    auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
     bool equivalentYield = state.areEquivalentBufferizedValues(
         bbArg, yieldOp->getOperand(opResult.getResultNumber()));
     return equivalentYield ? BufferRelation::Equivalent
@@ -487,8 +524,7 @@ struct ForOpInterface
     // satisfied. Otherwise, we cannot be sure and must yield a new buffer copy.
     // (New buffer copies do not alias with any buffer.)
     auto forOp = cast<scf::ForOp>(op);
-    auto yieldOp =
-        cast<scf::YieldOp>(forOp.getLoopBody().front().getTerminator());
+    auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
     OpBuilder::InsertionGuard g(rewriter);
     rewriter.setInsertionPoint(yieldOp);
 
@@ -507,9 +543,8 @@ struct ForOpInterface
         yieldValues.push_back(value);
         continue;
       }
-      FailureOr<Value> alloc =
-          allocateTensorForShapedValue(rewriter, yieldOp.getLoc(), value,
-                                       /*escape=*/true, state.getOptions());
+      FailureOr<Value> alloc = allocateTensorForShapedValue(
+          rewriter, yieldOp.getLoc(), value, state.getOptions());
       if (failed(alloc))
         return failure();
       yieldValues.push_back(*alloc);
@@ -541,8 +576,7 @@ struct ForOpInterface
             .getResultNumber();
 
     // Compute the bufferized type.
-    auto yieldOp =
-        cast<scf::YieldOp>(forOp.getLoopBody().front().getTerminator());
+    auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
     Value yieldedValue = yieldOp.getOperand(resultNum);
     BlockArgument iterArg = forOp.getRegionIterArgs()[resultNum];
     Value initArg = forOp.getInitArgs()[resultNum];
@@ -553,7 +587,7 @@ struct ForOpInterface
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
                           const BufferizationOptions &options) const {
     auto forOp = cast<scf::ForOp>(op);
-    Block *oldLoopBody = &forOp.getLoopBody().front();
+    Block *oldLoopBody = forOp.getBody();
 
     // Indices of all iter_args that have tensor type. These are the ones that
     // are bufferized.
@@ -561,7 +595,7 @@ struct ForOpInterface
 
     // The new memref init_args of the loop.
     FailureOr<SmallVector<Value>> maybeInitArgs =
-        getBuffers(rewriter, forOp.getIterOpOperands(), options);
+        getBuffers(rewriter, forOp.getInitArgsMutable(), options);
     if (failed(maybeInitArgs))
       return failure();
     SmallVector<Value> initArgs = *maybeInitArgs;
@@ -587,7 +621,7 @@ struct ForOpInterface
         forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
         forOp.getStep(), castedInitArgs);
     newForOp->setAttrs(forOp->getAttrs());
-    Block *loopBody = &newForOp.getLoopBody().front();
+    Block *loopBody = newForOp.getBody();
 
     // Set up new iter_args. The loop body uses tensors, so wrap the (memref)
     // iter_args of the new loop in ToTensorOps.
@@ -616,12 +650,11 @@ struct ForOpInterface
                                const AnalysisState &state) const {
     const auto &options =
         static_cast<const OneShotBufferizationOptions &>(state.getOptions());
-    if (options.allowReturnAllocs)
+    if (options.allowReturnAllocsFromLoops)
       return success();
 
     auto forOp = cast<scf::ForOp>(op);
-    auto yieldOp =
-        cast<scf::YieldOp>(forOp.getLoopBody().front().getTerminator());
+    auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
     for (OpResult opResult : op->getOpResults()) {
       if (!isa<TensorType>(opResult.getType()))
         continue;
@@ -754,9 +787,8 @@ struct WhileOpInterface
         beforeYieldValues.push_back(value);
         continue;
       }
-      FailureOr<Value> alloc =
-          allocateTensorForShapedValue(rewriter, conditionOp.getLoc(), value,
-                                       /*escape=*/true, state.getOptions());
+      FailureOr<Value> alloc = allocateTensorForShapedValue(
+          rewriter, conditionOp.getLoc(), value, state.getOptions());
       if (failed(alloc))
         return failure();
       beforeYieldValues.push_back(*alloc);
@@ -780,7 +812,7 @@ struct WhileOpInterface
 
     // The new memref init_args of the loop.
     FailureOr<SmallVector<Value>> maybeInitArgs =
-        getBuffers(rewriter, whileOp->getOpOperands(), options);
+        getBuffers(rewriter, whileOp.getInitsMutable(), options);
     if (failed(maybeInitArgs))
       return failure();
     SmallVector<Value> initArgs = *maybeInitArgs;
@@ -902,7 +934,7 @@ struct WhileOpInterface
     auto whileOp = cast<scf::WhileOp>(op);
     const auto &options =
         static_cast<const OneShotBufferizationOptions &>(state.getOptions());
-    if (options.allowReturnAllocs)
+    if (options.allowReturnAllocsFromLoops)
       return success();
 
     auto conditionOp = whileOp.getConditionOp();
@@ -1156,6 +1188,10 @@ struct ForallOpInterface
         return true;
     }
     return false;
+  }
+
+  bool isParallelRegion(Operation *op, unsigned index) const {
+    return isRepetitiveRegion(op, index);
   }
 };
 

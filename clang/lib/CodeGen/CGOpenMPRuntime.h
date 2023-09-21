@@ -640,18 +640,19 @@ public:
                                                 int32_t &DefaultVal);
   llvm::Value *emitNumTeamsForTargetDirective(CodeGenFunction &CGF,
                                               const OMPExecutableDirective &D);
-  /// Emit the number of threads for a target directive.  Inspect the
-  /// thread_limit clause associated with a teams construct combined or closely
-  /// nested with the target directive.
-  ///
-  /// Emit the num_threads clause for directives such as 'target parallel' that
-  /// have no associated teams construct.
-  ///
-  /// Otherwise, return nullptr.
-  const Expr *
-  getNumThreadsExprForTargetDirective(CodeGenFunction &CGF,
-                                      const OMPExecutableDirective &D,
-                                      int32_t &DefaultVal);
+
+  /// Check for a number of threads upper bound constant value (stored in \p
+  /// UpperBound), or expression (returned). If the value is conditional (via an
+  /// if-clause), store the condition in \p CondExpr. Similarly, a potential
+  /// thread limit expression is stored in \p ThreadLimitExpr. If \p
+  /// UpperBoundOnly is true, no expression evaluation is perfomed.
+  const Expr *getNumThreadsExprForTargetDirective(
+      CodeGenFunction &CGF, const OMPExecutableDirective &D,
+      uint32_t &UpperBound, bool UpperBoundOnly,
+      llvm::Value **CondExpr = nullptr, const Expr **ThreadLimitExpr = nullptr);
+
+  /// Emit an expression that denotes the number of threads a target region
+  /// shall use. Will generate "i32 0" to allow the runtime to choose.
   llvm::Value *
   emitNumThreadsForTargetDirective(CodeGenFunction &CGF,
                                    const OMPExecutableDirective &D);
@@ -1087,6 +1088,13 @@ public:
                                               llvm::GlobalVariable *Addr,
                                               bool PerformInit);
 
+  /// Emit code for handling declare target functions in the runtime.
+  /// \param FD Declare target function.
+  /// \param Addr Address of the global \a FD.
+  /// \param PerformInit true if initialization expression is not constant.
+  virtual void emitDeclareTargetFunction(const FunctionDecl *FD,
+                                         llvm::GlobalValue *GV);
+
   /// Creates artificial threadprivate variable with name \p Name and type \p
   /// VarType.
   /// \param VarType Type of the artificial threadprivate variable.
@@ -1426,6 +1434,14 @@ public:
   /// \param ThreadLimit An integer expression of threads.
   virtual void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
                                   const Expr *ThreadLimit, SourceLocation Loc);
+
+  /// Emits call to void __kmpc_set_thread_limit(ident_t *loc, kmp_int32
+  /// global_tid, kmp_int32 thread_limit) to generate code for
+  /// thread_limit clause on target directive
+  /// \param ThreadLimit An integer expression of threads.
+  virtual void emitThreadLimitClause(CodeGenFunction &CGF,
+                                     const Expr *ThreadLimit,
+                                     SourceLocation Loc);
 
   /// Struct that keeps all the relevant information that should be kept
   /// throughout a 'target data' region.

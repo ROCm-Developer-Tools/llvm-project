@@ -1603,42 +1603,6 @@ public:
   static CallInst *Create(CallInst *CI, ArrayRef<OperandBundleDef> Bundles,
                           Instruction *InsertPt = nullptr);
 
-  /// Generate the IR for a call to malloc:
-  /// 1. Compute the malloc call's argument as the specified type's size,
-  ///    possibly multiplied by the array size if the array size is not
-  ///    constant 1.
-  /// 2. Call malloc with that argument.
-  /// 3. Bitcast the result of the malloc call to the specified type.
-  static Instruction *CreateMalloc(Instruction *InsertBefore, Type *IntPtrTy,
-                                   Type *AllocTy, Value *AllocSize,
-                                   Value *ArraySize = nullptr,
-                                   Function *MallocF = nullptr,
-                                   const Twine &Name = "");
-  static Instruction *CreateMalloc(BasicBlock *InsertAtEnd, Type *IntPtrTy,
-                                   Type *AllocTy, Value *AllocSize,
-                                   Value *ArraySize = nullptr,
-                                   Function *MallocF = nullptr,
-                                   const Twine &Name = "");
-  static Instruction *
-  CreateMalloc(Instruction *InsertBefore, Type *IntPtrTy, Type *AllocTy,
-               Value *AllocSize, Value *ArraySize = nullptr,
-               ArrayRef<OperandBundleDef> Bundles = std::nullopt,
-               Function *MallocF = nullptr, const Twine &Name = "");
-  static Instruction *
-  CreateMalloc(BasicBlock *InsertAtEnd, Type *IntPtrTy, Type *AllocTy,
-               Value *AllocSize, Value *ArraySize = nullptr,
-               ArrayRef<OperandBundleDef> Bundles = std::nullopt,
-               Function *MallocF = nullptr, const Twine &Name = "");
-  /// Generate the IR for a call to the builtin free function.
-  static Instruction *CreateFree(Value *Source, Instruction *InsertBefore);
-  static Instruction *CreateFree(Value *Source, BasicBlock *InsertAtEnd);
-  static Instruction *CreateFree(Value *Source,
-                                 ArrayRef<OperandBundleDef> Bundles,
-                                 Instruction *InsertBefore);
-  static Instruction *CreateFree(Value *Source,
-                                 ArrayRef<OperandBundleDef> Bundles,
-                                 BasicBlock *InsertAtEnd);
-
   // Note that 'musttail' implies 'tail'.
   enum TailCallKind : unsigned {
     TCK_None = 0,
@@ -2336,7 +2300,7 @@ public:
 
   /// Return true if this shuffle mask is an insert subvector mask.
   /// A valid insert subvector mask inserts the lowest elements of a second
-  /// source operand into an in-place first source operand operand.
+  /// source operand into an in-place first source operand.
   /// Both the sub vector width and the insertion index is returned.
   static bool isInsertSubvectorMask(ArrayRef<int> Mask, int NumSrcElts,
                                     int &NumSubElts, int &Index);
@@ -2443,6 +2407,21 @@ public:
     SmallVector<unsigned, 8> StartIndexes;
     return isInterleaveMask(Mask, Factor, NumInputElts, StartIndexes);
   }
+
+  /// Checks if the shuffle is a bit rotation of the first operand across
+  /// multiple subelements, e.g:
+  ///
+  /// shuffle <8 x i8> %a, <8 x i8> poison, <8 x i32> <1, 0, 3, 2, 5, 4, 7, 6>
+  ///
+  /// could be expressed as
+  ///
+  /// rotl <4 x i16> %a, 8
+  ///
+  /// If it can be expressed as a rotation, returns the number of subelements to
+  /// group by in NumSubElts and the number of bits to rotate left in RotateAmt.
+  static bool isBitRotateMask(ArrayRef<int> Mask, unsigned EltSizeInBits,
+                              unsigned MinSubElts, unsigned MaxSubElts,
+                              unsigned &NumSubElts, unsigned &RotateAmt);
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Instruction *I) {

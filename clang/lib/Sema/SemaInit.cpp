@@ -2395,7 +2395,8 @@ void InitListChecker::CheckStructUnionTypes(
       if (HasDesignatedInit && InitializedFields.count(*it))
         continue;
 
-      if (!it->isUnnamedBitfield() && !it->hasInClassInitializer()) {
+      if (!it->isUnnamedBitfield() && !it->hasInClassInitializer() &&
+          !it->getType()->isIncompleteArrayType()) {
         SemaRef.Diag(IList->getSourceRange().getEnd(),
                      diag::warn_missing_field_initializers)
             << *it;
@@ -2858,7 +2859,8 @@ InitListChecker::CheckDesignatedInitializer(const InitializedEntity &Entity,
 
       if (PrevField &&
           PrevField->getFieldIndex() > KnownField->getFieldIndex()) {
-        SemaRef.Diag(DIE->getBeginLoc(), diag::ext_designated_init_reordered)
+        SemaRef.Diag(DIE->getInit()->getBeginLoc(),
+                     diag::ext_designated_init_reordered)
             << KnownField << PrevField << DIE->getSourceRange();
 
         unsigned OldIndex = StructuredIndex - 1;
@@ -5671,8 +5673,6 @@ static void TryOrBuildParenListInitialization(
            diag::warn_cxx17_compat_aggregate_init_paren_list)
         << Kind.getLocation() << SR << ResultType;
   }
-
-  return;
 }
 
 /// Attempt a user-defined conversion between two types (C++ [dcl.init]),

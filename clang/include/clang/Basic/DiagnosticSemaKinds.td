@@ -310,10 +310,12 @@ def err_anyx86_interrupt_attribute : Error<
   "a pointer as the first parameter|a %2 type as the second parameter}1">;
 def err_anyx86_interrupt_called : Error<
   "interrupt service routine cannot be called directly">;
-def warn_anyx86_interrupt_regsave : Warning<
-  "interrupt service routine should only call a function"
-  " with attribute 'no_caller_saved_registers'">,
-  InGroup<DiagGroup<"interrupt-service-routine">>;
+def warn_anyx86_excessive_regsave : Warning<
+  "%select{interrupt service routine|function with attribute"
+  " 'no_caller_saved_registers'}0 should only call a function"
+  " with attribute 'no_caller_saved_registers'"
+  " or be compiled with '-mgeneral-regs-only'">,
+  InGroup<DiagGroup<"excessive-regsave">>;
 def warn_arm_interrupt_calling_convention : Warning<
    "call to function without interrupt attribute could clobber interruptee's VFP registers">,
    InGroup<Extra>;
@@ -411,7 +413,7 @@ def warn_reserved_extern_symbol: Warning<
   InGroup<ReservedIdentifier>, DefaultIgnore;
 def warn_deprecated_literal_operator_id: Warning<
   "identifier %0 preceded by whitespace in a literal operator declaration "
-  "is deprecated">, InGroup<DeprecatedLiteralOperator>;
+  "is deprecated">, InGroup<DeprecatedLiteralOperator>, DefaultIgnore;
 def warn_reserved_module_name : Warning<
   "%0 is a reserved name for a module">, InGroup<ReservedModuleIdentifier>;
 
@@ -854,6 +856,11 @@ def warn_fortify_strlen_overflow: Warning<
 
 def warn_fortify_source_format_overflow : Warning<
   "'%0' will always overflow; destination buffer has size %1,"
+  " but format string expands to at least %2">,
+  InGroup<FortifySource>;
+
+def warn_fortify_source_format_truncation: Warning<
+  "'%0' will always be truncated; specified size is %1,"
   " but format string expands to at least %2">,
   InGroup<FortifySource>;
 
@@ -11864,13 +11871,13 @@ def err_std_source_location_impl_malformed : Error<
   "'std::source_location::__impl' must be standard-layout and have only two 'const char *' fields '_M_file_name' and '_M_function_name', and two integral fields '_M_line' and '_M_column'">;
 
 // HLSL Diagnostics
-def err_hlsl_attr_unsupported_in_stage : Error<"attribute %0 is unsupported in %select{Pixel|Vertex|Geometry|Hull|Domain|Compute|Library|RayGeneration|Intersection|AnyHit|ClosestHit|Miss|Callable|Mesh|Amplification|Invalid}1 shaders, requires %2">;
+def err_hlsl_attr_unsupported_in_stage : Error<"attribute %0 is unsupported in '%1' shaders, requires %select{|one of the following: }2%3">;
 def err_hlsl_attr_invalid_type : Error<
    "attribute %0 only applies to a field or parameter of type '%1'">;
 def err_hlsl_attr_invalid_ast_node : Error<
    "attribute %0 only applies to %1">;
 def err_hlsl_entry_shader_attr_mismatch : Error<
-   "%0 attribute on entry function does not match the pipeline stage">;
+   "%0 attribute on entry function does not match the target profile">;
 def err_hlsl_numthreads_argument_oor : Error<"argument '%select{X|Y|Z}0' to numthreads attribute cannot exceed %1">;
 def err_hlsl_numthreads_invalid : Error<"total number of threads cannot exceed %0">;
 def err_hlsl_missing_numthreads : Error<"missing numthreads attribute for %0 shader entry">;

@@ -1655,7 +1655,9 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
           tok::kw___is_union,
           tok::kw___is_unsigned,
           tok::kw___is_void,
-          tok::kw___is_volatile))
+          tok::kw___is_volatile,
+          tok::kw___reference_binds_to_temporary,
+          tok::kw___reference_constructs_from_temporary))
     // GNU libstdc++ 4.2 and libc++ use certain intrinsic names as the
     // name of struct templates, but some are keywords in GCC >= 4.3
     // and Clang. Therefore, when we see the token sequence "struct
@@ -3230,13 +3232,21 @@ ExprResult Parser::ParseCXXMemberInitializer(Decl *D, bool IsFunction,
   assert(Tok.isOneOf(tok::equal, tok::l_brace) &&
          "Data member initializer not starting with '=' or '{'");
 
+  bool IsFieldInitialization = isa_and_present<FieldDecl>(D);
+
   EnterExpressionEvaluationContext Context(
       Actions,
-      isa_and_present<FieldDecl>(D)
+      IsFieldInitialization
           ? Sema::ExpressionEvaluationContext::PotentiallyEvaluatedIfUsed
           : Sema::ExpressionEvaluationContext::PotentiallyEvaluated,
       D);
-  Actions.ExprEvalContexts.back().InImmediateEscalatingFunctionContext = true;
+
+  // CWG2760
+  // Default member initializers used to initialize a base or member subobject
+  // [...] are considered to be part of the function body
+  Actions.ExprEvalContexts.back().InImmediateEscalatingFunctionContext =
+      IsFieldInitialization;
+
   if (TryConsumeToken(tok::equal, EqualLoc)) {
     if (Tok.is(tok::kw_delete)) {
       // In principle, an initializer of '= delete p;' is legal, but it will
@@ -4715,9 +4725,9 @@ void Parser::ParseMicrosoftUuidAttributeArgs(ParsedAttributes &Attrs) {
   }
 
   ArgsVector ArgExprs;
-  if (Tok.is(tok::string_literal)) {
+  if (isTokenStringLiteral()) {
     // Easy case: uuid("...") -- quoted string.
-    ExprResult StringResult = ParseStringLiteralExpression();
+    ExprResult StringResult = ParseUnevaluatedStringLiteralExpression();
     if (StringResult.isInvalid())
       return;
     ArgExprs.push_back(StringResult.get());
@@ -4772,7 +4782,7 @@ void Parser::ParseMicrosoftUuidAttributeArgs(ParsedAttributes &Attrs) {
     Toks[0].setLiteralData(StrBuffer.data());
     Toks[0].setLength(StrBuffer.size());
     StringLiteral *UuidString =
-        cast<StringLiteral>(Actions.ActOnStringLiteral(Toks, nullptr).get());
+        cast<StringLiteral>(Actions.ActOnUnevaluatedStringLiteral(Toks).get());
     ArgExprs.push_back(UuidString);
   }
 

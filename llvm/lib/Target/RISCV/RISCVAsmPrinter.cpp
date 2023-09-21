@@ -88,8 +88,7 @@ public:
   void emitEndOfAsmFile(Module &M) override;
 
   void emitFunctionEntryLabel() override;
-  void emitDirectiveOptionArch();
-  bool isSameAttribute();
+  bool emitDirectiveOptionArch();
 
 private:
   void emitAttributes();
@@ -237,7 +236,7 @@ bool RISCVAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
   // RISCVDAGToDAGISel::SelectInlineAsmMemoryOperand).
   if (!AddrReg.isReg())
     return true;
-  if (!Offset.isImm() && !Offset.isGlobal())
+  if (!Offset.isImm() && !Offset.isGlobal() && !Offset.isBlockAddress())
     return true;
 
   MCOperand MCO;
@@ -246,13 +245,13 @@ bool RISCVAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 
   if (Offset.isImm())
     OS << MCO.getImm();
-  else if (Offset.isGlobal())
+  else if (Offset.isGlobal() || Offset.isBlockAddress())
     OS << *MCO.getExpr();
   OS << "(" << RISCVInstPrinter::getRegisterName(AddrReg.getReg()) << ")";
   return false;
 }
 
-void RISCVAsmPrinter::emitDirectiveOptionArch() {
+bool RISCVAsmPrinter::emitDirectiveOptionArch() {
   RISCVTargetStreamer &RTS =
       static_cast<RISCVTargetStreamer &>(*OutStreamer->getTargetStreamer());
   SmallVector<RISCVOptionArchArg> NeedEmitStdOptionArgs;
@@ -268,28 +267,26 @@ void RISCVAsmPrinter::emitDirectiveOptionArch() {
                                                 : RISCVOptionArchArgType::Minus;
     NeedEmitStdOptionArgs.emplace_back(Delta, Feature.Key);
   }
-  if (!NeedEmitStdOptionArgs.empty())
+  if (!NeedEmitStdOptionArgs.empty()) {
+    RTS.emitDirectiveOptionPush();
     RTS.emitDirectiveOptionArch(NeedEmitStdOptionArgs);
-}
+    return true;
+  }
 
-bool RISCVAsmPrinter::isSameAttribute() {
-  const MCSubtargetInfo &MCSTI = *TM.getMCSubtargetInfo();
-  return MCSTI.getFeatureBits() == STI->getFeatureBits();
+  return false;
 }
 
 bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   STI = &MF.getSubtarget<RISCVSubtarget>();
   RISCVTargetStreamer &RTS =
       static_cast<RISCVTargetStreamer &>(*OutStreamer->getTargetStreamer());
-  if (!isSameAttribute()) {
-    RTS.emitDirectiveOptionPush();
-    emitDirectiveOptionArch();
-  }
+
+  bool EmittedOptionArch = emitDirectiveOptionArch();
 
   SetupMachineFunction(MF);
   emitFunctionBody();
 
-  if (!isSameAttribute())
+  if (EmittedOptionArch)
     RTS.emitDirectiveOptionPop();
   return false;
 }
@@ -779,12 +776,13 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
   uint64_t TSFlags = MCID.TSFlags;
   unsigned NumOps = MI->getNumExplicitOperands();
 
-  // Skip policy, VL and SEW operands which are the last operands if present.
+  // Skip policy, SEW, VL, VXRM/FRM operands which are the last operands if
+  // present.
   if (RISCVII::hasVecPolicyOp(TSFlags))
     --NumOps;
-  if (RISCVII::hasVLOp(TSFlags))
-    --NumOps;
   if (RISCVII::hasSEWOp(TSFlags))
+    --NumOps;
+  if (RISCVII::hasVLOp(TSFlags))
     --NumOps;
   if (RISCVII::hasRoundModeOp(TSFlags))
     --NumOps;

@@ -250,6 +250,30 @@ def NVVM_GridDimYOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.nctaid.y">;
 def NVVM_GridDimZOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.nctaid.z">;
 
 //===----------------------------------------------------------------------===//
+// CTA Cluster index and range
+def NVVM_ClusterIdXOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.clusterid.x">;
+def NVVM_ClusterIdYOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.clusterid.y">;
+def NVVM_ClusterIdZOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.clusterid.z">;
+def NVVM_ClusterDimXOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.nclusterid.x">;
+def NVVM_ClusterDimYOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.nclusterid.y">;
+def NVVM_ClusterDimZOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.nclusterid.z">;
+
+
+//===----------------------------------------------------------------------===//
+// CTA index and range within Cluster
+def NVVM_BlockInClusterIdXOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.ctaid.x">;
+def NVVM_BlockInClusterIdYOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.ctaid.y">;
+def NVVM_BlockInClusterIdZOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.ctaid.z">;
+def NVVM_GridInClusterDimXOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.nctaid.x">;
+def NVVM_GridInClusterDimYOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.nctaid.y">;
+def NVVM_GridInClusterDimZOp : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.nctaid.z">;
+
+//===----------------------------------------------------------------------===//
+// CTA index and across Cluster dimensions
+def NVVM_ClusterId : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.ctarank">;
+def NVVM_ClusterDim : NVVM_SpecialRegisterOp<"read.ptx.sreg.cluster.nctarank">;
+
+//===----------------------------------------------------------------------===//
 // NVVM approximate op definitions
 //===----------------------------------------------------------------------===//
 
@@ -459,6 +483,34 @@ def NVVM_Barrier0Op : NVVM_Op<"barrier0"> {
   let assemblyFormat = "attr-dict";
 }
 
+def NVVM_ClusterArriveOp : NVVM_Op<"cluster.arrive"> {
+  string llvmBuilder = [{
+      createIntrinsicCall(builder, llvm::Intrinsic::nvvm_barrier_cluster_arrive);
+  }];
+  let assemblyFormat = "attr-dict";
+}
+
+def NVVM_ClusterArriveRelaxedOp : NVVM_Op<"cluster.arrive.relaxed"> {
+  string llvmBuilder = [{
+      createIntrinsicCall(builder, llvm::Intrinsic::nvvm_barrier_cluster_arrive_relaxed);
+  }];
+  let assemblyFormat = "attr-dict";
+}
+
+def NVVM_ClusterWaitOp : NVVM_Op<"cluster.wait"> {
+  string llvmBuilder = [{
+      createIntrinsicCall(builder, llvm::Intrinsic::nvvm_barrier_cluster_wait);
+  }];
+  let assemblyFormat = "attr-dict";
+}
+
+def NVVM_FenceScClusterOp : NVVM_Op<"fence.sc.cluster"> {
+  string llvmBuilder = [{
+      createIntrinsicCall(builder, llvm::Intrinsic::nvvm_fence_sc_cluster);
+  }];
+  let assemblyFormat = "attr-dict";
+}
+
 def ShflKindBfly : I32EnumAttrCase<"bfly", 0>;
 def ShflKindUp   : I32EnumAttrCase<"up", 1>;
 def ShflKindDown : I32EnumAttrCase<"down", 2>;
@@ -514,7 +566,7 @@ def NVVM_SyncWarpOp :
   let assemblyFormat = "$mask attr-dict `:` type($mask)";
 }
 
-// https://docs.nvidia.com/cuda/parallel-thread-execution/#id62
+
 def LoadCacheModifierCA : I32EnumAttrCase<"CA", 0, "ca">;
 def LoadCacheModifierCG : I32EnumAttrCase<"CG", 1, "cg">;
 def LoadCacheModifierCS : I32EnumAttrCase<"CS", 2, "cs">;
@@ -528,6 +580,11 @@ def LoadCacheModifierKind : I32EnumAttr<"LoadCacheModifierKind",
     LoadCacheModifierLU, LoadCacheModifierCV]> {
   let genSpecializedAttr = 0;
   let cppNamespace = "::mlir::NVVM";
+  let description = [{
+    Enum attribute of the different kinds of cache operators for load instructions.
+
+    [For more information, see PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/#id62)    
+  }];
 }
 
 def LoadCacheModifierAttr : EnumAttr<NVVM_Dialect, LoadCacheModifierKind, "load_cache_modifier">;
@@ -1436,8 +1493,8 @@ def NVVM_WgmmaFenceAlignedOp : NVVM_Op<"wgmma.fence.aligned",
   let description = [{
     Enforce an ordering of register accesses between warpgroup level matrix 
     multiplication and other operations. 
-    See for more information:
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions-wgmma-fence
+    
+    [For more information, see PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions-wgmma-fence)
   }];
   let assemblyFormat = "attr-dict";
   let extraClassDefinition = [{
@@ -1451,8 +1508,8 @@ def NVVM_WgmmaGroupSyncAlignedOp : NVVM_Op<"wgmma.commit.group.sync.aligned",
   let assemblyFormat = "attr-dict";
   let description = [{
     Commits all prior uncommitted warpgroup level matrix multiplication operations.
-    See for more information:
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions-wgmma-commit-group
+    
+    [For more information, see PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions-wgmma-commit-group)
   }];
   let extraClassDefinition = [{
     std::string $cppClass::getPtx() { return std::string("wgmma.commit_group.sync.aligned;"); }
@@ -1465,8 +1522,8 @@ def NVVM_WgmmaWaitGroupSyncOp : NVVM_Op<"wgmma.wait.group.sync.aligned",
   let assemblyFormat = "attr-dict $group";
   let description = [{
     Signal the completion of a preceding warpgroup operation.
-    See for more information:
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions-wgmma-wait-group
+    
+    [For more information, see PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions-wgmma-wait-group)
   }];
   let extraClassDefinition = [{
     std::string $cppClass::getPtx() { return std::string("wgmma.wait_group.sync.aligned %0;"); }
@@ -1603,8 +1660,8 @@ def NVVM_WgmmaMmaAsyncOp : NVVM_Op<"wgmma.mma_async",
     |--------------|--------------|------------|--------------|---------------|
     ```
 
-    See for more information:
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions
+    
+    [For more information, see PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#asynchronous-warpgroup-level-matrix-instructions)
   }];
   
   let hasVerifier = 1;

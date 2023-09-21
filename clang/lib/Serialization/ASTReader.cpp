@@ -2326,7 +2326,8 @@ InputFileInfo ASTReader::getInputFileInfo(ModuleFile &F, unsigned ID) {
   // Go find this input file.
   BitstreamCursor &Cursor = F.InputFilesCursor;
   SavedStreamPosition SavedPosition(Cursor);
-  if (llvm::Error Err = Cursor.JumpToBit(F.InputFileOffsets[ID - 1])) {
+  if (llvm::Error Err = Cursor.JumpToBit(F.InputFilesOffsetBase +
+                                         F.InputFileOffsets[ID - 1])) {
     // FIXME this drops errors on the floor.
     consumeError(std::move(Err));
   }
@@ -2410,7 +2411,8 @@ InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
   // Go find this input file.
   BitstreamCursor &Cursor = F.InputFilesCursor;
   SavedStreamPosition SavedPosition(Cursor);
-  if (llvm::Error Err = Cursor.JumpToBit(F.InputFileOffsets[ID - 1])) {
+  if (llvm::Error Err = Cursor.JumpToBit(F.InputFilesOffsetBase +
+                                         F.InputFileOffsets[ID - 1])) {
     // FIXME this drops errors on the floor.
     consumeError(std::move(Err));
   }
@@ -2425,6 +2427,16 @@ InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
 
   // For standard C++ modules, we don't need to check the inputs.
   bool SkipChecks = F.StandardCXXModule;
+
+  const HeaderSearchOptions &HSOpts =
+      PP.getHeaderSearchInfo().getHeaderSearchOpts();
+
+  // The option ForceCheckCXX20ModulesInputFiles is only meaningful for C++20
+  // modules.
+  if (F.StandardCXXModule && HSOpts.ForceCheckCXX20ModulesInputFiles) {
+    SkipChecks = false;
+    Overridden = false;
+  }
 
   OptionalFileEntryRefDegradesToFileEntryPtr File = OptionalFileEntryRef(
       expectedToOptional(FileMgr.getFileRef(Filename, /*OpenFile=*/false)));
@@ -2477,6 +2489,32 @@ InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
     std::optional<int64_t> Old = std::nullopt;
     std::optional<int64_t> New = std::nullopt;
   };
+  auto HasInputContentChanged = [&](Change OriginalChange) {
+    assert(ValidateASTInputFilesContent &&
+           "We should only check the content of the inputs with "
+           "ValidateASTInputFilesContent enabled.");
+
+    if (StoredContentHash == static_cast<uint64_t>(llvm::hash_code(-1)))
+      return OriginalChange;
+
+    auto MemBuffOrError = FileMgr.getBufferForFile(*File);
+    if (!MemBuffOrError) {
+      if (!Complain)
+        return OriginalChange;
+      std::string ErrorStr = "could not get buffer for file '";
+      ErrorStr += File->getName();
+      ErrorStr += "'";
+      Error(ErrorStr);
+      return OriginalChange;
+    }
+
+    // FIXME: hash_value is not guaranteed to be stable!
+    auto ContentHash = hash_value(MemBuffOrError.get()->getBuffer());
+    if (StoredContentHash == static_cast<uint64_t>(ContentHash))
+      return Change{Change::None};
+
+    return Change{Change::Content};
+  };
   auto HasInputFileChanged = [&]() {
     if (StoredSize != File->getSize())
       return Change{Change::Size, StoredSize, File->getSize()};
@@ -2487,26 +2525,9 @@ InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
 
       // In case the modification time changes but not the content,
       // accept the cached file as legit.
-      if (ValidateASTInputFilesContent &&
-          StoredContentHash != static_cast<uint64_t>(llvm::hash_code(-1))) {
-        auto MemBuffOrError = FileMgr.getBufferForFile(File);
-        if (!MemBuffOrError) {
-          if (!Complain)
-            return MTimeChange;
-          std::string ErrorStr = "could not get buffer for file '";
-          ErrorStr += File->getName();
-          ErrorStr += "'";
-          Error(ErrorStr);
-          return MTimeChange;
-        }
+      if (ValidateASTInputFilesContent)
+        return HasInputContentChanged(MTimeChange);
 
-        // FIXME: hash_value is not guaranteed to be stable!
-        auto ContentHash = hash_value(MemBuffOrError.get()->getBuffer());
-        if (StoredContentHash == static_cast<uint64_t>(ContentHash))
-          return Change{Change::None};
-
-        return Change{Change::Content};
-      }
       return MTimeChange;
     }
     return Change{Change::None};
@@ -2514,6 +2535,13 @@ InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
 
   bool IsOutOfDate = false;
   auto FileChange = SkipChecks ? Change{Change::None} : HasInputFileChanged();
+  // When ForceCheckCXX20ModulesInputFiles and ValidateASTInputFilesContent
+  // enabled, it is better to check the contents of the inputs. Since we can't
+  // get correct modified time information for inputs from overriden inputs.
+  if (HSOpts.ForceCheckCXX20ModulesInputFiles && ValidateASTInputFilesContent &&
+      F.StandardCXXModule && FileChange.Kind == Change::None)
+    FileChange = HasInputContentChanged(FileChange);
+
   // For an overridden file, there is nothing to validate.
   if (!Overridden && FileChange.Kind != Change::None) {
     if (Complain && !Diags.isDiagnosticInFlight()) {
@@ -2788,6 +2816,7 @@ ASTReader::ReadControlBlock(ModuleFile &F,
           Error("malformed block record in AST file");
           return Failure;
         }
+        F.InputFilesOffsetBase = F.InputFilesCursor.GetCurrentBitNo();
         continue;
 
       case OPTIONS_BLOCK_ID:
@@ -4083,13 +4112,13 @@ ASTReader::ReadModuleMapFileBlock(RecordData &Record, ModuleFile &F,
     // Check any additional module map files (e.g. module.private.modulemap)
     // that are not in the pcm.
     if (auto *AdditionalModuleMaps = Map.getAdditionalModuleMapFiles(M)) {
-      for (const FileEntry *ModMap : *AdditionalModuleMaps) {
+      for (FileEntryRef ModMap : *AdditionalModuleMaps) {
         // Remove files that match
         // Note: SmallPtrSet::erase is really remove
         if (!AdditionalStoredMaps.erase(ModMap)) {
           if (!canRecoverFromOutOfDate(F.FileName, ClientLoadCapabilities))
             Diag(diag::err_module_different_modmap)
-              << F.ModuleName << /*new*/0 << ModMap->getName();
+              << F.ModuleName << /*new*/0 << ModMap.getName();
           return OutOfDate;
         }
       }
@@ -4308,11 +4337,10 @@ static bool SkipCursorToBlock(BitstreamCursor &Cursor, unsigned BlockID) {
   }
 }
 
-ASTReader::ASTReadResult ASTReader::ReadAST(StringRef FileName,
-                                            ModuleKind Type,
+ASTReader::ASTReadResult ASTReader::ReadAST(StringRef FileName, ModuleKind Type,
                                             SourceLocation ImportLoc,
                                             unsigned ClientLoadCapabilities,
-                                            SmallVectorImpl<ImportedSubmodule> *Imported) {
+                                            ModuleFile **NewLoadedModuleFile) {
   llvm::TimeTraceScope scope("ReadAST", FileName);
 
   llvm::SaveAndRestore SetCurImportLocRAII(CurrentImportLoc, ImportLoc);
@@ -4341,6 +4369,9 @@ ASTReader::ASTReadResult ASTReader::ReadAST(StringRef FileName,
     ModuleMgr.setGlobalIndex(nullptr);
     return ReadResult;
   }
+
+  if (NewLoadedModuleFile && !Loaded.empty())
+    *NewLoadedModuleFile = Loaded.back().Mod;
 
   // Here comes stuff that we only do once the entire chain is loaded. Do *not*
   // remove modules from this point. Various fields are updated during reading
@@ -4502,10 +4533,6 @@ ASTReader::ASTReadResult ASTReader::ReadAST(StringRef FileName,
     }
   }
   UnresolvedModuleRefs.clear();
-
-  if (Imported)
-    Imported->append(PendingImportedModules.begin(),
-                     PendingImportedModules.end());
 
   // FIXME: How do we load the 'use'd modules? They may not be submodules.
   // Might be unnecessary as use declarations are only used to build the
@@ -4731,12 +4758,6 @@ ASTReader::ReadASTCore(StringRef FileName,
       ShouldFinalizePCM = true;
       return Success;
 
-    case UNHASHED_CONTROL_BLOCK_ID:
-      // This block is handled using look-ahead during ReadControlBlock.  We
-      // shouldn't get here!
-      Error("malformed block record in AST file");
-      return Failure;
-
     default:
       if (llvm::Error Err = Stream.SkipBlock()) {
         Error(std::move(Err));
@@ -4856,13 +4877,18 @@ ASTReader::ASTReadResult ASTReader::readUnhashedControlBlockImpl(
     }
     switch ((UnhashedControlBlockRecordTypes)MaybeRecordType.get()) {
     case SIGNATURE:
-      if (F)
-        F->Signature = ASTFileSignature::create(Record.begin(), Record.end());
+      if (F) {
+        F->Signature = ASTFileSignature::create(Blob.begin(), Blob.end());
+        assert(F->Signature != ASTFileSignature::createDummy() &&
+               "Dummy AST file signature not backpatched in ASTWriter.");
+      }
       break;
     case AST_BLOCK_HASH:
-      if (F)
-        F->ASTBlockHash =
-            ASTFileSignature::create(Record.begin(), Record.end());
+      if (F) {
+        F->ASTBlockHash = ASTFileSignature::create(Blob.begin(), Blob.end());
+        assert(F->ASTBlockHash != ASTFileSignature::createDummy() &&
+               "Dummy AST block hash not backpatched in ASTWriter.");
+      }
       break;
     case DIAGNOSTIC_OPTIONS: {
       bool Complain = (ClientLoadCapabilities & ARR_OutOfDate) == 0;
@@ -5164,9 +5190,12 @@ static ASTFileSignature readASTFileSignature(StringRef PCH) {
       consumeError(MaybeRecord.takeError());
       return ASTFileSignature();
     }
-    if (SIGNATURE == MaybeRecord.get())
-      return ASTFileSignature::create(Record.begin(),
-                                      Record.begin() + ASTFileSignature::size);
+    if (SIGNATURE == MaybeRecord.get()) {
+      auto Signature = ASTFileSignature::create(Blob.begin(), Blob.end());
+      assert(Signature != ASTFileSignature::createDummy() &&
+             "Dummy AST file signature not backpatched in ASTWriter.");
+      return Signature;
+    }
   }
 }
 
@@ -5328,6 +5357,7 @@ bool ASTReader::readASTFileControlBlock(
   bool NeedsSystemInputFiles = Listener.needsSystemInputFileVisitation();
   bool NeedsImports = Listener.needsImportVisitation();
   BitstreamCursor InputFilesCursor;
+  uint64_t InputFilesOffsetBase = 0;
 
   RecordData Record;
   std::string ModuleDir;
@@ -5363,6 +5393,7 @@ bool ASTReader::readASTFileControlBlock(
         if (NeedsInputFiles &&
             ReadBlockAbbrevs(InputFilesCursor, INPUT_FILES_BLOCK_ID))
           return true;
+        InputFilesOffsetBase = InputFilesCursor.GetCurrentBitNo();
         break;
 
       default:
@@ -5435,7 +5466,8 @@ bool ASTReader::readASTFileControlBlock(
 
         BitstreamCursor &Cursor = InputFilesCursor;
         SavedStreamPosition SavedPosition(Cursor);
-        if (llvm::Error Err = Cursor.JumpToBit(InputFileOffs[I])) {
+        if (llvm::Error Err =
+                Cursor.JumpToBit(InputFilesOffsetBase + InputFileOffs[I])) {
           // FIXME this drops errors on the floor.
           consumeError(std::move(Err));
         }
@@ -5673,7 +5705,7 @@ llvm::Error ASTReader::ReadSubmoduleBlock(ModuleFile &F,
                                        "too many submodules");
 
       if (!ParentModule) {
-        if (const FileEntry *CurFile = CurrentModule->getASTFile()) {
+        if (OptionalFileEntryRef CurFile = CurrentModule->getASTFile()) {
           // Don't emit module relocation error if we have -fno-validate-pch
           if (!bool(PP.getPreprocessorOpts().DisablePCHOrModuleValidation &
                     DisableValidationForModuleKind::Module) &&
@@ -5705,12 +5737,6 @@ llvm::Error ASTReader::ReadSubmoduleBlock(ModuleFile &F,
       CurrentModule->ModuleMapIsPrivate = ModuleMapIsPrivate;
       if (DeserializationListener)
         DeserializationListener->ModuleRead(GlobalID, CurrentModule);
-
-      // If we're loading a module before we initialize the sema, it implies
-      // we're performing eagerly loading.
-      if (!getSema() && CurrentModule->isModulePurview() &&
-          !getContext().getLangOpts().isCompilingModule())
-        Diag(clang::diag::warn_eagerly_load_for_standard_cplusplus_modules);
 
       SubmodulesLoaded[GlobalIndex] = CurrentModule;
 
@@ -6523,8 +6549,7 @@ void ASTReader::ReadPragmaDiagnosticMappings(DiagnosticsEngine &Diag) {
     // Read the final state.
     assert(Idx < Record.size() &&
            "Invalid data, missing final pragma diagnostic state");
-    SourceLocation CurStateLoc =
-        ReadSourceLocation(F, F.PragmaDiagMappings[Idx++]);
+    SourceLocation CurStateLoc = ReadSourceLocation(F, Record[Idx++]);
     auto *CurState = ReadDiagState(*FirstState, false);
 
     if (!F.isModule()) {
@@ -6834,20 +6859,22 @@ void TypeLocReader::VisitUnaryTransformTypeLoc(UnaryTransformTypeLoc TL) {
   TL.setUnderlyingTInfo(GetTypeSourceInfo());
 }
 
+ConceptReference *ASTRecordReader::readConceptReference() {
+  auto NNS = readNestedNameSpecifierLoc();
+  auto TemplateKWLoc = readSourceLocation();
+  auto ConceptNameLoc = readDeclarationNameInfo();
+  auto FoundDecl = readDeclAs<NamedDecl>();
+  auto NamedConcept = readDeclAs<ConceptDecl>();
+  auto *CR = ConceptReference::Create(
+      getContext(), NNS, TemplateKWLoc, ConceptNameLoc, FoundDecl, NamedConcept,
+      (readBool() ? readASTTemplateArgumentListInfo() : nullptr));
+  return CR;
+}
+
 void TypeLocReader::VisitAutoTypeLoc(AutoTypeLoc TL) {
   TL.setNameLoc(readSourceLocation());
-  if (Reader.readBool()) {
-    TL.setNestedNameSpecifierLoc(ReadNestedNameSpecifierLoc());
-    TL.setTemplateKWLoc(readSourceLocation());
-    TL.setConceptNameLoc(readSourceLocation());
-    TL.setFoundDecl(Reader.readDeclAs<NamedDecl>());
-    TL.setLAngleLoc(readSourceLocation());
-    TL.setRAngleLoc(readSourceLocation());
-    for (unsigned i = 0, e = TL.getNumArgs(); i != e; ++i)
-      TL.setArgLocInfo(
-          i, Reader.readTemplateArgumentLocInfo(
-                 TL.getTypePtr()->getTypeConstraintArguments()[i].getKind()));
-  }
+  if (Reader.readBool())
+    TL.setConceptReference(Reader.readConceptReference());
   if (Reader.readBool())
     TL.setRParenLoc(readSourceLocation());
 }

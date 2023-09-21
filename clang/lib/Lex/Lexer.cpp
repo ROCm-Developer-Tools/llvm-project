@@ -705,6 +705,22 @@ PreambleBounds Lexer::ComputePreamble(StringRef Buffer,
       // directive or it was one that can't occur in the preamble at this
       // point. Roll back the current token to the location of the '#'.
       TheTok = HashTok;
+    } else if (TheTok.isAtStartOfLine() &&
+               TheTok.getKind() == tok::raw_identifier &&
+               TheTok.getRawIdentifier() == "module" &&
+               LangOpts.CPlusPlusModules) {
+      // The initial global module fragment introducer "module;" is part of
+      // the preamble, which runs up to the module declaration "module foo;".
+      Token ModuleTok = TheTok;
+      do {
+        TheLexer.LexFromRawLexer(TheTok);
+      } while (TheTok.getKind() == tok::comment);
+      if (TheTok.getKind() != tok::semi) {
+        // Not global module fragment, roll back.
+        TheTok = ModuleTok;
+        break;
+      }
+      continue;
     }
 
     // We hit a token that we don't recognize as being in the
@@ -1734,15 +1750,21 @@ bool Lexer::tryConsumeIdentifierUCN(const char *&CurPtr, unsigned Size,
   return true;
 }
 
-bool Lexer::tryConsumeIdentifierUTF8Char(const char *&CurPtr) {
-  const char *UnicodePtr = CurPtr;
+bool Lexer::tryConsumeIdentifierUTF8Char(const char *&CurPtr, Token &Result) {
   llvm::UTF32 CodePoint;
-  llvm::ConversionResult Result =
-      llvm::convertUTF8Sequence((const llvm::UTF8 **)&UnicodePtr,
-                                (const llvm::UTF8 *)BufferEnd,
-                                &CodePoint,
-                                llvm::strictConversion);
-  if (Result != llvm::conversionOK)
+
+  // If a UTF-8 codepoint appears immediately after an escaped new line,
+  // CurPtr may point to the splicing \ on the preceding line,
+  // so we need to skip it.
+  unsigned FirstCodeUnitSize;
+  getCharAndSize(CurPtr, FirstCodeUnitSize);
+  const char *CharStart = CurPtr + FirstCodeUnitSize - 1;
+  const char *UnicodePtr = CharStart;
+
+  llvm::ConversionResult ConvResult = llvm::convertUTF8Sequence(
+      (const llvm::UTF8 **)&UnicodePtr, (const llvm::UTF8 *)BufferEnd,
+      &CodePoint, llvm::strictConversion);
+  if (ConvResult != llvm::conversionOK)
     return false;
 
   bool IsExtension = false;
@@ -1755,21 +1777,26 @@ bool Lexer::tryConsumeIdentifierUTF8Char(const char *&CurPtr) {
         !PP->isPreprocessedOutput())
       diagnoseInvalidUnicodeCodepointInIdentifier(
           PP->getDiagnostics(), LangOpts, CodePoint,
-          makeCharRange(*this, CurPtr, UnicodePtr), /*IsFirst=*/false);
+          makeCharRange(*this, CharStart, UnicodePtr), /*IsFirst=*/false);
     // We got a unicode codepoint that is neither a space nor a
     // a valid identifier part. Carry on as if the codepoint was
     // valid for recovery purposes.
   } else if (!isLexingRawMode()) {
     if (IsExtension)
-      diagnoseExtensionInIdentifier(PP->getDiagnostics(), CodePoint,
-                                    makeCharRange(*this, CurPtr, UnicodePtr));
+      diagnoseExtensionInIdentifier(
+          PP->getDiagnostics(), CodePoint,
+          makeCharRange(*this, CharStart, UnicodePtr));
     maybeDiagnoseIDCharCompat(PP->getDiagnostics(), CodePoint,
-                              makeCharRange(*this, CurPtr, UnicodePtr),
+                              makeCharRange(*this, CharStart, UnicodePtr),
                               /*IsFirst=*/false);
     maybeDiagnoseUTF8Homoglyph(PP->getDiagnostics(), CodePoint,
-                               makeCharRange(*this, CurPtr, UnicodePtr));
+                               makeCharRange(*this, CharStart, UnicodePtr));
   }
 
+  // Once we sucessfully parsed some UTF-8,
+  // calling ConsumeChar ensures the NeedsCleaning flag is set on the token
+  // being lexed, and that warnings about trailing spaces are emitted.
+  ConsumeChar(CurPtr, FirstCodeUnitSize, Result);
   CurPtr = UnicodePtr;
   return true;
 }
@@ -1849,7 +1876,7 @@ bool Lexer::LexIdentifierContinue(Token &Result, const char *CurPtr) {
     }
     if (C == '\\' && tryConsumeIdentifierUCN(CurPtr, Size, Result))
       continue;
-    if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr))
+    if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr, Result))
       continue;
     // Neither an expected Unicode codepoint nor a UCN.
     break;
@@ -1969,7 +1996,7 @@ bool Lexer::LexNumericConstant(Token &Result, const char *CurPtr) {
   // If we have a UCN or UTF-8 character (perhaps in a ud-suffix), continue.
   if (C == '\\' && tryConsumeIdentifierUCN(CurPtr, Size, Result))
     return LexNumericConstant(Result, CurPtr);
-  if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr))
+  if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr, Result))
     return LexNumericConstant(Result, CurPtr);
 
   // Update the location of token as well as BufferPtr.
@@ -1993,7 +2020,7 @@ const char *Lexer::LexUDSuffix(Token &Result, const char *CurPtr,
   if (!isAsciiIdentifierStart(C)) {
     if (C == '\\' && tryConsumeIdentifierUCN(CurPtr, Size, Result))
       Consumed = true;
-    else if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr))
+    else if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr, Result))
       Consumed = true;
     else
       return CurPtr;
@@ -2009,11 +2036,53 @@ const char *Lexer::LexUDSuffix(Token &Result, const char *CurPtr,
   }
 
   // C++11 [lex.ext]p10, [usrlit.suffix]p1: A program containing a ud-suffix
-  // that does not start with an underscore is ill-formed. We assume a suffix
-  // beginning with a UCN or UTF-8 character is more likely to be a ud-suffix
-  // than a macro, however, and accept that.
-  if (!Consumed)
+  // that does not start with an underscore is ill-formed. As a conforming
+  // extension, we treat all such suffixes as if they had whitespace before
+  // them. We assume a suffix beginning with a UCN or UTF-8 character is more
+  // likely to be a ud-suffix than a macro, however, and accept that.
+  if (!Consumed) {
+    bool IsUDSuffix = false;
+    if (C == '_')
+      IsUDSuffix = true;
+    else if (IsStringLiteral && LangOpts.CPlusPlus14) {
+      // In C++1y, we need to look ahead a few characters to see if this is a
+      // valid suffix for a string literal or a numeric literal (this could be
+      // the 'operator""if' defining a numeric literal operator).
+      const unsigned MaxStandardSuffixLength = 3;
+      char Buffer[MaxStandardSuffixLength] = { C };
+      unsigned Consumed = Size;
+      unsigned Chars = 1;
+      while (true) {
+        unsigned NextSize;
+        char Next = getCharAndSizeNoWarn(CurPtr + Consumed, NextSize, LangOpts);
+        if (!isAsciiIdentifierContinue(Next)) {
+          // End of suffix. Check whether this is on the allowed list.
+          const StringRef CompleteSuffix(Buffer, Chars);
+          IsUDSuffix =
+              StringLiteralParser::isValidUDSuffix(LangOpts, CompleteSuffix);
+          break;
+        }
+
+        if (Chars == MaxStandardSuffixLength)
+          // Too long: can't be a standard suffix.
+          break;
+
+        Buffer[Chars++] = Next;
+        Consumed += NextSize;
+      }
+    }
+
+    if (!IsUDSuffix) {
+      if (!isLexingRawMode())
+        Diag(CurPtr, LangOpts.MSVCCompat
+                         ? diag::ext_ms_reserved_user_defined_literal
+                         : diag::ext_reserved_user_defined_literal)
+            << FixItHint::CreateInsertion(getSourceLocation(CurPtr), " ");
+      return CurPtr;
+    }
+
     CurPtr = ConsumeChar(CurPtr, Size, Result);
+  }
 
   Result.setFlag(Token::HasUDSuffix);
   while (true) {
@@ -2021,7 +2090,7 @@ const char *Lexer::LexUDSuffix(Token &Result, const char *CurPtr,
     if (isAsciiIdentifierContinue(C)) {
       CurPtr = ConsumeChar(CurPtr, Size, Result);
     } else if (C == '\\' && tryConsumeIdentifierUCN(CurPtr, Size, Result)) {
-    } else if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr)) {
+    } else if (!isASCII(C) && tryConsumeIdentifierUTF8Char(CurPtr, Result)) {
     } else
       break;
   }
@@ -2544,7 +2613,7 @@ bool Lexer::SkipLineComment(Token &Result, const char *CurPtr,
   // \r\n sequence.  This is an efficiency hack (because we know the \n can't
   // contribute to another token), it isn't needed for correctness.  Note that
   // this is ok even in KeepWhitespaceMode, because we would have returned the
-  /// comment above in that mode.
+  // comment above in that mode.
   NewLinePtr = CurPtr++;
 
   // The next returned token is at the start of the line.

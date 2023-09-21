@@ -492,7 +492,17 @@ def FeatureStdExtZvfh
                        "'Zvfh' (Vector Half-Precision Floating-Point)",
                        [FeatureStdExtZve32f, FeatureStdExtZfhmin]>;
 
+def FeatureStdExtZvfhmin
+    : SubtargetFeature<"zvfhmin", "HasStdExtZvfhmin", "true",
+                       "'Zvfhmin' (Vector Half-Precision Floating-Point Minimal)",
+                       [FeatureStdExtZve32f]>;
+
 def HasVInstructionsF16 : Predicate<"Subtarget->hasVInstructionsF16()">;
+
+def HasVInstructionsF16Minimal : Predicate<"Subtarget->hasVInstructionsF16Minimal()">,
+      AssemblerPredicate<(any_of FeatureStdExtZvfhmin, FeatureStdExtZvfh),
+                         "'Zvfhmin' (Vector Half-Precision Floating-Point Minimal) or "
+                         "'Zvfh' (Vector Half-Precision Floating-Point)">;
 
 def HasStdExtZfhOrZvfh
     : Predicate<"Subtarget->hasStdExtZfh() || Subtarget->hasStdExtZvfh()">,
@@ -539,7 +549,7 @@ def HasStdExtSvinval : Predicate<"Subtarget->hasStdExtSvinval()">,
 def FeatureStdExtZtso
     : SubtargetFeature<"experimental-ztso", "HasStdExtZtso", "true",
                        "'Ztso' (Memory Model - Total Store Order)">;
-def HasStdExtZtso : Predicate<"Subtarget->hasStdExtZTso()">,
+def HasStdExtZtso : Predicate<"Subtarget->hasStdExtZtso()">,
                               AssemblerPredicate<(all_of FeatureStdExtZtso),
                               "'Ztso' (Memory Model - Total Store Order)">;
 def NotHasStdExtZtso : Predicate<"!Subtarget->hasStdExtZtso()">;

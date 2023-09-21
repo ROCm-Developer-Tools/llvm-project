@@ -397,6 +397,9 @@ DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForType(
   DeclarationFragments QualsFragments = getFragmentsForQualifiers(SQT.Quals),
                        TypeFragments =
                            getFragmentsForType(SQT.Ty, Context, After);
+  if (QT.getAsString() == "_Bool")
+    TypeFragments.replace("bool", 0);
+
   if (QualsFragments.getFragments().empty())
     return TypeFragments;
 
@@ -421,6 +424,16 @@ DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForType(
     return TypeFragments.appendSpace().append(std::move(QualsFragments));
 
   return QualsFragments.appendSpace().append(std::move(TypeFragments));
+}
+
+DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForNamespace(
+    const NamespaceDecl *Decl) {
+  DeclarationFragments Fragments;
+  Fragments.append("namespace", DeclarationFragments::FragmentKind::Keyword);
+  if (!Decl->isAnonymousNamespace())
+    Fragments.appendSpace().append(
+        Decl->getName(), DeclarationFragments::FragmentKind::Identifier);
+  return Fragments.append(";", DeclarationFragments::FragmentKind::Text);
 }
 
 DeclarationFragments
@@ -464,6 +477,11 @@ DeclarationFragmentsBuilder::getFragmentsForVarTemplate(const VarDecl *Var) {
       Var->getTypeSourceInfo()
           ? Var->getTypeSourceInfo()->getType()
           : Var->getASTContext().getUnqualifiedObjCPointerType(Var->getType());
+
+  // Might be a member, so might be static.
+  if (Var->isStaticDataMember())
+    Fragments.append("static", DeclarationFragments::FragmentKind::Keyword)
+        .appendSpace();
 
   DeclarationFragments After;
   DeclarationFragments ArgumentFragment =
@@ -670,9 +688,9 @@ DeclarationFragmentsBuilder::getFragmentsForSpecialCXXMethod(
     const CXXMethodDecl *Method) {
   DeclarationFragments Fragments;
   std::string Name;
-  if (isa<CXXConstructorDecl>(Method)) {
+  if (const auto *Constructor = dyn_cast<CXXConstructorDecl>(Method)) {
     Name = Method->getNameAsString();
-    if (dyn_cast<CXXConstructorDecl>(Method)->isExplicit())
+    if (Constructor->isExplicit())
       Fragments.append("explicit", DeclarationFragments::FragmentKind::Keyword)
           .appendSpace();
   } else if (isa<CXXDestructorDecl>(Method))

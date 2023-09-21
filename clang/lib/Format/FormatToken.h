@@ -41,7 +41,6 @@ namespace format {
   TYPE(CaseLabelColon)                                                         \
   TYPE(CastRParen)                                                             \
   TYPE(ClassLBrace)                                                            \
-  TYPE(CompoundRequirementLBrace)                                              \
   /* ternary ?: expression */                                                  \
   TYPE(ConditionalExpr)                                                        \
   /* the condition in an if statement */                                       \
@@ -134,6 +133,11 @@ namespace format {
   TYPE(StartOfName)                                                            \
   TYPE(StatementAttributeLikeMacro)                                            \
   TYPE(StatementMacro)                                                         \
+  /* A string that is part of a string concatenation. For C#, JavaScript, and  \
+   * Java, it is used for marking whether a string needs parentheses around it \
+   * if it is to be split into parts joined by `+`. For Verilog, whether       \
+   * braces need to be added to split it. Not used for other languages. */     \
+  TYPE(StringInConcatenation)                                                  \
   TYPE(StructLBrace)                                                           \
   TYPE(StructuredBindingLSquare)                                               \
   TYPE(TemplateCloser)                                                         \
@@ -727,7 +731,7 @@ public:
   /// Returns \c true if this is a string literal that's like a label,
   /// e.g. ends with "=" or ":".
   bool isLabelString() const {
-    if (!is(tok::string_literal))
+    if (isNot(tok::string_literal))
       return false;
     StringRef Content = TokenText;
     if (Content.startswith("\"") || Content.startswith("'"))

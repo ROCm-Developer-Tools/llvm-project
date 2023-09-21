@@ -3463,8 +3463,7 @@ static APSInt extractStringLiteralCharacter(EvalInfo &Info, const Expr *Lit,
   assert(CAT && "string literal isn't an array");
   QualType CharType = CAT->getElementType();
   assert(CharType->isIntegerType() && "unexpected character type");
-
-  APSInt Value(S->getCharByteWidth() * Info.Ctx.getCharWidth(),
+  APSInt Value(Info.Ctx.getTypeSize(CharType),
                CharType->isUnsignedIntegerType());
   if (Index < S->getLength())
     Value = S->getCodeUnit(Index);
@@ -3487,7 +3486,7 @@ static void expandStringLiteral(EvalInfo &Info, const StringLiteral *S,
   unsigned Elts = CAT->getSize().getZExtValue();
   Result = APValue(APValue::UninitArray(),
                    std::min(S->getLength(), Elts), Elts);
-  APSInt Value(S->getCharByteWidth() * Info.Ctx.getCharWidth(),
+  APSInt Value(Info.Ctx.getTypeSize(CharType),
                CharType->isUnsignedIntegerType());
   if (Result.hasArrayFiller())
     Result.getArrayFiller() = APValue(Value);
@@ -3712,7 +3711,8 @@ findSubobject(EvalInfo &Info, const Expr *E, const CompleteObject &Obj,
          !isValidIndeterminateAccess(handler.AccessKind))) {
       if (!Info.checkingPotentialConstantExpression())
         Info.FFDiag(E, diag::note_constexpr_access_uninit)
-            << handler.AccessKind << O->isIndeterminate();
+            << handler.AccessKind << O->isIndeterminate()
+            << E->getSourceRange();
       return handler.failed();
     }
 
@@ -4442,6 +4442,11 @@ struct CompoundAssignSubobjectHandler {
       return foundPointer(Subobj, SubobjType);
     case APValue::Vector:
       return foundVector(Subobj, SubobjType);
+    case APValue::Indeterminate:
+      Info.FFDiag(E, diag::note_constexpr_access_uninit)
+          << /*read of=*/0 << /*uninitialized object=*/1
+          << E->getLHS()->getSourceRange();
+      return false;
     default:
       // FIXME: can this happen?
       Info.FFDiag(E);
@@ -6057,8 +6062,9 @@ const AccessKinds StartLifetimeOfUnionMemberHandler::AccessKind;
 /// operator whose left-hand side might involve a union member access. If it
 /// does, implicitly start the lifetime of any accessed union elements per
 /// C++20 [class.union]5.
-static bool HandleUnionActiveMemberChange(EvalInfo &Info, const Expr *LHSExpr,
-                                          const LValue &LHS) {
+static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
+                                               const Expr *LHSExpr,
+                                               const LValue &LHS) {
   if (LHS.InvalidBase || LHS.Designator.Invalid)
     return false;
 
@@ -6113,8 +6119,14 @@ static bool HandleUnionActiveMemberChange(EvalInfo &Info, const Expr *LHSExpr,
         break;
       // Walk path backwards as we walk up from the base to the derived class.
       for (const CXXBaseSpecifier *Elt : llvm::reverse(ICE->path())) {
+        if (Elt->isVirtual()) {
+          // A class with virtual base classes never has a trivial default
+          // constructor, so S(E) is empty in this case.
+          E = nullptr;
+          break;
+        }
+
         --PathLength;
-        (void)Elt;
         assert(declaresSameEntity(Elt->getType()->getAsCXXRecordDecl(),
                                   LHS.Designator.Entries[PathLength]
                                       .getAsBaseOrMember().getPointer()));
@@ -7524,6 +7536,9 @@ public:
     return Error(E);
   }
 
+  bool VisitPredefinedExpr(const PredefinedExpr *E) {
+    return StmtVisitorTy::Visit(E->getFunctionName());
+  }
   bool VisitConstantExpr(const ConstantExpr *E) {
     if (E->hasAPValueResult())
       return DerivedSuccess(E->getAPValueResult(), E);
@@ -7649,7 +7664,8 @@ public:
   }
 
   bool VisitOpaqueValueExpr(const OpaqueValueExpr *E) {
-    if (APValue *Value = Info.CurrentCall->getCurrentTemporary(E))
+    if (APValue *Value = Info.CurrentCall->getCurrentTemporary(E);
+        Value && !Value->isAbsent())
       return DerivedSuccess(*Value, E);
 
     const Expr *Source = E->getSourceExpr();
@@ -7797,7 +7813,7 @@ public:
         // per C++20 [class.union]5.
         if (Info.getLangOpts().CPlusPlus20 && OCE &&
             OCE->getOperator() == OO_Equal && MD->isTrivial() &&
-            !HandleUnionActiveMemberChange(Info, Args[0], ThisVal))
+            !MaybeHandleUnionActiveMemberChange(Info, Args[0], ThisVal))
           return false;
 
         Args = Args.slice(1);
@@ -8670,7 +8686,7 @@ bool LValueExprEvaluator::VisitBinAssign(const BinaryOperator *E) {
     return false;
 
   if (Info.getLangOpts().CPlusPlus20 &&
-      !HandleUnionActiveMemberChange(Info, E->getLHS(), Result))
+      !MaybeHandleUnionActiveMemberChange(Info, E->getLHS(), Result))
     return false;
 
   return handleAssignment(this->Info, E, Result, E->getLHS()->getType(),
@@ -9357,7 +9373,7 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
       APSInt N;
       if (!EvaluateInteger(E->getArg(2), N, Info))
         return false;
-      MaxLength = N.getExtValue();
+      MaxLength = N.getZExtValue();
     }
     // We cannot find the value if there are no candidates to match against.
     if (MaxLength == 0u)
@@ -12381,7 +12397,7 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
       APSInt N;
       if (!EvaluateInteger(E->getArg(2), N, Info))
         return false;
-      MaxLength = N.getExtValue();
+      MaxLength = N.getZExtValue();
     }
 
     // Empty substrings compare equal by definition.
@@ -12661,9 +12677,9 @@ namespace {
 class DataRecursiveIntBinOpEvaluator {
   struct EvalResult {
     APValue Val;
-    bool Failed;
+    bool Failed = false;
 
-    EvalResult() : Failed(false) { }
+    EvalResult() = default;
 
     void swap(EvalResult &RHS) {
       Val.swap(RHS.Val);
@@ -13310,6 +13326,10 @@ EvaluateComparisonBinaryOperator(EvalInfo &Info, const BinaryOperator *E,
     // C++11 [expr.rel]p4, [expr.eq]p3: If two operands of type std::nullptr_t
     // are compared, the result is true of the operator is <=, >= or ==, and
     // false otherwise.
+    LValue Res;
+    if (!EvaluatePointer(E->getLHS(), Res, Info) ||
+        !EvaluatePointer(E->getRHS(), Res, Info))
+      return false;
     return Success(CmpResult::Equal, E);
   }
 

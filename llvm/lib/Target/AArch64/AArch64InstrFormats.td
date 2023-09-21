@@ -133,6 +133,16 @@ def extract_high_v4i32 :
 def extract_high_v2i64 :
     ComplexPattern<v1i64, 1, "SelectExtractHigh", [extract_subvector, bitconvert]>;
 
+def gi_extract_high_v16i8 :
+  GIComplexOperandMatcher<v8s8, "selectExtractHigh">,
+  GIComplexPatternEquiv<extract_high_v16i8>;
+def gi_extract_high_v8i16 :
+  GIComplexOperandMatcher<v4s16, "selectExtractHigh">,
+  GIComplexPatternEquiv<extract_high_v8i16>;
+def gi_extract_high_v4i32 :
+  GIComplexOperandMatcher<v2s32, "selectExtractHigh">,
+  GIComplexPatternEquiv<extract_high_v4i32>;
+
 def extract_high_v8f16 :
     ComplexPattern<v4f16, 1, "SelectExtractHigh", [extract_subvector, bitconvert]>;
 def extract_high_v4f32 :
@@ -5399,6 +5409,44 @@ multiclass ThreeOperandFPData<bit isNegated, bit isSub,string asm,
                   (node (f64 FPR64:$Rn), (f64 FPR64:$Rm), (f64 FPR64:$Ra)))]> {
     let Inst{23-22} = 0b01; // 64-bit size flag
   }
+
+  let Predicates = [HasFullFP16] in {
+  def : Pat<(f16 (node (f16 FPR16:$Rn),
+                       (f16 (extractelt (v8f16 V128:$Rm), (i64 0))),
+                       (f16 FPR16:$Ra))),
+            (!cast<Instruction>(NAME # Hrrr)
+              FPR16:$Rn, (f16 (EXTRACT_SUBREG V128:$Rm, hsub)), FPR16:$Ra)>;
+
+  def : Pat<(f16 (node (f16 (extractelt (v8f16 V128:$Rn), (i64 0))),
+                       (f16 FPR16:$Rm),
+                       (f16 FPR16:$Ra))),
+            (!cast<Instruction>(NAME # Hrrr)
+              (f16 (EXTRACT_SUBREG V128:$Rn, hsub)), FPR16:$Rm, FPR16:$Ra)>;
+  }
+
+  def : Pat<(f32 (node (f32 FPR32:$Rn),
+                       (f32 (extractelt (v4f32 V128:$Rm), (i64 0))),
+                       (f32 FPR32:$Ra))),
+            (!cast<Instruction>(NAME # Srrr)
+              FPR32:$Rn, (EXTRACT_SUBREG V128:$Rm, ssub), FPR32:$Ra)>;
+
+  def : Pat<(f32 (node (f32 (extractelt (v4f32 V128:$Rn), (i64 0))),
+                       (f32 FPR32:$Rm),
+                       (f32 FPR32:$Ra))),
+            (!cast<Instruction>(NAME # Srrr)
+              (EXTRACT_SUBREG V128:$Rn, ssub), FPR32:$Rm, FPR32:$Ra)>;
+
+  def : Pat<(f64 (node (f64 FPR64:$Rn),
+                       (f64 (extractelt (v2f64 V128:$Rm), (i64 0))),
+                       (f64 FPR64:$Ra))),
+            (!cast<Instruction>(NAME # Drrr)
+              FPR64:$Rn, (EXTRACT_SUBREG V128:$Rm, dsub), FPR64:$Ra)>;
+
+  def : Pat<(f64 (node (f64 (extractelt (v2f64 V128:$Rn), (i64 0))),
+                       (f64 FPR64:$Rm),
+                       (f64 FPR64:$Ra))),
+            (!cast<Instruction>(NAME # Drrr)
+              (EXTRACT_SUBREG V128:$Rn, dsub), FPR64:$Rm, FPR64:$Ra)>;
 }
 
 //---

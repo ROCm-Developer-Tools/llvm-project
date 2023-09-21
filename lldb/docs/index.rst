@@ -6,8 +6,9 @@ The LLDB Debugger
 Welcome to the LLDB documentation!
 
 LLDB is a next generation, high-performance debugger. It is built as a set of
-reusable components which highly leverage existing libraries in the larger LLVM
-Project, such as the Clang expression parser and LLVM disassembler.
+reusable components which highly leverage existing libraries in the larger
+`LLVM Project <https://llvm.org>`_, such as the Clang expression parser and
+LLVM disassembler.
 
 LLDB is the default debugger in Xcode on macOS and supports debugging C,
 Objective-C and C++ on the desktop and iOS devices and simulator.
@@ -25,8 +26,8 @@ Tutorial <https://lldb.llvm.org/use/tutorial.html>`_. For users already familiar
 with GDB there is a cheat sheet listing common tasks and their LLDB equivalent
 in the `GDB to LLDB command map <https://lldb.llvm.org/use/map.html>`_.
 
-There are also multiple resources on how to script LLDB using Python:
-`use/python-reference`_ is a great starting point for that.
+There are also multiple resources on how to script LLDB using Python: the
+:doc:`use/python-reference` is a great starting point for that.
 
 Compiler Integration Benefits
 -----------------------------
@@ -147,8 +148,10 @@ interesting areas to contribute to lldb.
    resources/contributing
    resources/build
    resources/test
+   resources/debugging
    resources/fuzzing
    resources/sbapi
+   resources/dataformatters
    resources/extensions
    resources/caveats
    resources/projects
@@ -163,5 +166,6 @@ interesting areas to contribute to lldb.
    Source Code <https://github.com/llvm/llvm-project>
    Releases <https://github.com/llvm/llvm-project/releases>
    Discussion Forums <https://discourse.llvm.org/c/subprojects/lldb/8>
-   Bug Reports <https://github.com/llvm/llvm-project/issues/labels/lldb/>
-   Code Reviews <https://reviews.llvm.org>
+   Developer Policy <https://llvm.org/docs/DeveloperPolicy.html>
+   Bug Reports <https://github.com/llvm/llvm-project/issues?q=is%3Aissue+label%3Alldb+is%3Aopen>
+   Code Reviews <https://github.com/llvm/llvm-project/pulls?q=is%3Apr+label%3Alldb+is%3Aopen>

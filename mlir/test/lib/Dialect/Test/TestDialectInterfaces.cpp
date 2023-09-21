@@ -219,6 +219,10 @@ struct TestOpAsmInterface : public OpAsmDialectInterface {
         return AliasResult::FinalAlias;
       }
     }
+    if (auto recAliasType = dyn_cast<TestRecursiveAliasType>(type)) {
+      os << recAliasType.getName();
+      return AliasResult::FinalAlias;
+    }
     return AliasResult::NoAlias;
   }
 

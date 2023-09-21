@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIBC_SRC_SUPPORT_GPU_AMDGPU_IO_H
-#define LLVM_LIBC_SRC_SUPPORT_GPU_AMDGPU_IO_H
+#ifndef LLVM_LIBC_SRC___SUPPORT_GPU_AMDGPU_IO_H
+#define LLVM_LIBC_SRC___SUPPORT_GPU_AMDGPU_IO_H
 
 #include "src/__support/common.h"
 #include "src/__support/macros/config.h"
@@ -125,7 +125,8 @@ LIBC_INLINE uint32_t get_lane_size() { return LANE_SIZE; }
 }
 
 /// Copies the value from the first active thread in the wavefront to the rest.
-[[clang::convergent]] LIBC_INLINE uint32_t broadcast_value(uint32_t x) {
+[[clang::convergent]] LIBC_INLINE uint32_t broadcast_value(uint64_t,
+                                                           uint32_t x) {
   return __builtin_amdgcn_readfirstlane(x);
 }
 
@@ -174,6 +175,9 @@ LIBC_INLINE uint64_t fixed_frequency_clock() {
   else
     return 0;
 }
+
+/// Terminates execution of the associated wavefront.
+[[noreturn]] LIBC_INLINE void end_program() { __builtin_amdgcn_endpgm(); }
 
 } // namespace gpu
 } // namespace __llvm_libc

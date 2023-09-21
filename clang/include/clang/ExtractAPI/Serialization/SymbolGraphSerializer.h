@@ -159,6 +159,8 @@ protected:
   llvm::StringSet<> visitedCategories;
 
 public:
+  void visitNamespaceRecord(const NamespaceRecord &Record);
+
   /// Visit a global function record.
   void visitGlobalFunctionRecord(const GlobalFunctionRecord &Record);
 
@@ -182,6 +184,19 @@ public:
 
   void visitClassTemplatePartialSpecializationRecord(
       const ClassTemplatePartialSpecializationRecord &Record);
+
+  void visitCXXInstanceMethodRecord(const CXXInstanceMethodRecord &Record);
+
+  void visitCXXStaticMethodRecord(const CXXStaticMethodRecord &Record);
+
+  void visitMethodTemplateRecord(const CXXMethodTemplateRecord &Record);
+
+  void visitMethodTemplateSpecializationRecord(
+      const CXXMethodTemplateSpecializationRecord &Record);
+
+  void visitCXXFieldRecord(const CXXFieldRecord &Record);
+
+  void visitCXXFieldTemplateRecord(const CXXFieldTemplateRecord &Record);
 
   void visitConceptRecord(const ConceptRecord &Record);
 

@@ -2514,12 +2514,15 @@ void Sema::DiagnoseImmediateEscalatingReason(FunctionDecl *FD) {
         Range = CurrentInit->isWritten() ? CurrentInit->getSourceRange()
                                          : SourceRange();
       }
+
+      FieldDecl* InitializedField = CurrentInit ? CurrentInit->getAnyMember() : nullptr;
+
       SemaRef.Diag(Loc, diag::note_immediate_function_reason)
           << ImmediateFn << Fn << Fn->isConsteval() << IsCall
           << isa<CXXConstructorDecl>(Fn) << ImmediateFnIsConstructor
-          << (CurrentInit != nullptr)
+          << (InitializedField != nullptr)
           << (CurrentInit && !CurrentInit->isWritten())
-          << (CurrentInit ? CurrentInit->getAnyMember() : nullptr) << Range;
+          << InitializedField << Range;
     }
     bool TraverseCallExpr(CallExpr *E) {
       if (const auto *DR =
@@ -3729,10 +3732,20 @@ Sema::ActOnCXXMemberDeclarator(Scope *S, AccessSpecifier AS, Declarator &D,
     if (!Diags.isIgnored(diag::warn_unused_private_field, FD->getLocation())) {
       // Remember all explicit private FieldDecls that have a name, no side
       // effects and are not part of a dependent type declaration.
+
+      auto DeclHasUnusedAttr = [](const QualType &T) {
+        if (const TagDecl *TD = T->getAsTagDecl())
+          return TD->hasAttr<UnusedAttr>();
+        if (const TypedefType *TDT = T->getAs<TypedefType>())
+          return TDT->getDecl()->hasAttr<UnusedAttr>();
+        return false;
+      };
+
       if (!FD->isImplicit() && FD->getDeclName() &&
           FD->getAccess() == AS_private &&
           !FD->hasAttr<UnusedAttr>() &&
           !FD->getParent()->isDependentContext() &&
+          !DeclHasUnusedAttr(FD->getType()) &&
           !InitializationHasSideEffects(*FD))
         UnusedPrivateFields.insert(FD);
     }

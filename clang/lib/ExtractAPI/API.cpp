@@ -44,6 +44,22 @@ RecordTy *addTopLevelRecord(DenseMap<StringRef, APIRecord *> &USRLookupTable,
 
 } // namespace
 
+NamespaceRecord *
+APISet::addNamespace(APIRecord *Parent, StringRef Name, StringRef USR,
+                     PresumedLoc Loc, AvailabilitySet Availability,
+                     LinkageInfo Linkage, const DocComment &Comment,
+                     DeclarationFragments Declaration,
+                     DeclarationFragments SubHeading, bool IsFromSystemHeader) {
+  auto *Record = addTopLevelRecord(
+      USRBasedLookupTable, Namespaces, USR, Name, Loc, std::move(Availability),
+      Linkage, Comment, Declaration, SubHeading, IsFromSystemHeader);
+
+  if (Parent)
+    Record->ParentInformation = APIRecord::HierarchyInformation(
+        Parent->USR, Parent->Name, Parent->getKind(), Parent);
+  return Record;
+}
+
 GlobalVariableRecord *
 APISet::addGlobalVar(StringRef Name, StringRef USR, PresumedLoc Loc,
                      AvailabilitySet Availabilities, LinkageInfo Linkage,
@@ -171,62 +187,94 @@ APISet::addStaticField(StringRef Name, StringRef USR, PresumedLoc Loc,
 }
 
 CXXFieldRecord *
-APISet::addCXXField(CXXClassRecord *CXXClass, StringRef Name, StringRef USR,
+APISet::addCXXField(APIRecord *CXXClass, StringRef Name, StringRef USR,
                     PresumedLoc Loc, AvailabilitySet Availabilities,
                     const DocComment &Comment, DeclarationFragments Declaration,
                     DeclarationFragments SubHeading, AccessControl Access,
                     bool IsFromSystemHeader) {
-  auto Record = std::make_unique<CXXFieldRecord>(
-      USR, Name, Loc, std::move(Availabilities), Comment, Declaration,
-      SubHeading, Access, IsFromSystemHeader);
+  auto *Record = addTopLevelRecord(
+      USRBasedLookupTable, CXXFields, USR, Name, Loc, std::move(Availabilities),
+      Comment, Declaration, SubHeading, Access, IsFromSystemHeader);
   Record->ParentInformation = APIRecord::HierarchyInformation(
       CXXClass->USR, CXXClass->Name, CXXClass->getKind(), CXXClass);
-  USRBasedLookupTable.insert({USR, Record.get()});
-  return CXXClass->Fields.emplace_back(std::move(Record)).get();
+  return Record;
+}
+
+CXXFieldTemplateRecord *APISet::addCXXFieldTemplate(
+    APIRecord *Parent, StringRef Name, StringRef USR, PresumedLoc Loc,
+    AvailabilitySet Availability, const DocComment &Comment,
+    DeclarationFragments Declaration, DeclarationFragments SubHeading,
+    AccessControl Access, Template Template, bool IsFromSystemHeader) {
+  auto *Record =
+      addTopLevelRecord(USRBasedLookupTable, CXXFieldTemplates, USR, Name, Loc,
+                        std::move(Availability), Comment, Declaration,
+                        SubHeading, Access, Template, IsFromSystemHeader);
+  Record->ParentInformation = APIRecord::HierarchyInformation(
+      Parent->USR, Parent->Name, Parent->getKind(), Parent);
+
+  return Record;
 }
 
 CXXClassRecord *
-APISet::addCXXClass(StringRef Name, StringRef USR, PresumedLoc Loc,
-                    AvailabilitySet Availabilities, const DocComment &Comment,
-                    DeclarationFragments Declaration,
+APISet::addCXXClass(APIRecord *Parent, StringRef Name, StringRef USR,
+                    PresumedLoc Loc, AvailabilitySet Availabilities,
+                    const DocComment &Comment, DeclarationFragments Declaration,
                     DeclarationFragments SubHeading, APIRecord::RecordKind Kind,
-                    bool IsFromSystemHeader) {
-  return addTopLevelRecord(USRBasedLookupTable, CXXClasses, USR, Name, Loc,
-                           std::move(Availabilities), Comment, Declaration,
-                           SubHeading, Kind, IsFromSystemHeader);
+                    AccessControl Access, bool IsFromSystemHeader) {
+  auto *Record =
+      addTopLevelRecord(USRBasedLookupTable, CXXClasses, USR, Name, Loc,
+                        std::move(Availabilities), Comment, Declaration,
+                        SubHeading, Kind, Access, IsFromSystemHeader);
+  if (Parent)
+    Record->ParentInformation = APIRecord::HierarchyInformation(
+        Parent->USR, Parent->Name, Parent->getKind(), Parent);
+  return Record;
 }
 
 ClassTemplateRecord *APISet::addClassTemplate(
-    StringRef Name, StringRef USR, PresumedLoc Loc,
+    APIRecord *Parent, StringRef Name, StringRef USR, PresumedLoc Loc,
     AvailabilitySet Availability, const DocComment &Comment,
     DeclarationFragments Declaration, DeclarationFragments SubHeading,
-    Template Template, bool IsFromSystemHeader) {
-
-  return addTopLevelRecord(USRBasedLookupTable, ClassTemplates, USR, Name, Loc,
-                           std::move(Availability), Comment, Declaration,
-                           SubHeading, Template, IsFromSystemHeader);
+    Template Template, AccessControl Access, bool IsFromSystemHeader) {
+  auto *Record =
+      addTopLevelRecord(USRBasedLookupTable, ClassTemplates, USR, Name, Loc,
+                        std::move(Availability), Comment, Declaration,
+                        SubHeading, Template, Access, IsFromSystemHeader);
+  if (Parent)
+    Record->ParentInformation = APIRecord::HierarchyInformation(
+        Parent->USR, Parent->Name, Parent->getKind(), Parent);
+  return Record;
 }
 
 ClassTemplateSpecializationRecord *APISet::addClassTemplateSpecialization(
-    StringRef Name, StringRef USR, PresumedLoc Loc,
+    APIRecord *Parent, StringRef Name, StringRef USR, PresumedLoc Loc,
     AvailabilitySet Availability, const DocComment &Comment,
     DeclarationFragments Declaration, DeclarationFragments SubHeading,
-    bool IsFromSystemHeader) {
-  return addTopLevelRecord(USRBasedLookupTable, ClassTemplateSpecializations,
-                           USR, Name, Loc, std::move(Availability), Comment,
-                           Declaration, SubHeading, IsFromSystemHeader);
+    AccessControl Access, bool IsFromSystemHeader) {
+  auto *Record =
+      addTopLevelRecord(USRBasedLookupTable, ClassTemplateSpecializations, USR,
+                        Name, Loc, std::move(Availability), Comment,
+                        Declaration, SubHeading, Access, IsFromSystemHeader);
+  if (Parent)
+    Record->ParentInformation = APIRecord::HierarchyInformation(
+        Parent->USR, Parent->Name, Parent->getKind(), Parent);
+  return Record;
 }
 
 ClassTemplatePartialSpecializationRecord *
 APISet::addClassTemplatePartialSpecialization(
-    StringRef Name, StringRef USR, PresumedLoc Loc,
+    APIRecord *Parent, StringRef Name, StringRef USR, PresumedLoc Loc,
     AvailabilitySet Availability, const DocComment &Comment,
     DeclarationFragments Declaration, DeclarationFragments SubHeading,
-    Template Template, bool IsFromSystemHeader) {
-  return addTopLevelRecord(USRBasedLookupTable,
-                           ClassTemplatePartialSpecializations, USR, Name, Loc,
-                           std::move(Availability), Comment, Declaration,
-                           SubHeading, Template, IsFromSystemHeader);
+    Template Template, AccessControl Access, bool IsFromSystemHeader) {
+  auto *Record = addTopLevelRecord(
+      USRBasedLookupTable, ClassTemplatePartialSpecializations, USR, Name, Loc,
+      std::move(Availability), Comment, Declaration, SubHeading, Template,
+      Access, IsFromSystemHeader);
+  if (Parent)
+    Record->ParentInformation = APIRecord::HierarchyInformation(
+        Parent->USR, Parent->Name, Parent->getKind(), Parent);
+  return Record;
 }
 
 GlobalVariableTemplateSpecializationRecord *
@@ -265,50 +313,71 @@ ConceptRecord *APISet::addConcept(StringRef Name, StringRef USR,
                            SubHeading, Template, IsFromSystemHeader);
 }
 
-CXXMethodRecord *APISet::addCXXMethod(
-    CXXClassRecord *CXXClassRecord, StringRef Name, StringRef USR,
-    PresumedLoc Loc, AvailabilitySet Availability, const DocComment &Comment,
+CXXMethodRecord *APISet::addCXXInstanceMethod(
+    APIRecord *CXXClassRecord, StringRef Name, StringRef USR, PresumedLoc Loc,
+    AvailabilitySet Availability, const DocComment &Comment,
     DeclarationFragments Declaration, DeclarationFragments SubHeading,
-    FunctionSignature Signature, bool IsStatic, AccessControl Access,
+    FunctionSignature Signature, AccessControl Access,
     bool IsFromSystemHeader) {
-  std::unique_ptr<CXXMethodRecord> Record;
-  if (IsStatic)
-    Record = std::make_unique<CXXStaticMethodRecord>(
-        USR, Name, Loc, std::move(Availability), Comment, Declaration,
-        SubHeading, Signature, Access, IsFromSystemHeader);
-  else
-    Record = std::make_unique<CXXInstanceMethodRecord>(
-        USR, Name, Loc, std::move(Availability), Comment, Declaration,
-        SubHeading, Signature, Access, IsFromSystemHeader);
+  CXXMethodRecord *Record =
+      addTopLevelRecord(USRBasedLookupTable, CXXInstanceMethods, USR, Name, Loc,
+                        std::move(Availability), Comment, Declaration,
+                        SubHeading, Signature, Access, IsFromSystemHeader);
 
   Record->ParentInformation = APIRecord::HierarchyInformation(
       CXXClassRecord->USR, CXXClassRecord->Name, CXXClassRecord->getKind(),
       CXXClassRecord);
-  USRBasedLookupTable.insert({USR, Record.get()});
-  return CXXClassRecord->Methods.emplace_back(std::move(Record)).get();
+  return Record;
 }
 
-CXXMethodRecord *APISet::addCXXSpecialMethod(
-    CXXClassRecord *CXXClassRecord, StringRef Name, StringRef USR,
-    PresumedLoc Loc, AvailabilitySet Availability, const DocComment &Comment,
+CXXMethodRecord *APISet::addCXXStaticMethod(
+    APIRecord *CXXClassRecord, StringRef Name, StringRef USR, PresumedLoc Loc,
+    AvailabilitySet Availability, const DocComment &Comment,
     DeclarationFragments Declaration, DeclarationFragments SubHeading,
-    FunctionSignature Signature, bool IsConstructor, AccessControl Access,
+    FunctionSignature Signature, AccessControl Access,
     bool IsFromSystemHeader) {
-  std::unique_ptr<CXXMethodRecord> Record;
-  if (IsConstructor)
-    Record = std::make_unique<CXXConstructorRecord>(
-        USR, Name, Loc, std::move(Availability), Comment, Declaration,
-        SubHeading, Signature, Access, IsFromSystemHeader);
-  else
-    Record = std::make_unique<CXXDestructorRecord>(
-        USR, Name, Loc, std::move(Availability), Comment, Declaration,
-        SubHeading, Signature, Access, IsFromSystemHeader);
+  CXXMethodRecord *Record =
+      addTopLevelRecord(USRBasedLookupTable, CXXStaticMethods, USR, Name, Loc,
+                        std::move(Availability), Comment, Declaration,
+                        SubHeading, Signature, Access, IsFromSystemHeader);
 
   Record->ParentInformation = APIRecord::HierarchyInformation(
       CXXClassRecord->USR, CXXClassRecord->Name, CXXClassRecord->getKind(),
       CXXClassRecord);
-  USRBasedLookupTable.insert({USR, Record.get()});
-  return CXXClassRecord->Methods.emplace_back(std::move(Record)).get();
+  return Record;
+}
+
+CXXMethodTemplateRecord *APISet::addCXXMethodTemplate(
+    APIRecord *Parent, StringRef Name, StringRef USR, PresumedLoc Loc,
+    AvailabilitySet Availability, const DocComment &Comment,
+    DeclarationFragments Declaration, DeclarationFragments SubHeading,
+    FunctionSignature Signature, AccessControl Access, Template Template,
+    bool IsFromSystemHeader) {
+  auto *Record = addTopLevelRecord(USRBasedLookupTable, CXXMethodTemplates, USR,
+                                   Name, Loc, std::move(Availability), Comment,
+                                   Declaration, SubHeading, Signature, Access,
+                                   Template, IsFromSystemHeader);
+  Record->ParentInformation = APIRecord::HierarchyInformation(
+      Parent->USR, Parent->Name, Parent->getKind(), Parent);
+
+  return Record;
+}
+
+CXXMethodTemplateSpecializationRecord *APISet::addCXXMethodTemplateSpec(
+    APIRecord *Parent, StringRef Name, StringRef USR, PresumedLoc Loc,
+    AvailabilitySet Availability, const DocComment &Comment,
+    DeclarationFragments Declaration, DeclarationFragments SubHeading,
+    FunctionSignature Signature, AccessControl Access,
+    bool IsFromSystemHeader) {
+
+  auto *Record = addTopLevelRecord(
+      USRBasedLookupTable, CXXMethodTemplateSpecializations, USR, Name, Loc,
+      std::move(Availability), Comment, Declaration, SubHeading, Signature,
+      Access, IsFromSystemHeader);
+  Record->ParentInformation = APIRecord::HierarchyInformation(
+      Parent->USR, Parent->Name, Parent->getKind(), Parent);
+
+  return Record;
 }
 
 ObjCCategoryRecord *APISet::addObjCCategory(

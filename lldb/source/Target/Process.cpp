@@ -89,7 +89,7 @@ using namespace std::chrono;
 class ProcessOptionValueProperties
     : public Cloneable<ProcessOptionValueProperties, OptionValueProperties> {
 public:
-  ProcessOptionValueProperties(ConstString name) : Cloneable(name) {}
+  ProcessOptionValueProperties(llvm::StringRef name) : Cloneable(name) {}
 
   const Property *
   GetPropertyAtIndex(size_t idx,
@@ -146,8 +146,7 @@ class ProcessExperimentalOptionValueProperties
                        OptionValueProperties> {
 public:
   ProcessExperimentalOptionValueProperties()
-      : Cloneable(
-            ConstString(Properties::GetExperimentalSettingsName())) {}
+      : Cloneable(Properties::GetExperimentalSettingsName()) {}
 };
 
 ProcessExperimentalProperties::ProcessExperimentalProperties()
@@ -162,8 +161,7 @@ ProcessProperties::ProcessProperties(lldb_private::Process *process)
 {
   if (process == nullptr) {
     // Global process properties, set them up one time
-    m_collection_sp =
-        std::make_shared<ProcessOptionValueProperties>(ConstString("process"));
+    m_collection_sp = std::make_shared<ProcessOptionValueProperties>("process");
     m_collection_sp->Initialize(g_process_properties);
     m_collection_sp->AppendProperty(
         "thread", "Settings specific to threads.", true,
@@ -435,7 +433,7 @@ Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp,
           Listener::MakeListener("lldb.process.internal_state_listener")),
       m_mod_id(), m_process_unique_id(0), m_thread_index_id(0),
       m_thread_id_to_index_id_map(), m_exit_status(-1), m_exit_string(),
-      m_exit_status_mutex(), m_thread_list_real(this),
+      m_exit_status_mutex(), m_thread_mutex(), m_thread_list_real(this),
       m_thread_list(this), m_thread_plans(*this), m_extended_thread_list(this),
       m_extended_thread_stop_id(0), m_queue_list(this), m_queue_list_stop_id(0),
       m_notifications(), m_image_tokens(),
@@ -629,8 +627,7 @@ void Process::SyncIOHandler(uint32_t iohandler_id,
                             const Timeout<std::micro> &timeout) {
   // don't sync (potentially context switch) in case where there is no process
   // IO
-  std::lock_guard<std::mutex> guard(m_process_input_reader_mutex);
-  if (!m_process_input_reader)
+  if (!ProcessIOHandlerExists())
     return;
 
   auto Result = m_iohandler_sync.WaitForValueNotEqualTo(iohandler_id, timeout);
@@ -1125,11 +1122,9 @@ bool Process::SetProcessExitStatus(
     if (target_sp) {
       ProcessSP process_sp(target_sp->GetProcessSP());
       if (process_sp) {
-        const char *signal_cstr = nullptr;
-        if (signo)
-          signal_cstr = process_sp->GetUnixSignals()->GetSignalAsCString(signo);
-
-        process_sp->SetExitStatus(exit_status, signal_cstr);
+        llvm::StringRef signal_str =
+            process_sp->GetUnixSignals()->GetSignalAsStringRef(signo);
+        process_sp->SetExitStatus(exit_status, signal_str);
       }
     }
     return true;
@@ -2457,7 +2452,7 @@ Process::WaitForProcessStopPrivate(EventSP &event_sp,
 }
 
 void Process::LoadOperatingSystemPlugin(bool flush) {
-  std::lock_guard<std::recursive_mutex> guard(GetThreadList().GetMutex());
+  std::lock_guard<std::recursive_mutex> guard(m_thread_mutex);
   if (flush)
     m_thread_list.Clear();
   m_os_up.reset(OperatingSystem::FindPlugin(this, nullptr));
@@ -5916,12 +5911,12 @@ size_t Process::AddImageToken(lldb::addr_t image_ptr) {
 lldb::addr_t Process::GetImagePtrFromToken(size_t token) const {
   if (token < m_image_tokens.size())
     return m_image_tokens[token];
-  return LLDB_INVALID_ADDRESS;
+  return LLDB_INVALID_IMAGE_TOKEN;
 }
 
 void Process::ResetImageToken(size_t token) {
   if (token < m_image_tokens.size())
-    m_image_tokens[token] = LLDB_INVALID_ADDRESS;
+    m_image_tokens[token] = LLDB_INVALID_IMAGE_TOKEN;
 }
 
 Address
