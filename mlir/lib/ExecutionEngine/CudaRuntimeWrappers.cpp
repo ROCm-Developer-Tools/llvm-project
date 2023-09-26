@@ -119,7 +119,8 @@ static bool cusparseLt_initiated = false;
 #endif // MLIR_ENABLE_CUDA_CUSPARSELT
 #endif // MLIR_ENABLE_CUDA_CUSPARSE
 
-extern "C" MLIR_CUDA_WRAPPERS_EXPORT CUmodule mgpuModuleLoad(void *data) {
+extern "C" MLIR_CUDA_WRAPPERS_EXPORT CUmodule
+mgpuModuleLoad(void *data, size_t /*gpuBlobSize*/) {
   ScopedContext scopedContext;
   CUmodule module = nullptr;
   CUDA_REPORT_IF_ERROR(cuModuleLoadData(&module, data));
@@ -165,7 +166,7 @@ extern "C" MLIR_CUDA_WRAPPERS_EXPORT void
 mgpuLaunchKernel(CUfunction function, intptr_t gridX, intptr_t gridY,
                  intptr_t gridZ, intptr_t blockX, intptr_t blockY,
                  intptr_t blockZ, int32_t smem, CUstream stream, void **params,
-                 void **extra) {
+                 void **extra, size_t /*paramsCount*/) {
   ScopedContext scopedContext;
   int32_t maxShmem = 0;
   CUdevice device = getDefaultCuDevice();
@@ -376,8 +377,8 @@ extern "C" MLIR_CUDA_WRAPPERS_EXPORT void *mgpuTensorMapEncodeTiledMemref(
   CUtensorMap tensorMap;
 
   auto *globalAddress = descriptor->data;
-  uint32_t boxDim[5] = {0}, elementStrides[5] = {0};
-  uint64_t globalDim[5] = {0}, globalStrides[5] = {0};
+  uint32_t boxDim[5] = {1, 1, 1, 1, 1}, elementStrides[5] = {1, 1, 1, 1, 1};
+  uint64_t globalDim[5] = {1, 1, 1, 1, 1}, globalStrides[5] = {0};
   uint32_t tensorRank32 = uint32_t(tensorRank);
 
   static const int elementSizeInBytes[] = {1, 2, 4, 4, 8, 8, 2,

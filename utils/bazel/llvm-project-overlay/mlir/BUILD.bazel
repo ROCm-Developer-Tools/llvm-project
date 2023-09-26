@@ -1898,6 +1898,37 @@ gentbl_cc_library(
     deps = [":ArmSMETdFiles"],
 )
 
+gentbl_cc_library(
+    name = "ArmSMEAttrDefsIncGen",
+    tbl_outs = [
+        (
+            ["-gen-enum-decls"],
+            "include/mlir/Dialect/ArmSME/IR/ArmSMEEnums.h.inc",
+        ),
+        (
+            ["-gen-enum-defs"],
+            "include/mlir/Dialect/ArmSME/IR/ArmSMEEnums.cpp.inc",
+        ),
+        (
+            [
+                "-gen-attrdef-decls",
+                "-attrdefs-dialect=arm_sme",
+            ],
+            "include/mlir/Dialect/ArmSME/IR/ArmSMEAttrDefs.h.inc",
+        ),
+        (
+            [
+                "-gen-attrdef-defs",
+                "-attrdefs-dialect=arm_sme",
+            ],
+            "include/mlir/Dialect/ArmSME/IR/ArmSMEAttrDefs.cpp.inc",
+        ),
+    ],
+    tblgen = ":mlir-tblgen",
+    td_file = "include/mlir/Dialect/ArmSME/IR/ArmSME.td",
+    deps = [":ArmSMETdFiles"],
+)
+
 cc_library(
     name = "ArmSMEDialect",
     srcs = ["lib/Dialect/ArmSME/IR/ArmSME.cpp"],
@@ -1905,8 +1936,10 @@ cc_library(
     includes = ["include"],
     deps = [
         ":ArmSMEIncGen",
+        ":ArmSMEAttrDefsIncGen",
         ":IR",
         ":LLVMDialect",
+        ":MemRefDialect",
         ":SCFDialect",
         ":SideEffectInterfaces",
         ":VectorDialect",
@@ -1921,6 +1954,7 @@ cc_library(
     hdrs = glob(["include/mlir/Dialect/ArmSME/Utils/*.h"]),
     includes = ["include"],
     deps = [
+        ":ArithDialect",
         ":ArmSMEDialect",
         ":Dialect",
         ":IR",
@@ -2442,6 +2476,7 @@ td_library(
     includes = ["include"],
     deps = [
         ":ControlFlowInterfacesTdFiles",
+        ":DestinationStyleOpInterfaceTdFiles",
         ":InferTypeOpInterfaceTdFiles",
         ":LoopLikeInterfaceTdFiles",
         ":ParallelCombiningOpInterfaceTdFiles",
@@ -3632,6 +3667,7 @@ cc_library(
         ":BufferizationDialect",
         ":ControlFlowDialect",
         ":ControlFlowInterfaces",
+        ":DestinationStyleOpInterface",
         ":FuncDialect",
         ":FunctionInterfaces",
         ":IR",
@@ -5240,6 +5276,7 @@ cc_library(
         ":NVGPUDialect",
         ":NVVMDialect",
         ":Pass",
+        ":SCFTransforms",
         "//llvm:Support",
     ],
 )
@@ -6554,6 +6591,7 @@ cc_library(
         ":DialectUtils",
         ":IR",
         ":InferTypeOpInterface",
+        ":LoopLikeInterface",
         ":ParallelCombiningOpInterface",
         ":ShapedOpInterfaces",
         ":SideEffectInterfaces",
@@ -10293,7 +10331,7 @@ gentbl_cc_library(
     tblgen = ":mlir-tblgen",
     td_file = "include/mlir/Dialect/Vector/IR/Vector.td",
     deps = [
-        ":ArithOpsTdFiles", 
+        ":ArithOpsTdFiles",
         ":VectorOpsTdFiles"
     ],
 )
@@ -10313,7 +10351,7 @@ gentbl_cc_library(
     tblgen = ":mlir-tblgen",
     td_file = "include/mlir/Dialect/Vector/IR/VectorOps.td",
     deps = [
-        ":ArithOpsTdFiles", 
+        ":ArithOpsTdFiles",
         ":VectorOpsTdFiles"
     ],
 )
@@ -10341,7 +10379,7 @@ gentbl_cc_library(
     tblgen = ":mlir-tblgen",
     td_file = "include/mlir/Dialect/Vector/IR/VectorAttributes.td",
     deps = [
-        ":ArithOpsTdFiles", 
+        ":ArithOpsTdFiles",
         ":VectorOpsTdFiles"
     ],
 )
@@ -10449,6 +10487,7 @@ cc_library(
         ":ArmSMEUtils",
         ":ConversionPassIncGen",
         ":IR",
+        ":MemRefDialect",
         ":Pass",
         ":Transforms",
         "//llvm:Support",
@@ -12612,7 +12651,10 @@ gentbl_cc_library(
 
 cc_library(
     name = "UBDialect",
-    srcs = ["lib/Dialect/UB/IR/UBOps.cpp"],
+    srcs = [
+        "lib/Dialect/UB/IR/UBOps.cpp",
+        "include/mlir/Transforms/InliningUtils.h",
+    ],
     hdrs = ["include/mlir/Dialect/UB/IR/UBOps.h"],
     includes = ["include"],
     deps = [

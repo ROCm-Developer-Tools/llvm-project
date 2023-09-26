@@ -101,7 +101,7 @@ protected:
   FunctionCallBuilder moduleLoadCallBuilder = {
       "mgpuModuleLoad",
       llvmPointerType /* void *module */,
-      {llvmPointerType /* void *cubin */}};
+      {llvmPointerType /* void *cubin */, llvmInt64Type /* size_t size */}};
   FunctionCallBuilder moduleUnloadCallBuilder = {
       "mgpuModuleUnload", llvmVoidType, {llvmPointerType /* void *module */}};
   FunctionCallBuilder moduleGetFunctionCallBuilder = {
@@ -125,7 +125,8 @@ protected:
           llvmInt32Type,          /* unsigned int sharedMemBytes */
           llvmPointerType,        /* void *hstream */
           llvmPointerPointerType, /* void **kernelParams */
-          llvmPointerPointerType  /* void **extra */
+          llvmPointerPointerType, /* void **extra */
+          llvmInt64Type           /* size_t paramsCount */
       }};
   FunctionCallBuilder streamCreateCallBuilder = {
       "mgpuStreamCreate", llvmPointerType /* void *stream */, {}};
@@ -1134,7 +1135,23 @@ LogicalResult ConvertLaunchFuncOpToGpuRuntimeCallPattern::matchAndRewrite(
       loc, rewriter, nameBuffer.str(), binaryAttr.getValue(),
       LLVM::Linkage::Internal, getTypeConverter()->useOpaquePointers());
 
-  auto module = moduleLoadCallBuilder.create(loc, rewriter, data);
+  // Pass the binary size. SPIRV requires binary size.
+  auto gpuBlob = binaryAttr.getValue();
+  auto gpuBlobSize = rewriter.create<mlir::LLVM::ConstantOp>(
+      loc, llvmInt64Type,
+      mlir::IntegerAttr::get(llvmInt64Type,
+                             static_cast<int64_t>(gpuBlob.size())));
+
+  auto module =
+      moduleLoadCallBuilder.create(loc, rewriter, {data, gpuBlobSize});
+
+  // Pass the count of the parameters to runtime wrappers
+  auto paramsCount = rewriter.create<mlir::LLVM::ConstantOp>(
+      loc, llvmInt64Type,
+      mlir::IntegerAttr::get(
+          llvmInt64Type,
+          static_cast<int64_t>(launchOp.getNumKernelOperands())));
+
   // Get the function from the module. The name corresponds to the name of
   // the kernel function.
   auto kernelName = generateKernelNameConstant(
@@ -1149,7 +1166,7 @@ LogicalResult ConvertLaunchFuncOpToGpuRuntimeCallPattern::matchAndRewrite(
           : adaptor.getAsyncDependencies().front();
   // Create array of pointers to kernel arguments.
   auto kernelParams = generateParamsArray(launchOp, adaptor, rewriter);
-  auto nullpointer = rewriter.create<LLVM::NullOp>(loc, llvmPointerPointerType);
+  auto nullpointer = rewriter.create<LLVM::ZeroOp>(loc, llvmPointerPointerType);
   Value dynamicSharedMemorySize = launchOp.getDynamicSharedMemorySize()
                                       ? launchOp.getDynamicSharedMemorySize()
                                       : zero;
@@ -1158,7 +1175,7 @@ LogicalResult ConvertLaunchFuncOpToGpuRuntimeCallPattern::matchAndRewrite(
       {function.getResult(), adaptor.getGridSizeX(), adaptor.getGridSizeY(),
        adaptor.getGridSizeZ(), adaptor.getBlockSizeX(), adaptor.getBlockSizeY(),
        adaptor.getBlockSizeZ(), dynamicSharedMemorySize, stream, kernelParams,
-       /*extra=*/nullpointer});
+       /*extra=*/nullpointer, paramsCount});
 
   if (launchOp.getAsyncToken()) {
     // Async launch: make dependent ops use the same stream.
@@ -1211,7 +1228,7 @@ LogicalResult ConvertMemcpyOpToGpuRuntimeCallPattern::matchAndRewrite(
   Value numElements = getNumElements(rewriter, loc, memRefType, srcDesc);
 
   Type elementPtrType = getElementPtrType(memRefType);
-  Value nullPtr = rewriter.create<LLVM::NullOp>(loc, elementPtrType);
+  Value nullPtr = rewriter.create<LLVM::ZeroOp>(loc, elementPtrType);
   Value gepPtr = rewriter.create<LLVM::GEPOp>(
       loc, elementPtrType,
       typeConverter->convertType(memRefType.getElementType()), nullPtr,
