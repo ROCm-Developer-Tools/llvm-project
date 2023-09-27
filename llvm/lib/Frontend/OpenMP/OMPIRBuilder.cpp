@@ -2755,45 +2755,6 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
   // body
   Extractor.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
 
-  // Sink allocas used only inside loop body
-  // original code:
-  // %item_used_in_loop_body = alloca i32
-  // ;no more instructions which uses item_used_in_loop_body
-  // loopbody:
-  //   use(%item_used_in_loop_body)
-  //
-  // After sinking:
-  // loopbody:
-  //    %item_used_in_loop_body_moved_alloca = alloca i32
-  //    use(%item_used_in_loop_body_moved_alloca)
-  //
-  // TODO: OMPIRBuilder should not be responsible for sinking allocas
-  // which are used only inside loop body region.
-  for (AllocaInst *AllocaItem : CEAC.getAllocas()) {
-    bool ReadyToMove = true;
-    for (User *AllocaUse : AllocaItem->users()) {
-      Instruction *Inst;
-      if ((Inst = dyn_cast<LoadInst>(AllocaUse)) &&
-          ParallelRegionBlockSet.count(Inst->getParent()))
-        continue;
-      if ((Inst = dyn_cast<StoreInst>(AllocaUse)) &&
-          ParallelRegionBlockSet.count(Inst->getParent()))
-        continue;
-      ReadyToMove = false;
-      break;
-    }
-    if (ReadyToMove) {
-      Builder.restoreIP({CLI->getBody(), CLI->getBody()->begin()});
-      AllocaInst *NewAlloca =
-          Builder.CreateAlloca(CLI->getIndVarType(), 0, "moved_alloca");
-      std::vector<User *> Users(AllocaItem->user_begin(),
-                                AllocaItem->user_end());
-      for (User *use : Users) {
-        use->replaceUsesOfWith(AllocaItem, NewAlloca);
-      }
-      ToBeDeleted.push_back(AllocaItem);
-    }
-  }
   // We need to model loop body region as the function f(cnt, loop_arg).
   // That's why we replace loop induction variable by the new counter
   // which will be one of loop body function argument

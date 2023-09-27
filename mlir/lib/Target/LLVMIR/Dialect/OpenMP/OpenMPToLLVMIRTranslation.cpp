@@ -794,6 +794,50 @@ static void collectReductionInfo(
   }
 }
 
+/// Populate a set of previously created llvm.alloca instructions that are only
+/// used inside of the given region but defined outside of it. Allocations of
+/// non-primitive types are skipped by this function.
+static void getSinkableAllocas(LLVM::ModuleTranslation &moduleTranslation,
+                               Region &region,
+                               SetVector<llvm::AllocaInst *> &allocasToSink) {
+  Operation *op = region.getParentOp();
+
+  for (auto storeOp : region.getOps<LLVM::StoreOp>()) {
+    Value storeAddr = storeOp.getAddr();
+    Operation *addrOp = storeAddr.getDefiningOp();
+
+    // The destination address is already defined in this region or it is not an
+    // llvm.alloca operation, so skip it.
+    if (!isa_and_present<LLVM::AllocaOp>(addrOp) || op->isAncestor(addrOp))
+      continue;
+
+    // Get LLVM value to which the address is mapped. It has to be mapped to the
+    // allocation instruction of a scalar type to be marked as sinkable by this
+    // function.
+    llvm::Value *llvmAddr = moduleTranslation.lookupValue(storeAddr);
+    if (!isa_and_present<llvm::AllocaInst>(llvmAddr))
+      continue;
+
+    auto *llvmAlloca = cast<llvm::AllocaInst>(llvmAddr);
+    if (llvmAlloca->getAllocatedType()->getPrimitiveSizeInBits() == 0)
+      continue;
+
+    // Check that the address is only used inside of the region.
+    bool addressUsedOnlyInternally = true;
+    for (auto &addrUse : storeAddr.getUses()) {
+      if (!op->isAncestor(addrUse.getOwner())) {
+        addressUsedOnlyInternally = false;
+        break;
+      }
+    }
+
+    if (!addressUsedOnlyInternally)
+      continue;
+
+    allocasToSink.insert(llvmAlloca);
+  }
+}
+
 /// Converts an OpenMP workshare loop into LLVM IR using OpenMPIRBuilder.
 static LogicalResult
 convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
@@ -850,6 +894,9 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   // Set up the source location value for OpenMP runtime.
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
 
+  SetVector<llvm::AllocaInst *> allocasToSink;
+  getSinkableAllocas(moduleTranslation, loop.getRegion(), allocasToSink);
+
   // Generator of the canonical loop body.
   // TODO: support error propagation in OpenMPIRBuilder and use it instead of
   // relying on captured variables.
@@ -869,10 +916,21 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
     if (loopInfos.size() != loop.getNumLoops() - 1)
       return;
 
-    // Convert the body of the loop.
+    // Convert the body of the loop, adding lifetime markers to allocations that
+    // can be sunk into the new block.
     builder.restoreIP(ip);
-    convertOmpOpRegions(loop.getRegion(), "omp.wsloop.region", builder,
-                        moduleTranslation, bodyGenStatus);
+    for (auto *alloca : allocasToSink) {
+      unsigned size = alloca->getAllocatedType()->getPrimitiveSizeInBits() / 8;
+      builder.CreateLifetimeStart(alloca, builder.getInt64(size));
+    }
+    llvm::BasicBlock *cont =
+        convertOmpOpRegions(loop.getRegion(), "omp.wsloop.region", builder,
+                            moduleTranslation, bodyGenStatus);
+    builder.SetInsertPoint(cont, cont->begin());
+    for (auto *alloca : allocasToSink) {
+      unsigned size = alloca->getAllocatedType()->getPrimitiveSizeInBits() / 8;
+      builder.CreateLifetimeEnd(alloca, builder.getInt64(size));
+    }
   };
 
   // Delegate actual loop construction to the OpenMP IRBuilder.
@@ -1091,6 +1149,9 @@ convertOmpSimdLoop(Operation &opInst, llvm::IRBuilderBase &builder,
 
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
 
+  SetVector<llvm::AllocaInst *> allocasToSink;
+  getSinkableAllocas(moduleTranslation, loop.getRegion(), allocasToSink);
+
   // Generator of the canonical loop body.
   // TODO: support error propagation in OpenMPIRBuilder and use it instead of
   // relying on captured variables.
@@ -1110,10 +1171,21 @@ convertOmpSimdLoop(Operation &opInst, llvm::IRBuilderBase &builder,
     if (loopInfos.size() != loop.getNumLoops() - 1)
       return;
 
-    // Convert the body of the loop.
+    // Convert the body of the loop, adding lifetime markers to allocations that
+    // can be sunk into the new block.
     builder.restoreIP(ip);
-    convertOmpOpRegions(loop.getRegion(), "omp.simdloop.region", builder,
-                        moduleTranslation, bodyGenStatus);
+    for (auto *alloca : allocasToSink) {
+      unsigned size = alloca->getAllocatedType()->getPrimitiveSizeInBits() / 8;
+      builder.CreateLifetimeStart(alloca, builder.getInt64(size));
+    }
+    llvm::BasicBlock *cont =
+        convertOmpOpRegions(loop.getRegion(), "omp.simdloop.region", builder,
+                            moduleTranslation, bodyGenStatus);
+    builder.SetInsertPoint(cont, cont->begin());
+    for (auto *alloca : allocasToSink) {
+      unsigned size = alloca->getAllocatedType()->getPrimitiveSizeInBits() / 8;
+      builder.CreateLifetimeEnd(alloca, builder.getInt64(size));
+    }
   };
 
   // Delegate actual loop construction to the OpenMP IRBuilder.
