@@ -15,7 +15,7 @@
 !DEVICE:  %[[C8:.*]] = arith.constant 1 : index
 !DEVICE:  %[[BOUNDS1:.*]] = omp.bounds   lower_bound(%[[C5]] : index) upper_bound(%[[C6]] : index) stride(%[[C8]] : index) start_idx(%[[C8]] : index)
 !DEVICE:  %[[MAP1:.*]] = omp.map_info var_ptr(%[[ARG2]] : !fir.ref<!fir.array<10xi32>>, !fir.array<10xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS1]]) -> !fir.ref<!fir.array<10xi32>> {name = "sp_write(2:5)"}
-!DEVICE:  omp.target   map_entries(%[[MAP0]], %[[MAP1]] : !fir.ref<!fir.array<10xi32>>, !fir.ref<!fir.array<10xi32>>) {
+!DEVICE:  omp.target   map_entries(%[[MAP0]], %[[MAP1]], {{.*}} : !fir.ref<!fir.array<10xi32>>, !fir.ref<!fir.array<10xi32>>, {{.*}}) {
 
 !HOST-LABEL:  func.func @_QPread_write_section() {
 !HOST:  %0 = fir.alloca i32 {bindc_name = "i", uniq_name = "_QFread_write_sectionEi"}
@@ -31,8 +31,8 @@
 !HOST:  %[[C6:.*]] = arith.constant 4 : index
 !HOST:  %[[BOUNDS1:.*]] = omp.bounds   lower_bound(%[[C5]] : index) upper_bound(%[[C6]] : index) stride(%[[C4]] : index) start_idx(%[[C4]] : index)
 !HOST:  %[[MAP1:.*]] = omp.map_info var_ptr(%[[WRITE]] : !fir.ref<!fir.array<10xi32>>, !fir.array<10xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS1]]) -> !fir.ref<!fir.array<10xi32>> {name = "sp_write(2:5)"}
-!HOST:  omp.target   map_entries(%[[MAP0]], %[[MAP1]] : !fir.ref<!fir.array<10xi32>>, !fir.ref<!fir.array<10xi32>>) {
-
+!HOST:  %[[MAP2:.*]] = omp.map_info var_ptr({{.*}})   map_clauses(exit_release_or_enter_alloc) capture(ByCopy) -> !fir.ref<i32> {implicit = true, name = "i"}
+!HOST:  omp.target   map_entries(%[[MAP0]], %[[MAP1]], %[[MAP2]] : !fir.ref<!fir.array<10xi32>>, !fir.ref<!fir.array<10xi32>>, !fir.ref<i32>) {
 subroutine read_write_section()
     integer :: sp_read(10) = (/1,2,3,4,5,6,7,8,9,10/)
     integer :: sp_write(10) = (/0,0,0,0,0,0,0,0,0,0/)
@@ -57,7 +57,7 @@ module assumed_array_routines
 !DEVICE: %[[BOUNDS:.*]] = omp.bounds   lower_bound(%[[C0]] : index) upper_bound(%[[C1]] : index) stride(%[[C3]]#2 : index) start_idx(%[[C4]] : index) {stride_in_bytes = true}
 !DEVICE: %[[ARGADDR:.*]] = fir.box_addr %[[ARG1]] : (!fir.box<!fir.array<?xi32>>) -> !fir.ref<!fir.array<?xi32>>
 !DEVICE: %[[MAP:.*]] = omp.map_info var_ptr(%[[ARGADDR]] : !fir.ref<!fir.array<?xi32>>, !fir.array<?xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}
-!DEVICE: omp.target   map_entries(%[[MAP]] : !fir.ref<!fir.array<?xi32>>) {
+!DEVICE: omp.target   map_entries(%[[MAP]], {{.*}} : !fir.ref<!fir.array<?xi32>>, {{.*}}) {
 
 !HOST-LABEL: func.func @_QMassumed_array_routinesPassumed_shape_array(
 !HOST-SAME: %[[ARG0:.*]]: !fir.box<!fir.array<?xi32>> {fir.bindc_name = "arr_read_write"}) {
@@ -70,7 +70,7 @@ module assumed_array_routines
 !HOST: %[[BOUNDS:.*]] = omp.bounds   lower_bound(%[[C3]] : index) upper_bound(%[[C4]] : index) stride(%[[C2]]#2 : index) start_idx(%[[C0]] : index) {stride_in_bytes = true}
 !HOST: %[[ADDROF:.*]] = fir.box_addr %arg0 : (!fir.box<!fir.array<?xi32>>) -> !fir.ref<!fir.array<?xi32>>
 !HOST: %[[MAP:.*]] = omp.map_info var_ptr(%[[ADDROF]] : !fir.ref<!fir.array<?xi32>>, !fir.array<?xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}
-!HOST: omp.target   map_entries(%[[MAP]] : !fir.ref<!fir.array<?xi32>>) {
+!HOST: omp.target   map_entries(%[[MAP]], {{.*}} : !fir.ref<!fir.array<?xi32>>, {{.*}}) {
     subroutine assumed_shape_array(arr_read_write)
             integer, intent(inout) :: arr_read_write(:)
 
@@ -89,7 +89,7 @@ module assumed_array_routines
 !DEVICE: %[[C3:.*]] = arith.constant 1 : index
 !DEVICE: %[[BOUNDS:.*]] = omp.bounds   lower_bound(%[[C0]] : index) upper_bound(%[[C1]] : index) stride(%[[C3]] : index) start_idx(%[[C3]] : index)
 !DEVICE: %[[MAP:.*]] = omp.map_info var_ptr(%[[ARG1]] : !fir.ref<!fir.array<?xi32>>, !fir.array<?xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}
-!DEVICE: omp.target   map_entries(%[[MAP]] : !fir.ref<!fir.array<?xi32>>) {
+!DEVICE: omp.target   map_entries(%[[MAP]], {{.*}} : !fir.ref<!fir.array<?xi32>>, {{.*}}) {
 
 !HOST-LABEL: func.func @_QMassumed_array_routinesPassumed_size_array(
 !HOST-SAME: %[[ARG0:.*]]: !fir.ref<!fir.array<?xi32>> {fir.bindc_name = "arr_read_write"}) {
@@ -99,7 +99,7 @@ module assumed_array_routines
 !HOST: %[[C2:.*]] = arith.constant 4 : index
 !HOST: %[[BOUNDS:.*]]  = omp.bounds   lower_bound(%[[C1]] : index) upper_bound(%[[C2]] : index) stride(%[[C0]] : index) start_idx(%[[C0]] : index)
 !HOST: %[[MAP:.*]] = omp.map_info var_ptr(%[[ARG0]] : !fir.ref<!fir.array<?xi32>>, !fir.array<?xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}
-!HOST: omp.target   map_entries(%[[MAP]] : !fir.ref<!fir.array<?xi32>>) {
+!HOST: omp.target   map_entries(%[[MAP]], {{.*}} : !fir.ref<!fir.array<?xi32>>, {{.*}}) {
         subroutine assumed_size_array(arr_read_write)
             integer, intent(inout) :: arr_read_write(*)
 

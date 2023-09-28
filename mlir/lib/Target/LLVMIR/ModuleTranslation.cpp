@@ -1378,6 +1378,11 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
   if (failed(translator.convertFunctions()))
     return nullptr;
 
+  // llvm::errs() << "dump mlir module \n";
+  // translator.mlirModule->dump();
+  // llvm::errs() << "\n\n\n";
+  // translator.llvmModule->dump();
+
   if (llvm::verifyModule(*translator.llvmModule, &llvm::errs()))
     return nullptr;
 

@@ -467,6 +467,7 @@ func.func @_QPomp_target() {
 // CHECK:           llvm.return
 // CHECK:         }
 
+
 // -----
 
 func.func @_QPsimdloop_with_nested_loop() {

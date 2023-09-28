@@ -346,9 +346,6 @@ public:
 
   /// Kind of device clause for declare target variables
   /// and functions
-  /// NOTE: Currently not used as a part of a variable entry
-  /// used for Flang and Clang to interface with the variable
-  /// related registration functions
   enum OMPTargetDeviceClauseKind : uint32_t {
     /// The target is marked for all devices
     OMPTargetDeviceClauseAny = 0x0,

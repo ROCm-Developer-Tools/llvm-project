@@ -1170,7 +1170,7 @@ def MapInfoOp : OpenMP_Op<"map_info", [AttrSizedOperandSegments]> {
                        Variadic<DataBoundsType>:$bounds, /* rank-0 to rank-{n-1} */
                        OptionalAttr<UI64Attr>:$map_type,
                        OptionalAttr<VariableCaptureKindAttr>:$map_capture_type,
-                       DefaultValuedAttr<BoolAttr, "false">:$implicit,
+                       OptionalAttr<BoolAttr>:$is_fortran_allocatable,
                        OptionalAttr<StrAttr>:$name);
   let results = (outs OpenMP_PointerLikeType:$omp_ptr);
 
@@ -1198,7 +1198,7 @@ def MapInfoOp : OpenMP_Op<"map_info", [AttrSizedOperandSegments]> {
     ```
     =>
     ```mlir
-    omp.map_info var_ptr(%index_ssa) map_type(to) map_capture_type(ByRef) implicit(false)
+    omp.map_info var_ptr(%index_ssa) map_type(to) map_capture_type(ByRef)
       name(index)
     ```
 
@@ -1211,9 +1211,8 @@ def MapInfoOp : OpenMP_Op<"map_info", [AttrSizedOperandSegments]> {
       objects (e.g. derived types or classes), indicates the bounds to be copied
       of the variable. When it's an array slice it is in rank order where rank 0
       is the inner-most dimension.
-    - `implicit`: indicates where the map item has been specified explicitly in a
-      map clause or captured implicitly by being used in a target region with no
-      map or other data mapping construct.
+    - `is_fortran_allocatable`: indicates if a captured variable is a fortran 
+       allocatable with a descriptor and requires special handling during lowering
     - 'map_clauses': OpenMP map type for this map capture, for example: from, to and
       always. It's a bitfield composed of the OpenMP runtime flags stored in
       OpenMPOffloadMappingFlags.
@@ -1229,6 +1228,7 @@ def MapInfoOp : OpenMP_Op<"map_info", [AttrSizedOperandSegments]> {
       | `map_clauses` `(` custom<MapClause>($map_type) `)`
       | `capture` `(` custom<CaptureType>($map_capture_type) `)`
       | `bounds` `(` $bounds `)`
+      | `is_fortran_allocatable` `(` $is_fortran_allocatable `)`
     ) `->` type($omp_ptr) attr-dict
   }];
 
@@ -1248,7 +1248,7 @@ def MapInfoOp : OpenMP_Op<"map_info", [AttrSizedOperandSegments]> {
 //===---------------------------------------------------------------------===//
 // 2.14.2 target data Construct
 //===---------------------------------------------------------------------===//
-
+  
 def Target_DataOp: OpenMP_Op<"target_data", [AttrSizedOperandSegments]>{
   let summary = "target data construct";
   let description = [{
@@ -1286,9 +1286,7 @@ def Target_DataOp: OpenMP_Op<"target_data", [AttrSizedOperandSegments]>{
                        Variadic<OpenMP_PointerLikeType>:$use_device_ptr,
                        Variadic<OpenMP_PointerLikeType>:$use_device_addr,
                        Variadic<OpenMP_PointerLikeType>:$map_operands);
-
   let regions = (region AnyRegion:$region);
-
   let assemblyFormat = [{
     oilist(`if` `(` $if_expr `:` type($if_expr) `)`
     | `device` `(` $device `:` type($device) `)`

@@ -127,10 +127,6 @@ llvm.func @_QPomp_target_enter_exit(%1 : !llvm.ptr, %3 : !llvm.ptr) {
   %37 = omp.bounds   lower_bound(%34 : i64) upper_bound(%33 : i64) extent(%35 : i64) stride(%36 : i64) start_idx(%36 : i64)
   %map4 = omp.map_info var_ptr(%3 : !llvm.ptr, !llvm.array<512 x i32>)   map_clauses(exit_release_or_enter_alloc) capture(ByRef) bounds(%37) -> !llvm.ptr {name = ""}
   omp.target_exit_data   if(%26 : i1) device(%27 : i32) map_entries(%map3, %map4 : !llvm.ptr, !llvm.ptr)
-  llvm.return
-}
-
-// CHECK:         @.offload_sizes = private unnamed_addr constant [2 x i64] [i64 4096, i64 2048]
 // CHECK:         @.offload_maptypes = private unnamed_addr constant [2 x i64] [i64 1, i64 0]
 // CHECK:         @.offload_sizes.1 = private unnamed_addr constant [2 x i64] [i64 4096, i64 2048]
 // CHECK:         @.offload_maptypes.2 = private unnamed_addr constant [2 x i64] [i64 2, i64 0]

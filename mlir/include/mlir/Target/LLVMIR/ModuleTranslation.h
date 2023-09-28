@@ -76,6 +76,15 @@ public:
   /// Stores the mapping between an MLIR value and its LLVM IR counterpart.
   void mapValue(Value mlir, llvm::Value *llvm) { mapValue(mlir) = llvm; }
 
+  void mapGlobal(Operation *op, llvm::GlobalValue *llvm) {
+    mapGlobal(op) = llvm;
+  }
+
+  llvm::GlobalValue *&mapGlobal(Operation *op) {
+    llvm::GlobalValue *&llvm = globalsMapping[op];
+    return llvm;
+  }
+
   /// Provides write-once access to store the LLVM IR value corresponding to the
   /// given MLIR value.
   llvm::Value *&mapValue(Value value) {

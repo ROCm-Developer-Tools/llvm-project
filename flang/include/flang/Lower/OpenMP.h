@@ -29,6 +29,7 @@ class ConvertOp;
 namespace Fortran {
 namespace parser {
 struct OpenMPConstruct;
+struct OpenMPBlockConstruct;
 struct OpenMPDeclarativeConstruct;
 struct OmpEndLoopDirective;
 struct OmpClauseList;
@@ -51,7 +52,6 @@ struct Variable;
 // Generate the OpenMP terminator for Operation at Location.
 void genOpenMPTerminator(fir::FirOpBuilder &, mlir::Operation *,
                          mlir::Location);
-
 void genOpenMPConstruct(AbstractConverter &, semantics::SemanticsContext &,
                         pft::Evaluation &, const parser::OpenMPConstruct &);
 void genOpenMPDeclarativeConstruct(AbstractConverter &, pft::Evaluation &,
@@ -61,6 +61,11 @@ void genThreadprivateOp(AbstractConverter &, const pft::Variable &);
 void genDeclareTargetIntGlobal(AbstractConverter &, const pft::Variable &);
 void genOpenMPReduction(AbstractConverter &,
                         const Fortran::parser::OmpClauseList &clauseList);
+void genImplicitMapsForTarget(
+    Fortran::lower::AbstractConverter &converter,
+    Fortran::semantics::SemanticsContext &semanticsContext,
+    Fortran::lower::pft::Evaluation &eval,
+    const Fortran::parser::OpenMPBlockConstruct &ompBlock);
 
 mlir::Operation *findReductionChain(mlir::Value, mlir::Value * = nullptr);
 fir::ConvertOp getConvertFromReductionOp(mlir::Operation *, mlir::Value);

@@ -1626,7 +1626,7 @@ convertOmpThreadprivate(Operation &opInst, llvm::IRBuilderBase &builder,
   return success();
 }
 
-static llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseKind
+llvm::OffloadEntriesInfoManager::OMPTargetDeviceClauseKind
 convertToDeviceClauseKind(mlir::omp::DeclareTargetDeviceType deviceClause) {
   switch (deviceClause) {
   case mlir::omp::DeclareTargetDeviceType::host:
@@ -1764,7 +1764,8 @@ uint64_t getArrayElementSizeInBits(LLVM::LLVMArrayType arrTy, DataLayout &dl) {
 // This function is somewhat equivalent to Clang's getExprTypeSize inside of
 // CGOpenMPRuntime.cpp.
 llvm::Value *getSizeInBytes(DataLayout &dl, const mlir::Type &type,
-                            Operation *clauseOp, llvm::IRBuilderBase &builder,
+                            Operation *clauseOp, llvm::Value *basePointer,
+                            llvm::Type *baseType, llvm::IRBuilderBase &builder,
                             LLVM::ModuleTranslation &moduleTranslation) {
   // utilising getTypeSizeInBits instead of getTypeSize as getTypeSize gives
   // the size in inconsistent byte or bit format.
@@ -1798,6 +1799,23 @@ llvm::Value *getSizeInBytes(DataLayout &dl, const mlir::Type &type,
         }
       }
 
+      // The size in bytes x number of elements, for allocatables, the
+      // underlying element type is stored inside of the descriptor, we
+      // can retrieve and use it directly here. However, it may also be
+      // possible to use the BoundsOp's getStride, which points to the
+      // same field, however, unsure if the stride will change based
+      // on a user specified stride, whereas, the element size
+      // should never change.
+      if (memberClause.getIsFortranAllocatable().value_or(false)) {
+        llvm::Value *memberEleByteSize = builder.CreateLoad(
+            builder.getInt64Ty(),
+            builder.CreateGEP(baseType, basePointer,
+                              std::vector<llvm::Value *>{builder.getInt64(0),
+                                                         builder.getInt32(1)},
+                              "element_size"));
+        return builder.CreateMul(elementCount, memberEleByteSize);
+      }
+
       // The size in bytes x number of elements, the sizeInBytes stored is
       // the underyling types size, e.g. if ptr<i32>, it'll be the i32's
       // size, so we do some on the fly runtime math to get the size in
@@ -1809,6 +1827,21 @@ llvm::Value *getSizeInBytes(DataLayout &dl, const mlir::Type &type,
   }
 
   return builder.getInt64(underlyingTypeSzInBits / 8);
+}
+
+// Get the underlying LLVM type, this will bypass the pointer and
+// access the underlying type. Which bypasses llvm's opaque pointers
+// to get the underlying type via MLIR.
+llvm::Type *getLLVMIRType(mlir::Type inputType,
+                          LLVM::ModuleTranslation &moduleTranslation) {
+  llvm::Type *type = moduleTranslation.convertType(inputType);
+  if (auto pointerType =
+          llvm::dyn_cast<mlir::omp::PointerLikeType>(inputType)) {
+    if (auto eleType = pointerType.getElementType()) {
+      type = moduleTranslation.convertType(eleType);
+    }
+  }
+  return type;
 }
 
 void collectMapDataFromMapOperands(MapInfoData &mapData,
@@ -1834,10 +1867,11 @@ void collectMapDataFromMapOperands(MapInfoData &mapData,
         mapData.BasePointers.push_back(mapData.OriginalValue.back());
       }
 
-      mapData.Sizes.push_back(getSizeInBytes(dl, mapOp.getVarType(), mapOp,
-                                             builder, moduleTranslation));
       mapData.BaseType.push_back(
-          moduleTranslation.convertType(mapOp.getVarType()));
+          getLLVMIRType(mapOp.getVarType(), moduleTranslation));
+      mapData.Sizes.push_back(getSizeInBytes(
+          dl, mapOp.getVarType(), mapOp, mapData.BasePointers.back(),
+          mapData.BaseType.back(), builder, moduleTranslation));
       mapData.MapClause.push_back(mapOp.getOperation());
       mapData.Types.push_back(
           llvm::omp::OpenMPOffloadMappingFlags(mapOp.getMapType().value()));
@@ -1849,6 +1883,319 @@ void collectMapDataFromMapOperands(MapInfoData &mapData,
   }
 }
 
+// Fortran pointers and allocatables come with descriptor information
+// alongside a pointer to the data itself, currently we map this together as
+// we would a regular C/C++ structure with a pointer member that's been
+// specified explicitly as a map argument, as the lowered target region from
+// Fortran has expectations that it's dealing with this descriptor and the
+// pointer or allocatable information to perform runtime checks and
+// calculations. A future optimisation pass may allow us to elide this
+// descriptor information and simplify the kernel in certain cases where we
+// can prove the bounds are known at compile time.
+//
+// The descriptor information (pointed to by the BoundsOp of the map) allows
+// us to take this liberty with the mapping, it contains dynamic information
+// for the pointer, such as its runtime size, and type.
+//
+// TODO: Extend for allocatables N > 1 for allocatables or pointers pointing
+// at N-Dimensional data
+// TODO: Extend for nested membersOf, this currently only handles one layer of
+// nesting and it's only been tested with Fortran's
+// pointers/allocatables/target which are effectively a structure with one
+// pointer member and several non-complex data members, need to wait on some
+// further Frontend support to test user defined types with nested pointers
+// and nested user defined types with pointers within
+// static void processMapWithMembersOf(
+//     LLVM::ModuleTranslation & moduleTranslation,
+//     llvm::IRBuilderBase & builder, llvm::OpenMPIRBuilder & ompBuilder,
+//     DataLayout & dl, llvm::OpenMPIRBuilder::MapInfosTy & combinedInfo,
+//     MapData & parentMap, bool isTargetParams) {
+//   ////////// First Parent Map Segment //////////
+//   // Map the first segment of our structure (pointer and descriptor), the
+//   // pointer to the descriptor itself.
+
+//   // TODO: Unneccessary for all cases for allocatables, but it is fine to
+//   // keep... but will come at performance cost
+//   // if (isTargetParams) {
+//   combinedInfo.Types.emplace_back(
+//       isTargetParams
+//           ? llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM
+//           : llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_NONE);
+//   combinedInfo.DevicePointers.emplace_back(
+//       llvm::OpenMPIRBuilder::DeviceInfoTy::None);
+//   combinedInfo.Names.emplace_back(LLVM::createMappingInformation(
+//       parentMap.mapClause->getLoc(), ompBuilder));
+//   combinedInfo.BasePointers.emplace_back(parentMap.basePointer);
+//   combinedInfo.Pointers.emplace_back(parentMap.pointer);
+
+//   // Calculate size of the parent object being mapped based on the
+//   // addresses at runtime, highAddr - lowAddr = size. This of course
+//   // doesn't factor in allocated data like pointers, hence the further
+//   // processing of members specified by users, or in the case of Fortran
+//   // pointers and allocatables, the mapping of the pointed to data by the
+//   // descriptor (which itself, is a structure containing runtime information
+//   // on the dynamically allocated data).
+//   llvm::Value *lowAddr =
+//       builder.CreatePointerCast(parentMap.pointer, builder.getPtrTy());
+//   llvm::Value *highAddr = builder.CreatePointerCast(
+//       builder.CreateConstGEP1_32(parentMap.underlyingType, parentMap.pointer,
+//                                  1),
+//       builder.getPtrTy());
+//   llvm::Value *size = builder.CreateIntCast(
+//       builder.CreatePtrDiff(builder.getInt8Ty(), highAddr, lowAddr),
+//       builder.getInt64Ty(),
+//       /*isSigned=*/false);
+//   combinedInfo.Sizes.push_back(size);
+//   // }
+//   ////////// Second Parent Map Segment //////////
+//   // This creates the initial MEMBER_OF mapping that consists of
+//   // the parent/top level container (same as above effectively, except with a
+//   // fixed initial compile time size and seperate maptype which indicates the
+//   // true mape type (tofrom etc.) and that it is a part of a larger mapping
+//   // and indicating the link between it and it's members that are also
+//   // explicitly mapped).
+//   auto parentClause =
+//       mlir::dyn_cast<mlir::omp::MapInfoOp>(parentMap.mapClause);
+
+//   llvm::omp::OpenMPOffloadMappingFlags mapFlag;
+//   // TODO: Need to special case this and above based on enter/exit and maybe
+//   // if it's a fortran allocatable type, in which case we wish to special
+//   case
+//   // some of this as it's implicit data the user has no knowledge of.
+//   // TODO: ALLOCATABLE DESCRIPTORS SHOULD *ALWAYS* BE TO, never from, tofrom,
+//   // is okay, but we likley want to just utilise "TO" mapping for the time
+//   // being. Ths could be set in the frontend or here, likely here if we use
+//   an
+//   // is allocatable flag and get rid of some of the extra map_info
+//   if (isTargetParams) {
+//     mapFlag = llvm::omp::OpenMPOffloadMappingFlags(
+//         parentClause.getMapType().value());
+//     mapFlag &= ~llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
+//   } else {
+//     mapFlag = llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TO /*|
+//               llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM*/
+//         ;
+//   }
+
+//   llvm::omp::OpenMPOffloadMappingFlags memberOfFlag =
+//       ompBuilder.getMemberOfFlag(combinedInfo.BasePointers.size() - 1);
+//   ompBuilder.setCorrectMemberOfFlag(mapFlag, memberOfFlag);
+
+//   combinedInfo.Types.emplace_back(mapFlag);
+//   combinedInfo.DevicePointers.emplace_back(
+//       llvm::OpenMPIRBuilder::DeviceInfoTy::None);
+//   combinedInfo.Names.emplace_back(LLVM::createMappingInformation(
+//       parentMap.mapClause->getLoc(), ompBuilder));
+//   combinedInfo.BasePointers.emplace_back(parentMap.basePointer);
+//   combinedInfo.Pointers.emplace_back(parentMap.pointer);
+//   combinedInfo.Sizes.emplace_back(parentMap.sizeInBytes);
+
+//   ////////// Mapping of Members Segment //////////
+//   for (MapData &mappedMembers : parentMap.membersOf) {
+//     auto memberClause =
+//         mlir::dyn_cast<mlir::omp::MapInfoOp>(mappedMembers.mapClause);
+
+//     // Same MemberOfFlag to indicate its link with parent and other members
+//     // of, and we flag that it's part of a pointer and object coupling.
+//     auto mapFlag = llvm::omp::OpenMPOffloadMappingFlags(
+//         memberClause.getMapType().value());
+//     mapFlag &= ~llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
+//     ompBuilder.setCorrectMemberOfFlag(mapFlag, memberOfFlag);
+//     mapFlag |= llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
+//     combinedInfo.Types.emplace_back(mapFlag);
+//     combinedInfo.DevicePointers.emplace_back(
+//         llvm::OpenMPIRBuilder::DeviceInfoTy::None);
+//     combinedInfo.Names.emplace_back(
+//         LLVM::createMappingInformation(memberClause.getLoc(), ompBuilder));
+
+//     // llvm::errs() << "emitting memberclause: \n";
+//     // memberClause.getVarPtr().getDefiningOp()->dump();
+//     // memberClause.getVarPtr().dump();
+
+//     // TODO/FIXME: Likely need a more foolproof way of accessing this
+//     // information. Possibly generated by the frontend and stored in the
+//     // BoundsOp, may require or would be desireable to discuss with the
+//     // OpenACC developers that share some of the bounds infrastructure.
+//     std::vector<llvm::Value *> parentAccessIdx;
+//     if (auto loadOp = mlir::dyn_cast_if_present<LLVM::LoadOp>(
+//             memberClause.getVarPtr().getDefiningOp())) {
+//       if (auto gepOp = mlir::dyn_cast_if_present<LLVM::GEPOp>(
+//               loadOp.getAddr().getDefiningOp())) {
+//         parentAccessIdx.reserve(gepOp.getRawConstantIndices().size());
+//         LLVM::GEPIndicesAdaptor<decltype(moduleTranslation.lookupValues(
+//             gepOp.getDynamicIndices()))>
+//             gepIndices(
+//                 gepOp.getRawConstantIndicesAttr(),
+//                 moduleTranslation.lookupValues(gepOp.getDynamicIndices()));
+
+//         for (PointerUnion<IntegerAttr, llvm::Value *> valueOrAttr :
+//              gepIndices) {
+//           if (llvm::Value *value =
+//                   ::llvm::dyn_cast<llvm::Value *>(valueOrAttr))
+//             parentAccessIdx.push_back(value);
+//           else
+//             parentAccessIdx.push_back(
+//                 builder.getInt32(valueOrAttr.get<IntegerAttr>().getInt()));
+//         }
+//       }
+//     }
+
+//     assert(!parentAccessIdx.empty() &&
+//            "Could not create accessor index for child when lowering mapped "
+//            "member of an object");
+
+//     llvm::Value *memberBase =
+//         builder.CreateInBoundsGEP(parentMap.underlyingType,
+//         parentMap.pointer,
+//                                   parentAccessIdx, "member_base");
+//     combinedInfo.BasePointers.emplace_back(memberBase);
+
+//     assert(
+//         memberClause.getBounds().size() <= 1 &&
+//         "Only 1-D map bounds are currently supported for member-of mapping");
+
+//     if (auto boundOp = mlir::dyn_cast_if_present<mlir::omp::DataBoundsOp>(
+//             memberClause.getBounds()[0].getDefiningOp())) {
+//       // TODO: Support dimensions > 1 accesses
+//       llvm::Value *loadMember =
+//           builder.CreateLoad(memberBase->getType(), memberBase);
+//       auto idx = std::vector<llvm::Value *>{builder.CreateSub(
+//           moduleTranslation.lookupValue(boundOp.getStartIdx()),
+//           builder.getInt64(1))};
+//       llvm::Value *memberIdx = builder.CreateInBoundsGEP(
+//           mappedMembers.underlyingType, loadMember, idx, "member_idx");
+//       combinedInfo.Pointers.emplace_back(memberIdx);
+//       combinedInfo.Sizes.emplace_back(mappedMembers.sizeInBytes);
+//     }
+//   }
+// }
+
+static void generateAllocatablesMapInfo(
+    LLVM::ModuleTranslation &moduleTranslation, llvm::IRBuilderBase &builder,
+    llvm::OpenMPIRBuilder &ompBuilder, DataLayout &dl,
+    llvm::OpenMPIRBuilder::MapInfosTy &combinedInfo, MapInfoData &mapData,
+    uint64_t mapDataIndex, bool isTargetParams) {
+  auto mapClauseInfo =
+      mlir::dyn_cast<mlir::omp::MapInfoOp>(mapData.MapClause[mapDataIndex]);
+
+  ////////// First Descriptor Structure Segment //////////
+  combinedInfo.Types.emplace_back(
+      isTargetParams
+          ? llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM
+          : llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_NONE);
+  combinedInfo.DevicePointers.emplace_back(
+      llvm::OpenMPIRBuilder::DeviceInfoTy::None);
+  combinedInfo.Names.emplace_back(LLVM::createMappingInformation(
+      mapData.MapClause[mapDataIndex]->getLoc(), ompBuilder));
+  combinedInfo.BasePointers.emplace_back(mapData.BasePointers[mapDataIndex]);
+  combinedInfo.Pointers.emplace_back(mapData.Pointers[mapDataIndex]);
+
+  llvm::Value *lowAddr = builder.CreatePointerCast(
+      mapData.Pointers[mapDataIndex], builder.getPtrTy());
+  llvm::Value *highAddr = builder.CreatePointerCast(
+      builder.CreateConstGEP1_32(mapData.BaseType[mapDataIndex],
+                                 mapData.Pointers[mapDataIndex], 1),
+      builder.getPtrTy());
+  llvm::Value *size = builder.CreateIntCast(
+      builder.CreatePtrDiff(builder.getInt8Ty(), highAddr, lowAddr),
+      builder.getInt64Ty(),
+      /*isSigned=*/false);
+  combinedInfo.Sizes.push_back(size);
+
+  ////////// Second Descriptor Structure Segment //////////
+  llvm::omp::OpenMPOffloadMappingFlags mapFlag =
+      llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TO;
+  if (isTargetParams)
+    mapFlag &= ~llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
+
+  llvm::omp::OpenMPOffloadMappingFlags memberOfFlag =
+      ompBuilder.getMemberOfFlag(combinedInfo.BasePointers.size() - 1);
+  ompBuilder.setCorrectMemberOfFlag(mapFlag, memberOfFlag);
+
+  combinedInfo.Types.emplace_back(mapFlag);
+  combinedInfo.DevicePointers.emplace_back(
+      llvm::OpenMPIRBuilder::DeviceInfoTy::None);
+  combinedInfo.Names.emplace_back(LLVM::createMappingInformation(
+      mapData.MapClause[mapDataIndex]->getLoc(), ompBuilder));
+  combinedInfo.BasePointers.emplace_back(mapData.BasePointers[mapDataIndex]);
+  combinedInfo.Pointers.emplace_back(mapData.Pointers[mapDataIndex]);
+  combinedInfo.Sizes.emplace_back(builder.getInt64(
+      moduleTranslation.getLLVMModule()->getDataLayout().getTypeSizeInBits(
+          mapData.BaseType[mapDataIndex]) /
+      8));
+
+  ///// Mapping of the data, that the descriptor pointer points to/ /////
+  // Same MemberOfFlag to indicate its link with parent and other members
+  // of, and we flag that it's part of a pointer and object coupling.
+  mapFlag =
+      llvm::omp::OpenMPOffloadMappingFlags(mapClauseInfo.getMapType().value());
+
+  // TODO: Is target_param always required? seems unneccesary for enter +exit
+  mapFlag &= ~llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
+  ompBuilder.setCorrectMemberOfFlag(mapFlag, memberOfFlag);
+  mapFlag |= llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
+  combinedInfo.Types.emplace_back(mapFlag);
+  combinedInfo.DevicePointers.emplace_back(
+      llvm::OpenMPIRBuilder::DeviceInfoTy::None);
+  combinedInfo.Names.emplace_back(LLVM::createMappingInformation(
+      mapData.MapClause[mapDataIndex]->getLoc(), ompBuilder));
+
+  llvm::Value *memberBase = builder.CreateInBoundsGEP(
+      mapData.BaseType[mapDataIndex], mapData.BasePointers[mapDataIndex],
+      std::vector<llvm::Value *>{builder.getInt64(0), builder.getInt32(0)},
+      "member_base");
+
+  combinedInfo.BasePointers.emplace_back(memberBase);
+
+  assert(!mapClauseInfo.getBounds().empty() &&
+         "missing map bounds for fortran allocatable, required for lowering");
+
+  llvm::Value *memberEleByteSize = builder.CreateLoad(
+      builder.getInt64Ty(),
+      builder.CreateGEP(
+          mapData.BaseType[mapDataIndex], mapData.BasePointers[mapDataIndex],
+          std::vector<llvm::Value *>{builder.getInt64(0), builder.getInt32(1)},
+          "size"));
+
+  std::vector<llvm::Value *> dimensionIndexSizeOffset{memberEleByteSize};
+  for (size_t i = 1; i < mapClauseInfo.getBounds().size(); ++i) {
+    llvm::Value *ubExtent = builder.CreateLoad(
+        builder.getInt64Ty(),
+        builder.CreateGEP(
+            mapData.BaseType[mapDataIndex], mapData.BasePointers[mapDataIndex],
+            std::vector<llvm::Value *>{builder.getInt64(0), builder.getInt32(7),
+                                       builder.getInt32(i),
+                                       builder.getInt32(1)},
+            "ub_extent"));
+    dimensionIndexSizeOffset.push_back(
+        builder.CreateMul(ubExtent, dimensionIndexSizeOffset[i - 1]));
+  }
+
+  llvm::Value *offsetAddress = nullptr;
+  for (int i = mapClauseInfo.getBounds().size() - 1; i >= 0; --i) {
+    if (auto boundOp = mlir::dyn_cast_if_present<mlir::omp::DataBoundsOp>(
+            mapClauseInfo.getBounds()[i].getDefiningOp())) {
+      if (!offsetAddress)
+        offsetAddress = builder.CreateMul(
+            moduleTranslation.lookupValue(boundOp.getLowerBound()),
+            dimensionIndexSizeOffset[i]);
+      else
+        offsetAddress = builder.CreateAdd(
+            offsetAddress, builder.CreateMul(moduleTranslation.lookupValue(
+                                                 boundOp.getLowerBound()),
+                                             dimensionIndexSizeOffset[i]));
+    }
+  }
+
+  llvm::Value *loadMember =
+      builder.CreateLoad(memberBase->getType(), memberBase);
+  llvm::Value *memberIdx = builder.CreateGEP(
+      builder.getInt8Ty(), loadMember,
+      std::vector<llvm::Value *>{offsetAddress}, "member_idx");
+  combinedInfo.Pointers.emplace_back(memberIdx);
+  combinedInfo.Sizes.emplace_back(mapData.Sizes[mapDataIndex]);
+}
+
 // Generate all map related information and fill the combinedInfo.
 static void genMapInfos(llvm::IRBuilderBase &builder,
                         LLVM::ModuleTranslation &moduleTranslation,
@@ -1858,6 +2205,7 @@ static void genMapInfos(llvm::IRBuilderBase &builder,
                         const SmallVector<Value> &devPtrOperands = {},
                         const SmallVector<Value> &devAddrOperands = {},
                         bool isTargetParams = false) {
+  // Get map clause information.
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
   auto fail = [&combinedInfo]() -> void {
@@ -1875,9 +2223,22 @@ static void genMapInfos(llvm::IRBuilderBase &builder,
   // utilise the size from any component of MapInfoData, if we can't
   // something is missing from the initial MapInfoData construction.
   for (size_t i = 0; i < mapData.MapClause.size(); ++i) {
+    auto mapOp = mlir::dyn_cast<mlir::omp::MapInfoOp>(mapData.MapClause[i]);
+    bool isImplicit =
+        mapOp.getMapType().value() &
+        static_cast<
+            std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
+            llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_IMPLICIT);
+
+    if (!isImplicit && mapOp.getIsFortranAllocatable().value_or(false)) {
+      generateAllocatablesMapInfo(moduleTranslation, builder, *ompBuilder, dl,
+                                  combinedInfo, mapData, i, isTargetParams);
+      continue;
+    }
+
     // Declare Target Mappings are excluded from being marked as
-    // OMP_MAP_TARGET_PARAM as they are not passed as parameters, they're marked
-    // with OMP_MAP_PTR_AND_OBJ instead.
+    // OMP_MAP_TARGET_PARAM as they are not passed as parameters, they're
+    // marked with OMP_MAP_PTR_AND_OBJ instead.
     auto mapFlag = mapData.Types[i];
     if (mapData.IsDeclareTarget[i])
       mapFlag |= llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
@@ -1942,7 +2303,7 @@ convertOmpTargetData(Operation *op, llvm::IRBuilderBase &builder,
   SmallVector<Value> useDevPtrOperands;
   SmallVector<Value> useDevAddrOperands;
   llvm::omp::RuntimeFunction RTLFn;
-  DataLayout DL = DataLayout(op->getParentOfType<ModuleOp>());
+  DataLayout dl = DataLayout(op->getParentOfType<ModuleOp>());
 
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
@@ -2007,7 +2368,7 @@ convertOmpTargetData(Operation *op, llvm::IRBuilderBase &builder,
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
 
   MapInfoData mapData;
-  collectMapDataFromMapOperands(mapData, mapOperands, moduleTranslation, DL,
+  collectMapDataFromMapOperands(mapData, mapOperands, moduleTranslation, dl,
                                 builder);
 
   // Fill up the arrays with all the mapped variables.
@@ -2016,16 +2377,17 @@ convertOmpTargetData(Operation *op, llvm::IRBuilderBase &builder,
       [&](InsertPointTy codeGenIP) -> llvm::OpenMPIRBuilder::MapInfosTy & {
     builder.restoreIP(codeGenIP);
     if (auto dataOp = dyn_cast<omp::DataOp>(op)) {
-      genMapInfos(builder, moduleTranslation, DL, combinedInfo, mapData,
+      genMapInfos(builder, moduleTranslation, dl, combinedInfo, mapData,
                   useDevPtrOperands, useDevAddrOperands);
     } else {
-      genMapInfos(builder, moduleTranslation, DL, combinedInfo, mapData);
+      genMapInfos(builder, moduleTranslation, dl, combinedInfo, mapData);
     }
     return combinedInfo;
   };
 
-  llvm::OpenMPIRBuilder::TargetDataInfo info(/*RequiresDevicePointerInfo=*/true,
-                                             /*SeparateBeginEndCalls=*/true);
+  llvm::OpenMPIRBuilder::TargetDataInfo info(
+      /*RequiresDevicePointerInfo=*/true,
+      /*SeparateBeginEndCalls=*/true);
 
   using BodyGenTy = llvm::OpenMPIRBuilder::BodyGenTy;
   LogicalResult bodyGenStatus = success();
@@ -2184,13 +2546,14 @@ handleDeclareTargetMapVar(MapInfoData &mapData,
     // structure for the host.
     if (mapData.IsDeclareTarget[i]) {
       // The users iterator will get invalidated if we modify an element,
-      // so we populate this vector of uses to alter each user on an individual
-      // basis to emit its own load (rather than one load for all).
+      // so we populate this vector of uses to alter each user on an
+      // individual basis to emit it's own load (rather than one load for
+      // all).
       llvm::SmallVector<llvm::User *> userVec;
       for (llvm::User *user : mapData.OriginalValue[i]->users())
         userVec.push_back(user);
 
-      for (llvm::User *user : userVec) {
+      for (auto *user : userVec) {
         if (auto *insn = dyn_cast<llvm::Instruction>(user)) {
           auto *load = builder.CreateLoad(mapData.BasePointers[i]->getType(),
                                           mapData.BasePointers[i]);
@@ -2339,12 +2702,18 @@ createAlteredByCaptureMap(MapInfoData &mapData,
       switch (captureKind) {
       case mlir::omp::VariableCaptureKind::ByRef: {
         // Currently handles array sectioning lowerbound case, but more
-        // logic may be required in the future. Clang invokes EmitLValue,
-        // which has specialised logic for special Clang types such as user
-        // defines, so it is possible we will have to extend this for
-        // structures or other complex types. As the general idea is that this
-        // function mimics some of the logic from Clang that we require for
-        // kernel argument passing from host -> device.
+        // logic may be required. Clang invokes EmitLValue, which has
+        // specialised logic for special Clang types such as user defines,
+        // so it is possible we will have to extend this for structures or
+        // other complex types. As the general idea is that this function
+        // mimics some of the logic from Clang that we require for kernel
+        // argument passing from host -> device. The load in from kernel
+        // arguments for device is currently handled inside of the
+        // OMPIRBuilder.
+        // NOTE: Allocatable arrays lower bound offset is handled inside of the
+        // generateAllocatablesMapInfo function currently, as the MapInfo for
+        // these actually contains the outer descriptor structure and the array
+        // data is internal to this strucutre (as a pointer)
         if (auto mapOp = mlir::dyn_cast_if_present<mlir::omp::MapInfoOp>(
                 mapData.MapClause[i])) {
           if (!mapOp.getBounds().empty() && mapData.BaseType[i]->isArrayTy()) {
@@ -2426,12 +2795,22 @@ convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
   return bodyGenStatus;
 }
 
+// Refactor TODO:
+//  * Rebase
+//  * Perhaps fix broken test: Flang :: Lower/OpenMP/function-filtering.f90
+//    and any other flang/mlir tests that appear broken after rebase
+// After Initial Patch Set TODO:
+//  * After initial bounds work upstreamed look into structure mapping of
+//    pointers (and other things) and getting the right offset into the
+//    structure lowered from IR.
+//  * Handle duplicate map clauses from being processed multiple times
 static LogicalResult
 convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                  LLVM::ModuleTranslation &moduleTranslation) {
-
   if (!targetOpSupported(opInst))
     return failure();
+
+  // opInst.getParentOfType<ModuleOp>().dump();
 
   auto *ompBuilder = moduleTranslation.getOpenMPBuilder();
   auto targetOp = cast<omp::TargetOp>(opInst);
@@ -2443,12 +2822,13 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   auto bodyCB = [&](InsertPointTy allocaIP,
                     InsertPointTy codeGenIP) -> InsertPointTy {
     builder.restoreIP(codeGenIP);
-    llvm::BasicBlock *exitBlock = convertOmpOpRegions(
-        targetRegion, "omp.target", builder, moduleTranslation, bodyGenStatus);
+    llvm::BasicBlock *exitBlock =
+        convertOmpOpRegions(targetOp.getRegion(), "omp.target", builder,
+                            moduleTranslation, bodyGenStatus);
     builder.SetInsertPoint(exitBlock);
 
-    // The thread_limit clause of the omp.teams operation takes precedence. Set
-    // it here if not already set and present in the omp.target operation.
+    // The thread_limit clause of the omp.teams operation takes precedence.
+    // Set it here if not already set and present in the omp.target operation.
     if (!ompBuilder->CurrentTargetInfo->ThreadLimit) {
       if (Value threadLimit = targetOp.getThreadLimit())
         ompBuilder->CurrentTargetInfo->ThreadLimit =
@@ -2463,9 +2843,9 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   };
 
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-  StringRef parentName = opInst.getParentOfType<LLVM::LLVMFuncOp>().getName();
 
   // Override parent name if early outlining function
+  StringRef parentName = opInst.getParentOfType<LLVM::LLVMFuncOp>().getName();
   if (auto earlyOutlineOp = llvm::dyn_cast<mlir::omp::EarlyOutliningInterface>(
           opInst.getParentOfType<LLVM::LLVMFuncOp>().getOperation())) {
     llvm::StringRef outlineParentName = earlyOutlineOp.getParentName();
@@ -2473,7 +2853,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   }
 
   llvm::TargetRegionEntryInfo entryInfo;
-
   if (!getTargetEntryUniqueInfo(entryInfo, targetOp, parentName))
     return failure();
 
@@ -2555,8 +2934,8 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   ompBuilder->CurrentTargetInfo.emplace();
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
-      ompLoc, targetOp.isTargetSPMDLoop(), allocaIP, builder.saveIP(), entryInfo,
-       kernelInput, genMapInfoCB, bodyCB, argAccessorCB));
+      ompLoc, targetOp.isTargetSPMDLoop(), allocaIP, builder.saveIP(),
+      entryInfo, kernelInput, genMapInfoCB, bodyCB, argAccessorCB));
 
   // Remap access operations to declare target reference pointers for the
   // device, essentially generating extra loadop's as necessary
@@ -2659,8 +3038,8 @@ convertDeclareTargetAttr(Operation *op, mlir::omp::DeclareTargetAttr attribute,
   return success();
 }
 
-/// Converts the module-level set of OpenMP requires clauses into LLVM IR using
-/// OpenMPIRBuilder.
+/// Converts the module-level set of OpenMP requires clauses into LLVM IR
+/// using OpenMPIRBuilder.
 static LogicalResult
 convertRequiresAttr(Operation &op, omp::ClauseRequiresAttr requiresAttr,
                     LLVM::ModuleTranslation &moduleTranslation) {
@@ -2695,8 +3074,8 @@ public:
   convertOperation(Operation *op, llvm::IRBuilderBase &builder,
                    LLVM::ModuleTranslation &moduleTranslation) const final;
 
-  /// Given an OpenMP MLIR attribute, create the corresponding LLVM-IR, runtime
-  /// calls, or operation amendments
+  /// Given an OpenMP MLIR attribute, create the corresponding LLVM-IR,
+  /// runtime calls, or operation amendments
   LogicalResult
   amendOperation(Operation *op, NamedAttribute attribute,
                  LLVM::ModuleTranslation &moduleTranslation) const final;
@@ -2808,7 +3187,6 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
 LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
     Operation *op, llvm::IRBuilderBase &builder,
     LLVM::ModuleTranslation &moduleTranslation) const {
-
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
   return llvm::TypeSwitch<Operation *, LogicalResult>(op)
@@ -2831,8 +3209,8 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
         //  "An implementation may implement a flush with a list by ignoring
         //   the list, and treating it the same as a flush without a list."
         //
-        // The argument list is discarded so that, flush with a list is treated
-        // same as a flush without a list.
+        // The argument list is discarded so that, flush with a list is
+        // treated same as a flush without a list.
         ompBuilder->createFlush(builder.saveIP());
         return success();
       })

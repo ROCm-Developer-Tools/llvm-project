@@ -1475,6 +1475,7 @@ fir::BoxValue fir::factory::createBoxValue(fir::FirOpBuilder &builder,
                                            const fir::ExtendedValue &exv) {
   if (auto *boxValue = exv.getBoxOf<fir::BoxValue>())
     return *boxValue;
+
   mlir::Value box = builder.createBox(loc, exv);
   llvm::SmallVector<mlir::Value> lbounds;
   llvm::SmallVector<mlir::Value> explicitTypeParams;

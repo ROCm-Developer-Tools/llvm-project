@@ -418,6 +418,46 @@ public:
 } // namespace
 
 namespace {
+// FIR Op specific conversion for MapInfoOp that overwrites the default OpenMP
+// Dialect lowering, this allows FIR specific lowering of types, required for
+// descriptors of allocatables currently.
+struct MapInfoOpConversion : public FIROpConversion<mlir::omp::MapInfoOp> {
+  using FIROpConversion::FIROpConversion;
+
+  mlir::LogicalResult
+  matchAndRewrite(mlir::omp::MapInfoOp curOp, OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    const mlir::TypeConverter *converter = getTypeConverter();
+
+    llvm::SmallVector<mlir::Type> resTypes;
+    if (failed(converter->convertTypes(curOp->getResultTypes(), resTypes)))
+      return mlir::failure();
+
+    // Copy attributes of the curOp except for the typeAttr which should
+    // be converted
+    llvm::SmallVector<mlir::NamedAttribute> newAttrs;
+    for (mlir::NamedAttribute attr : curOp->getAttrs()) {
+      if (auto typeAttr = mlir::dyn_cast<mlir::TypeAttr>(attr.getValue())) {
+        mlir::Type newAttr;
+        if (curOp.getIsFortranAllocatable().value_or(false)) {
+          newAttr = this->getBoxTypePair(typeAttr.getValue()).llvm;
+        } else {
+          newAttr = converter->convertType(typeAttr.getValue());
+        }
+        newAttrs.emplace_back(attr.getName(), mlir::TypeAttr::get(newAttr));
+      } else {
+        newAttrs.push_back(attr);
+      }
+    }
+
+    rewriter.replaceOpWithNewOp<mlir::omp::MapInfoOp>(
+        curOp, resTypes, adaptor.getOperands(), newAttrs);
+    return mlir::success();
+  }
+};
+} // namespace
+
+namespace {
 /// Lower `fir.address_of` operation to `llvm.address_of` operation.
 struct AddrOfOpConversion : public FIROpConversion<fir::AddrOfOp> {
   using FIROpConversion::FIROpConversion;
@@ -1474,6 +1514,7 @@ struct EmboxCommonConversion : public FIROpConversion<OP> {
     bool useInputType = fir::isPolymorphicType(boxTy) || isUnlimitedPolymorphic;
     mlir::Value descriptor =
         rewriter.create<mlir::LLVM::UndefOp>(loc, llvmBoxTy);
+
     descriptor =
         insertField(rewriter, loc, descriptor, {kElemLenPosInBox}, eleSize);
     descriptor = insertField(rewriter, loc, descriptor, {kVersionPosInBox},
@@ -1508,6 +1549,7 @@ struct EmboxCommonConversion : public FIROpConversion<OP> {
                                        fir::unwrapIfDerived(boxTy));
         }
       }
+
       if (typeDesc)
         descriptor =
             insertField(rewriter, loc, descriptor, {typeDescFieldId}, typeDesc,
@@ -1948,6 +1990,7 @@ struct XReboxOpConversion : public EmboxCommonConversion<fir::cg::XReboxOp> {
   mlir::LogicalResult
   matchAndRewrite(fir::cg::XReboxOp rebox, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
+
     mlir::Location loc = rebox.getLoc();
     mlir::Type idxTy = lowerTy().indexType();
     mlir::Value loweredBox = adaptor.getOperands()[0];
@@ -3797,6 +3840,9 @@ public:
     if (mlir::failed(runPipeline(mathConvertionPM, mod)))
       return signalPassFailure();
 
+    // if a loadop spawns an alloca if it's a box, why does the alloca for the
+    // target op load op end up external to the target op?
+
     auto *context = getModule().getContext();
     fir::LLVMTypeConverter typeConverter{getModule(),
                                          options.applyTBAA || applyTBAA,
@@ -3827,7 +3873,13 @@ public:
         XEmboxOpConversion, XReboxOpConversion, ZeroOpConversion>(typeConverter,
                                                                   options);
     mlir::populateFuncToLLVMConversionPatterns(typeConverter, pattern);
+
     mlir::populateOpenMPToLLVMConversionPatterns(typeConverter, pattern);
+
+    // Insert OpenMP FIR specific conversion patterns that override OpenMP
+    // dialect default conversion patterns.
+    pattern.insert<MapInfoOpConversion>(typeConverter, options);
+
     mlir::arith::populateArithToLLVMConversionPatterns(typeConverter, pattern);
     mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                           pattern);
@@ -3848,6 +3900,12 @@ public:
 
     // required NOPs for applying a full conversion
     target.addLegalOp<mlir::ModuleOp>();
+
+    // Each conversion should return a value of type mlir::Type.
+    // typeConverter.addConversion([&](fir::BaseBoxType box) {
+    //   llvm::errs() << "1 \n";
+    //   return typeConverter.convertBoxType(box);
+    // });
 
     // If we're on Windows, we might need to rename some libm calls.
     bool isMSVC = fir::getTargetTriple(mod).isOSMSVCRT();

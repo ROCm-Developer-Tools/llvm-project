@@ -5079,10 +5079,12 @@ static Function *createOutlinedFunction(
       ParameterTypes.push_back(Arg->getType());
   }
 
-  auto FuncType = FunctionType::get(Builder.getVoidTy(), ParameterTypes,
-                                    /*isVarArg*/ false);
-  auto Func = Function::Create(FuncType, GlobalValue::InternalLinkage, FuncName,
-                               Builder.GetInsertBlock()->getModule());
+  FunctionType *FuncType =
+      FunctionType::get(Builder.getVoidTy(), ParameterTypes,
+                        /*isVarArg*/ false);
+  Function *Func =
+      Function::Create(FuncType, GlobalValue::InternalLinkage, FuncName,
+                       Builder.GetInsertBlock()->getModule());
 
   if (OMPBuilder.Config.isTargetDevice()) {
     std::vector<llvm::WeakTrackingVH> LLVMCompilerUsed;
@@ -5132,11 +5134,38 @@ static Function *createOutlinedFunction(
     Builder.restoreIP(
         ArgAccessorFuncCB(Arg, Input, InputCopy, AllocaIP, Builder.saveIP()));
 
-    // Collect all the instructions
+    // Things like GEP's can come in the form of Constants, constants and
+    // ConstantExpr's do not have access to the knowledge of what they're
+    // contained in, so we must dig a little to find an instruction so we can
+    // tell if they're used inside of the function we're outlining. We also
+    // replace the original constant expression with a new instruction
+    // equivelant; an instruction as it allows easy modification in the
+    // following loop, as we can now know the constant (instruction) is owned by
+    // our target function and replaceUsesOfWith can now be invoked on it
+    // (cannot do this with constants it seems), a brand new one also allows us
+    // to be cautious as it is perhaps possible the old expression was used
+    // inside of the function but exists and is used externally (unlikely by the
+    // nature of a Constant, but still)
+    auto ReplaceConstantUsedInFunction = [](Constant *Const, Function *Func) {
+      if (auto *ConstExpr = dyn_cast<ConstantExpr>(Const))
+        for (User *User : make_early_inc_range(ConstExpr->users()))
+          if (auto *Instr = dyn_cast<Instruction>(User))
+            if (Instr->getFunction() == Func)
+              Instr->replaceUsesOfWith(ConstExpr,
+                                       ConstExpr->getAsInstruction(Instr));
+    };
+
     for (User *User : make_early_inc_range(Input->users()))
-      if (auto Instr = dyn_cast<Instruction>(User))
+      if (auto Const = dyn_cast<Constant>(User))
+        ReplaceConstantUsedInFunction(Const, Func);
+
+    // Collect all the instructions
+    for (User *User : make_early_inc_range(Input->users())) {
+      if (auto *Instr = dyn_cast<Instruction>(User)) {
         if (Instr->getFunction() == Func)
           Instr->replaceUsesOfWith(Input, InputCopy);
+      }
+    }
   }
 
   // Restore insert point.

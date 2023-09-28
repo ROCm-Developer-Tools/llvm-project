@@ -29,6 +29,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
 #include <cstddef>
+#include <numeric>
 #include <optional>
 
 #include "mlir/Dialect/OpenMP/OpenMPOpsDialect.cpp.inc"
@@ -674,7 +675,7 @@ static LogicalResult verifySynchronizationHint(Operation *op, uint64_t hint) {
 }
 
 //===----------------------------------------------------------------------===//
-// Parser, printer and verifier for Target
+// Builder, Parser, printer and verifier for Target
 //===----------------------------------------------------------------------===//
 
 // Helper function to get bitwise AND of `value` and 'flag'
@@ -1482,6 +1483,7 @@ LogicalResult CancelOp::verify() {
   // TODO : Add more when we support taskgroup.
   return success();
 }
+
 //===----------------------------------------------------------------------===//
 // Verifier for CancelOp
 //===----------------------------------------------------------------------===//

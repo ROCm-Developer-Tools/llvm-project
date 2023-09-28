@@ -1,4 +1,5 @@
 // RUN: mlir-translate -mlir-to-llvmir %s | FileCheck %s
+// FIXME Test is broken, not sure how to resolve conflicts
 
 module attributes {omp.is_target_device = true} {
   llvm.func @omp_target_region_() {

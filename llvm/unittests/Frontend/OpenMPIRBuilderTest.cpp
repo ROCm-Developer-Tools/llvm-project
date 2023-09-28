@@ -5821,7 +5821,7 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
       };
 
   llvm::OpenMPIRBuilder::MapInfosTy CombinedInfos;
-  auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy codeGenIP)
+  auto GenMapInfoCB = [&](llvm::OpenMPIRBuilder::InsertPointTy CodeGenIP)
       -> llvm::OpenMPIRBuilder::MapInfosTy & {
     CreateDefaultMapInfos(OMPBuilder, CapturedArgs, CombinedInfos);
     return CombinedInfos;
