@@ -878,6 +878,22 @@ public:
       Type *LlvmPtrTy, Constant *Addr);
 
 private:
+  /// Modifies the canonical loop to be a statically-scheduled workshare loop
+  /// which is executed on the device
+  ///
+  /// This takes a \p LoopInfo representing a canonical loop, such as the one
+  /// created by \p createCanonicalLoop and emits additional instructions to
+  /// turn it into a workshare loop. In particular, it calls to an OpenMP
+  /// runtime function in the preheader to call OpenMP device rtl function
+  /// which handles worksharing of loop body interations.
+  ///
+  /// \param DL       Debug location for instructions added for the
+  ///                 workshare-loop construct itself.
+  /// \param CLI      A descriptor of the canonical loop to workshare.
+  ///
+  /// \returns Point where to insert code after the workshare construct.
+  InsertPointTy applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI);
+
   /// Modifies the canonical loop to be a statically-scheduled workshare loop.
   ///
   /// This takes a \p LoopInfo representing a canonical loop, such as the one
