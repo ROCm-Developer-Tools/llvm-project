@@ -2222,6 +2222,7 @@ TEST_F(OpenMPIRBuilderTest, UnrollLoopHeuristic) {
 TEST_F(OpenMPIRBuilderTest, StaticWorkShareLoop) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   IRBuilder<> Builder(BB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
@@ -2322,6 +2323,7 @@ TEST_P(OpenMPIRBuilderTestWithIVBits, StaticChunkedWorkshareLoop) {
 
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
 
   BasicBlock *Body;
   CallInst *Call;
@@ -2396,6 +2398,7 @@ INSTANTIATE_TEST_SUITE_P(IVBits, OpenMPIRBuilderTestWithIVBits,
 TEST_P(OpenMPIRBuilderTestWithParams, DynamicWorkShareLoop) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   IRBuilder<> Builder(BB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
@@ -2553,6 +2556,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST_F(OpenMPIRBuilderTest, DynamicWorkShareLoopOrdered) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   IRBuilder<> Builder(BB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
