@@ -762,7 +762,6 @@ public:
   /// Worksharing `distrbute`-loop.
   static void Distribute(IdentTy *Loc, void (*LoopBody)(Ty, void *), void *Arg,
                          Ty NumIters, Ty BlockChunk) {
-#if 0
     ASSERT(icv::Level == 0, "Bad distribute");
     ASSERT(icv::ActiveLevel == 0, "Bad distribute");
     ASSERT(state::ParallelRegionFn == nullptr, "Bad distribute");
@@ -778,8 +777,8 @@ public:
     ASSERT(TId == mapping::getThreadIdInBlock(), "Bad thread id");
 
     // All teams need to participate.
-    Ty NumBlocks = mapping::getNumberOfBlocks();
-    Ty BId = mapping::getBlockId();
+    Ty NumBlocks = mapping::getNumberOfBlocksInKernel();
+    Ty BId = mapping::getBlockIdInKernel();
 
     // If the block chunk is not specified we pick a default now.
     if (BlockChunk == 0)
@@ -805,14 +804,12 @@ public:
     ASSERT(icv::ActiveLevel == 0, "Bad distribute");
     ASSERT(state::ParallelRegionFn == nullptr, "Bad distribute");
     ASSERT(state::ParallelTeamSize == 1, "Bad distribute");
-#endif
   }
 
   /// Worksharing `distrbute parallel for`-loop.
   static void DistributeFor(IdentTy *Loc, void (*LoopBody)(Ty, void *),
                             void *Arg, Ty NumIters, Ty NumThreads,
                             Ty BlockChunk, Ty ThreadChunk) {
-#if 0
     ASSERT(icv::Level == 1, "Bad distribute");
     ASSERT(icv::ActiveLevel == 1, "Bad distribute");
     ASSERT(state::ParallelRegionFn == nullptr, "Bad distribute");
@@ -827,8 +824,8 @@ public:
     Ty TId = mapping::getThreadIdInBlock();
 
     // All teams need to participate.
-    Ty NumBlocks = mapping::getNumberOfBlocks();
-    Ty BId = mapping::getBlockId();
+    Ty NumBlocks = mapping::getNumberOfBlocksInKernel();
+    Ty BId = mapping::getBlockIdInKernel();
 
     // If the block chunk is not specified we pick a default now.
     if (BlockChunk == 0)
@@ -858,7 +855,6 @@ public:
     ASSERT(icv::Level == 1, "Bad distribute");
     ASSERT(icv::ActiveLevel == 1, "Bad distribute");
     ASSERT(state::ParallelRegionFn == nullptr, "Bad distribute");
-#endif
   }
 };
 
