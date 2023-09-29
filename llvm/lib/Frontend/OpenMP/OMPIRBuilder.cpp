@@ -2834,7 +2834,9 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
         /*identifier*/ Ident,
         /*loop body func*/ Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
         /*loop body args*/ LoopBodyArg,
-        /*num of iters*/ TripCount,
+        /*num of iters*/
+        Builder.CreateZExtOrTrunc(TripCount, Type::getInt32Ty(M.getContext()),
+                                  "TripCountTrunc"),
         /*num of threads*/ NumThreads,
         /*block chunk*/ Builder.getInt32(1)};
 
