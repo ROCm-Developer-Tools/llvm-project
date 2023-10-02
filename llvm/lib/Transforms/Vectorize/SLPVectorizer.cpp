@@ -7092,8 +7092,8 @@ class BoUpSLP::ShuffleCostEstimator : public BaseShuffleAnalysis {
       auto *VecTy = cast<FixedVectorType>(EE->getVectorOperandType());
       NumElts = std::max(NumElts, VecTy->getNumElements());
     }
-    assert(NumElts > 1 &&
-           "Expected at least 2-element fixed length vector(s).");
+    assert(NumElts > 0 &&
+           "Expected at least 1-element fixed length vector(s).");
     auto *VecTy = FixedVectorType::get(VL.front()->getType(), NumElts);
     unsigned NumOfParts = TTI.getNumberOfParts(VecTy);
     if (!NumOfParts || NumElts < NumOfParts)
