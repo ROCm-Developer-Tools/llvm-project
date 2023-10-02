@@ -2691,6 +2691,21 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::applyStaticChunkedWorkshareLoop(
   return {DispatchAfter, DispatchAfter->getFirstInsertionPt()};
 }
 
+// Returns an LLVM function to call for executing an OpenMP static worksharing
+// for loop depending on `type`. Only i32 and i64 are supported by the runtime.
+// Always interpret integers as unsigned similarly to CanonicalLoopInfo.
+static FunctionCallee getKmpcForStaticLoopForType(Type *Ty, Module &M,
+                                                  OpenMPIRBuilder &OMPBuilder) {
+  unsigned Bitwidth = Ty->getIntegerBitWidth();
+  if (Bitwidth == 32)
+    return OMPBuilder.getOrCreateRuntimeFunction(
+        M, omp::RuntimeFunction::OMPRTL___kmpc_for_static_loop_4u);
+  if (Bitwidth == 64)
+    return OMPBuilder.getOrCreateRuntimeFunction(
+        M, omp::RuntimeFunction::OMPRTL___kmpc_for_static_loop_8u);
+  llvm_unreachable("unknown OpenMP loop iterator bitwidth");
+}
+
 OpenMPIRBuilder::InsertPointTy
 OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
   uint32_t SrcLocStrSize;
@@ -2733,7 +2748,6 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
   OI.collectBlocks(ParallelRegionBlockSet, Blocks);
   SmallVector<BasicBlock *, 32> BlocksT(ParallelRegionBlockSet.begin(),
                                         ParallelRegionBlockSet.end());
-  ;
 
   CodeExtractorAnalysisCache CEAC(*OuterFn);
   CodeExtractor Extractor(Blocks,
@@ -2783,6 +2797,7 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
   OI.PostOutlineCB = [=](Function &OutlinedFn) {
     BasicBlock *Preheader = CLI->getPreheader();
     Value *TripCount = CLI->getTripCount();
+    Type *TripCountTy = TripCount->getType();
 
     // After loop body outling, the loop body contains only set up
     // of loop body argument structure and the call to the outlined
@@ -2815,7 +2830,11 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
          ++instIt) {
       if (CallInst *CallInstruction = dyn_cast<CallInst>(instIt)) {
         if (CallInstruction->getCalledFunction() == &OutlinedFn) {
-          LoopBodyArg = CallInstruction->getArgOperand(1);
+          // Check in case no argument structure has been passed.
+          if (CallInstruction->arg_size() > 1)
+            LoopBodyArg = CallInstruction->getArgOperand(1);
+          else
+            LoopBodyArg = Constant::getNullValue(Builder.getPtrTy());
           CallInstruction->eraseFromParent();
           break;
         }
@@ -2824,8 +2843,7 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
 
     // Create call to the OpenMP runtime function.
     // TODO: Provide mechanism of choosing the right OpenMP device function
-    FunctionCallee RTLFn =
-        getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_for_static_loop_4);
+    FunctionCallee RTLFn = getKmpcForStaticLoopForType(TripCountTy, M, *this);
     FunctionCallee RTLNumThreads =
         getOrCreateRuntimeFunctionPtr(OMPRTL_omp_get_num_threads);
     Builder.restoreIP({Preheader, std::prev(Preheader->end())});
@@ -2834,11 +2852,12 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
         /*identifier*/ Ident,
         /*loop body func*/ Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
         /*loop body args*/ LoopBodyArg,
-        /*num of iters*/
-        Builder.CreateZExtOrTrunc(TripCount, Type::getInt32Ty(M.getContext()),
-                                  "TripCountTrunc"),
-        /*num of threads*/ NumThreads,
-        /*block chunk*/ Builder.getInt32(1)};
+        /*num of iters*/ TripCount,
+        /*num of threads*/
+        Builder.CreateZExtOrTrunc(NumThreads, TripCountTy, "num.threads.cast"),
+        /*block chunk*/ TripCountTy->getIntegerBitWidth() == 32
+            ? Builder.getInt32(1)
+            : Builder.getInt64(1)};
 
     SmallVector<Value *, 8> RealArgs;
     RealArgs.append(std::begin(ForStaticLoopCallArgs),
