@@ -1128,14 +1128,10 @@ static void targetParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
   Value *Void = ConstantPointerNull::get(PtrTy);
   // Add alloca for kernel args. Put this instruction at the beginning
   // of the function.
-  OpenMPIRBuilder ::InsertPointTy CurrentIP = Builder.saveIP();
-  Builder.SetInsertPoint(&OuterFn->front(),
-                         OuterFn->front().getFirstInsertionPt());
   AllocaInst *ArgsAlloca =
       Builder.CreateAlloca(ArrayType::get(PtrTy, NumCapturedVars));
   Value *Args =
       Builder.CreatePointerCast(ArgsAlloca, Type::getInt8PtrTy(M.getContext()));
-  Builder.restoreIP(CurrentIP);
   // Store captured vars which are used by kmpc_parallel_51
   if (NumCapturedVars) {
     for (unsigned Idx = 0; Idx < NumCapturedVars; Idx++) {
@@ -2692,7 +2688,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::applyStaticChunkedWorkshareLoop(
 }
 
 OpenMPIRBuilder::InsertPointTy
-OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
+OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI,
+                                          bool IsDistribute) {
   uint32_t SrcLocStrSize;
   Constant *SrcLocStr = getOrCreateSrcLocStr(DL, SrcLocStrSize);
   Value *Ident = getOrCreateIdent(SrcLocStr, SrcLocStrSize);
@@ -2821,31 +2818,58 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI) {
         }
       }
     }
+    if (IsDistribute) {
+      // Create call to the OpenMP runtime function.
+      // TODO: Provide mechanism of choosing the right OpenMP device function
+      FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(
+          OMPRTL___kmpc_distribute_for_static_loop_4);
+      FunctionCallee RTLNumThreads =
+          getOrCreateRuntimeFunctionPtr(OMPRTL_omp_get_num_threads);
+      Builder.restoreIP({Preheader, std::prev(Preheader->end())});
+      Value *NumThreads = Builder.CreateCall(RTLNumThreads, {});
+      Value *ForStaticLoopCallArgs[] = {
+          /*identifier*/ Ident,
+          /*loop body func*/
+          Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
+          /*loop body args*/ LoopBodyArg,
+          /*num of iters*/
+          Builder.CreateZExtOrTrunc(TripCount, Type::getInt32Ty(M.getContext()),
+                                    "TripCountTrunc"),
+          /*num of threads*/ NumThreads,
+          /*block chunk*/ Builder.getInt32(0),
+          /*thread chunk */ Builder.getInt32(1)};
 
-    // Create call to the OpenMP runtime function.
-    // TODO: Provide mechanism of choosing the right OpenMP device function
-    FunctionCallee RTLFn =
-        getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_for_static_loop_4);
-    FunctionCallee RTLNumThreads =
-        getOrCreateRuntimeFunctionPtr(OMPRTL_omp_get_num_threads);
-    Builder.restoreIP({Preheader, std::prev(Preheader->end())});
-    Value *NumThreads = Builder.CreateCall(RTLNumThreads, {});
-    Value *ForStaticLoopCallArgs[] = {
-        /*identifier*/ Ident,
-        /*loop body func*/ Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
-        /*loop body args*/ LoopBodyArg,
-        /*num of iters*/
-        Builder.CreateZExtOrTrunc(TripCount, Type::getInt32Ty(M.getContext()),
-                                  "TripCountTrunc"),
-        /*num of threads*/ NumThreads,
-        /*block chunk*/ Builder.getInt32(1)};
+      SmallVector<Value *, 8> RealArgs;
+      RealArgs.append(std::begin(ForStaticLoopCallArgs),
+                      std::end(ForStaticLoopCallArgs));
 
-    SmallVector<Value *, 8> RealArgs;
-    RealArgs.append(std::begin(ForStaticLoopCallArgs),
-                    std::end(ForStaticLoopCallArgs));
+      Builder.CreateCall(RTLFn, RealArgs);
+    } else {
+      // Create call to the OpenMP runtime function.
+      // TODO: Provide mechanism of choosing the right OpenMP device function
+      FunctionCallee RTLFn =
+          getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_for_static_loop_4);
+      FunctionCallee RTLNumThreads =
+          getOrCreateRuntimeFunctionPtr(OMPRTL_omp_get_num_threads);
+      Builder.restoreIP({Preheader, std::prev(Preheader->end())});
+      Value *NumThreads = Builder.CreateCall(RTLNumThreads, {});
+      Value *ForStaticLoopCallArgs[] = {
+          /*identifier*/ Ident,
+          /*loop body func*/
+          Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
+          /*loop body args*/ LoopBodyArg,
+          /*num of iters*/
+          Builder.CreateZExtOrTrunc(TripCount, Type::getInt32Ty(M.getContext()),
+                                    "TripCountTrunc"),
+          /*num of threads*/ NumThreads,
+          /*thread chunk*/ Builder.getInt32(1)};
 
-    Builder.CreateCall(RTLFn, RealArgs);
+      SmallVector<Value *, 8> RealArgs;
+      RealArgs.append(std::begin(ForStaticLoopCallArgs),
+                      std::end(ForStaticLoopCallArgs));
 
+      Builder.CreateCall(RTLFn, RealArgs);
+    }
     for (auto &ToBeDeletedItem : ToBeDeleted)
       ToBeDeletedItem->eraseFromParent();
     CLI->invalidate();
@@ -2858,9 +2882,9 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::applyWorkshareLoop(
     DebugLoc DL, CanonicalLoopInfo *CLI, InsertPointTy AllocaIP,
     bool NeedsBarrier, llvm::omp::ScheduleKind SchedKind,
     llvm::Value *ChunkSize, bool HasSimdModifier, bool HasMonotonicModifier,
-    bool HasNonmonotonicModifier, bool HasOrderedClause) {
+    bool HasNonmonotonicModifier, bool HasOrderedClause, bool IsDistribute) {
   if (Config.isTargetDevice())
-    return applyWorkshareLoopDevice(DL, CLI);
+    return applyWorkshareLoopDevice(DL, CLI, IsDistribute);
   OMPScheduleType EffectiveScheduleType = computeOpenMPScheduleType(
       SchedKind, ChunkSize, HasSimdModifier, HasMonotonicModifier,
       HasNonmonotonicModifier, HasOrderedClause);
@@ -6081,6 +6105,43 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createAtomicCompare(
 }
 
 OpenMPIRBuilder::InsertPointTy
+OpenMPIRBuilder::createDistribute(const LocationDescription &Loc,
+                                  InsertPointTy OuterAllocaIP,
+                                  BodyGenCallbackTy BodyGenCB) {
+  if (!updateToLocation(Loc))
+    return InsertPointTy();
+
+  BasicBlock *OuterAllocaBB = OuterAllocaIP.getBlock();
+
+  if (OuterAllocaBB == Builder.GetInsertBlock()) {
+    BasicBlock *BodyBB =
+        splitBB(Builder, /*CreateBranch=*/true, "distribute.entry");
+    Builder.SetInsertPoint(BodyBB, BodyBB->begin());
+  }
+  BasicBlock *ExitBB =
+      splitBB(Builder, /*CreateBranch=*/true, "distribute.exit");
+  BasicBlock *BodyBB =
+      splitBB(Builder, /*CreateBranch=*/true, "distribute.body");
+  BasicBlock *AllocaBB =
+      splitBB(Builder, /*CreateBranch=*/true, "distribute.alloca");
+
+  // Generate the body of distribute clause
+  InsertPointTy AllocaIP(AllocaBB, AllocaBB->begin());
+  InsertPointTy CodeGenIP(BodyBB, BodyBB->begin());
+  BodyGenCB(AllocaIP, CodeGenIP);
+
+  OutlineInfo OI;
+  OI.OuterAllocaBB = OuterAllocaIP.getBlock();
+  OI.EntryBB = AllocaBB;
+  OI.ExitBB = ExitBB;
+
+  addOutlineInfo(std::move(OI));
+  Builder.SetInsertPoint(ExitBB, ExitBB->begin());
+
+  return Builder.saveIP();
+}
+
+OpenMPIRBuilder::InsertPointTy
 OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
                              BodyGenCallbackTy BodyGenCB) {
   if (!updateToLocation(Loc))
@@ -6120,11 +6181,16 @@ OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
   BasicBlock *AllocaBB =
       splitBB(Builder, /*CreateBranch=*/true, "teams.alloca");
 
+  // Generate the body of teams.
+  InsertPointTy AllocaIP(AllocaBB, AllocaBB->begin());
+  InsertPointTy CodeGenIP(BodyBB, BodyBB->begin());
+  BodyGenCB(AllocaIP, CodeGenIP);
+
   OutlineInfo OI;
   OI.EntryBB = AllocaBB;
   OI.ExitBB = ExitBB;
   OI.OuterAllocaBB = &OuterAllocaBB;
-  OI.PostOutlineCB = [this, Ident](Function &OutlinedFn) {
+  auto HostPostOutlineCB = [this, Ident](Function &OutlinedFn) {
     // The input IR here looks like the following-
     // ```
     // func @current_fn() {
@@ -6165,8 +6231,8 @@ OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
     if (WrapperFunc->arg_size() > 2)
       WrapperFunc->getArg(2)->setName("data");
 
-    // Emit the body of the wrapper function - just a call to outlined function
-    // and return statement.
+    // Emit the body of the wrapper function - just a call to outlined
+    // function and return statement.
     BasicBlock *WrapperEntryBB =
         BasicBlock::Create(M.getContext(), "entrybb", WrapperFunc);
     Builder.SetInsertPoint(WrapperEntryBB);
@@ -6190,13 +6256,10 @@ OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
                        Args);
     StaleCI->eraseFromParent();
   };
-
+  if (!Config.isTargetDevice()) {
+    OI.PostOutlineCB = HostPostOutlineCB;
+  }
   addOutlineInfo(std::move(OI));
-
-  // Generate the body of teams.
-  InsertPointTy AllocaIP(AllocaBB, AllocaBB->begin());
-  InsertPointTy CodeGenIP(BodyBB, BodyBB->begin());
-  BodyGenCB(AllocaIP, CodeGenIP);
 
   Builder.SetInsertPoint(ExitBB, ExitBB->begin());
 
