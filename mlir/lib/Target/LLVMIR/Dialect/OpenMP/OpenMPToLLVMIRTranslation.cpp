@@ -2213,6 +2213,10 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   int32_t defaultValTeams = -1;
   int32_t defaultValThreads = 0;
 
+  // TODO: Support num_teams() clause. Add information about loop trip count
+  // to kernel arguments.
+  opInst.walk([&defaultValTeams](omp::TeamsOp) { defaultValTeams = 64; });
+
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
 
