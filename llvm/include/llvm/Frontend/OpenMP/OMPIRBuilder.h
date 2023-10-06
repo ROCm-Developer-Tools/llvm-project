@@ -911,12 +911,14 @@ private:
   /// runtime function in the preheader to call OpenMP device rtl function
   /// which handles worksharing of loop body interations.
   ///
-  /// \param DL       Debug location for instructions added for the
-  ///                 workshare-loop construct itself.
-  /// \param CLI      A descriptor of the canonical loop to workshare.
-  ///
+  /// \param DL            Debug location for instructions added for the
+  ///                      workshare-loop construct itself.
+  /// \param CLI           A descriptor of the canonical loop to workshare.
+  /// \param IsDistribute  If true, generate the workshare loop accross
+  ///                      multiple teams
   /// \returns Point where to insert code after the workshare construct.
-  InsertPointTy applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI);
+  InsertPointTy applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI,
+                                         bool IsDistribute = false);
 
   /// Modifies the canonical loop to be a statically-scheduled workshare loop.
   ///
@@ -1038,7 +1040,7 @@ public:
       llvm::omp::ScheduleKind SchedKind = llvm::omp::OMP_SCHEDULE_Default,
       Value *ChunkSize = nullptr, bool HasSimdModifier = false,
       bool HasMonotonicModifier = false, bool HasNonmonotonicModifier = false,
-      bool HasOrderedClause = false);
+      bool HasOrderedClause = false, bool IsDistribute = false);
 
   /// Tile a loop nest.
   ///
@@ -1936,6 +1938,14 @@ public:
   InsertPointTy createTeams(const LocationDescription &Loc,
                             BodyGenCallbackTy BodyGenCB);
 
+  /// Generator for `#omp distribute`
+  ///
+  /// \param Loc The location where the teams construct was encountered.
+  /// \param AllocaIP The insertion points to be used for alloca instructions.
+  /// \param BodyGenCB Callback that will generate the region code.
+  InsertPointTy createDistribute(const LocationDescription &Loc,
+                                 InsertPointTy AllocaIP,
+                                 BodyGenCallbackTy BodyGenCB);
   /// Generate conditional branch and relevant BasicBlocks through which private
   /// threads copy the 'copyin' variables from Master copy to threadprivate
   /// copies.

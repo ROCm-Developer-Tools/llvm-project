@@ -1000,12 +1000,14 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   std::optional<omp::ScheduleModifier> scheduleModifier =
       loop.getScheduleModifier();
   bool isSimd = loop.getSimdModifier();
+  bool distributeParallelCodeGen = opInst.getParentOfType<omp::DistributeOp>();
 
   ompBuilder->applyWorkshareLoop(
       ompLoc.DL, loopInfo, allocaIP, !loop.getNowait(),
       convertToScheduleKind(schedule), chunk, isSimd,
       scheduleModifier == omp::ScheduleModifier::monotonic,
-      scheduleModifier == omp::ScheduleModifier::nonmonotonic, isOrdered);
+      scheduleModifier == omp::ScheduleModifier::nonmonotonic, isOrdered,
+      distributeParallelCodeGen);
 
   // Continue building IR after the loop. Note that the LoopInfo returned by
   // `collapseLoops` points inside the outermost loop and is intended for
@@ -2091,6 +2093,67 @@ handleDeclareTargetMapVar(llvm::ArrayRef<Value> mapOperands,
 }
 
 static LogicalResult
+convertOmpTeams(Operation &opInst, llvm::IRBuilderBase &builder,
+                LLVM::ModuleTranslation &moduleTranslation) {
+
+  using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+  // TODO: support error propagation in OpenMPIRBuilder and use it instead of
+  // relying on captured variables.
+  LogicalResult bodyGenStatus = success();
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+
+  auto bodyGenCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP) {
+    // Save the alloca insertion point on ModuleTranslation stack for use in
+    // nested regions.
+    LLVM::ModuleTranslation::SaveStack<OpenMPAllocaStackFrame> frame(
+        moduleTranslation, allocaIP);
+
+    // TeamsOp has only one region associated with it.
+    builder.restoreIP(codeGenIP);
+    auto regionBlock =
+        convertOmpOpRegions(opInst.getRegion(0), "omp.teams.region", builder,
+                            moduleTranslation, bodyGenStatus);
+  };
+
+  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
+
+  builder.restoreIP(ompBuilder->createTeams(ompLoc, bodyGenCB));
+
+  return bodyGenStatus;
+}
+
+static LogicalResult
+convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
+                     LLVM::ModuleTranslation &moduleTranslation) {
+
+  using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+  // TODO: support error propagation in OpenMPIRBuilder and use it instead of
+  // relying on captured variables.
+  LogicalResult bodyGenStatus = success();
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+
+  auto bodyGenCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP) {
+    // Save the alloca insertion point on ModuleTranslation stack for use in
+    // nested regions.
+    LLVM::ModuleTranslation::SaveStack<OpenMPAllocaStackFrame> frame(
+        moduleTranslation, allocaIP);
+
+    // DistributeOp has only one region associated with it.
+    builder.restoreIP(codeGenIP);
+    auto regionBlock =
+        convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region",
+                            builder, moduleTranslation, bodyGenStatus);
+  };
+
+  llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
+      findAllocaInsertPoint(builder, moduleTranslation);
+  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
+
+  builder.restoreIP(ompBuilder->createDistribute(ompLoc, allocaIP, bodyGenCB));
+  return bodyGenStatus;
+}
+
+static LogicalResult
 convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                  LLVM::ModuleTranslation &moduleTranslation) {
 
@@ -2149,6 +2212,10 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   int32_t defaultValTeams = -1;
   int32_t defaultValThreads = 0;
+
+  // TODO: Support num_teams() clause. Add information about loop trip count
+  // to kernel arguments.
+  opInst.walk([&defaultValTeams](omp::TeamsOp) { defaultValTeams = 64; });
 
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
@@ -2525,14 +2592,10 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
         return convertOmpTarget(*op, builder, moduleTranslation);
       })
       .Case([&](omp::TeamsOp) {
-        // TODO return convertOmpTeams(*op, builder, moduleTranslation);
-        op->emitError("'teams' translation to LLVM IR not supported");
-        return failure();
+        return convertOmpTeams(*op, builder, moduleTranslation);
       })
       .Case([&](omp::DistributeOp) {
-        // TODO convertOmpDistribute(*op, builder, moduleTranslation);
-        op->emitError("'distribute' translation to LLVM IR not supported");
-        return failure();
+        return convertOmpDistribute(*op, builder, moduleTranslation);
       })
       .Case<omp::MapInfoOp, omp::DataBoundsOp>([&](auto op) {
         // No-op, should be handled by relevant owning operations e.g.
