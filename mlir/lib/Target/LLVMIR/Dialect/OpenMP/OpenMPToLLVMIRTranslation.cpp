@@ -2118,36 +2118,6 @@ createDeviceArgumentAccessor(llvm::Argument &arg, llvm::Value *input,
 }
 
 static LogicalResult
-convertOmpTeams(Operation &opInst, llvm::IRBuilderBase &builder,
-                LLVM::ModuleTranslation &moduleTranslation) {
-
-  using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
-  // TODO: support error propagation in OpenMPIRBuilder and use it instead of
-  // relying on captured variables.
-  LogicalResult bodyGenStatus = success();
-  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
-
-  auto bodyGenCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP) {
-    // Save the alloca insertion point on ModuleTranslation stack for use in
-    // nested regions.
-    LLVM::ModuleTranslation::SaveStack<OpenMPAllocaStackFrame> frame(
-        moduleTranslation, allocaIP);
-
-    // TeamsOp has only one region associated with it.
-    builder.restoreIP(codeGenIP);
-    auto regionBlock =
-        convertOmpOpRegions(opInst.getRegion(0), "omp.teams.region", builder,
-                            moduleTranslation, bodyGenStatus);
-  };
-
-  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-
-  builder.restoreIP(ompBuilder->createTeams(ompLoc, bodyGenCB));
-
-  return bodyGenStatus;
-}
-
-static LogicalResult
 convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
                      LLVM::ModuleTranslation &moduleTranslation) {
 
@@ -2635,9 +2605,6 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
       })
       .Case([&](omp::TargetOp) {
         return convertOmpTarget(*op, builder, moduleTranslation);
-      })
-      .Case([&](omp::TeamsOp) {
-        return convertOmpTeams(*op, builder, moduleTranslation);
       })
       .Case([&](omp::DistributeOp) {
         return convertOmpDistribute(*op, builder, moduleTranslation);
