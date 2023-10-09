@@ -6027,8 +6027,12 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
   getNumThreadsExprForTargetDirective(CGF, D, DefaultValThreads,
                                       /*UpperBoundOnly=*/true);
 
+  OMPBuilder.CurrentTargetInfo.emplace();
+  OMPBuilder.CurrentTargetInfo->NumTeams =
+      CGF.Builder.getInt32(DefaultValTeams);
+  OMPBuilder.CurrentTargetInfo->ThreadLimit =
+      CGF.Builder.getInt32(DefaultValThreads);
   OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction,
-                                      DefaultValTeams, DefaultValThreads,
                                       IsOffloadEntry, OutlinedFn, OutlinedFnID);
 
   if (!OutlinedFn)

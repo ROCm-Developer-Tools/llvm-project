@@ -667,9 +667,8 @@ convertOmpTeams(omp::TeamsOp op, llvm::IRBuilderBase &builder,
                 LLVM::ModuleTranslation &moduleTranslation) {
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
   LogicalResult bodyGenStatus = success();
-  if (op.getNumTeamsLower() || op.getNumTeamsUpper() || op.getIfExpr() ||
-      op.getThreadLimit() || !op.getAllocatorsVars().empty() ||
-      op.getReductions()) {
+  if (op.getNumTeamsLower() || op.getIfExpr() ||
+      !op.getAllocatorsVars().empty() || op.getReductions()) {
     return op.emitError("unhandled clauses for translation to LLVM IR");
   }
   auto bodyCB = [&](InsertPointTy allocaIP, InsertPointTy codegenIP) {
@@ -680,9 +679,26 @@ convertOmpTeams(omp::TeamsOp op, llvm::IRBuilderBase &builder,
                         moduleTranslation, bodyGenStatus);
   };
 
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-  builder.restoreIP(
-      moduleTranslation.getOpenMPBuilder()->createTeams(ompLoc, bodyCB));
+  builder.restoreIP(ompBuilder->createTeams(ompLoc, bodyCB));
+
+  if (ompBuilder->CurrentTargetInfo) {
+    // TODO The omp.target op verifier needs to ensure that a single omp.teams
+    // child op is allowed. Here we just assume this is the case.
+    ompBuilder->CurrentTargetInfo->HasTeamsRegion = true;
+
+    // FIXME Later uses of NumTeams and ThreadLimit can crash the compiler, if
+    // they are not compile-time constants.
+    if (Value numTeamsUpper = op.getNumTeamsUpper())
+      ompBuilder->CurrentTargetInfo->NumTeams =
+          moduleTranslation.lookupValue(numTeamsUpper);
+
+    if (Value threadLimit = op.getThreadLimit())
+      ompBuilder->CurrentTargetInfo->ThreadLimit =
+          moduleTranslation.lookupValue(threadLimit);
+  }
+
   return bodyGenStatus;
 }
 
@@ -993,6 +1009,13 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::CanonicalLoopInfo *loopInfo =
       ompBuilder->collapseLoops(ompLoc.DL, loopInfos, {});
 
+  if (ompBuilder->CurrentTargetInfo &&
+      !ompBuilder->CurrentTargetInfo->NumLoopRegions++) {
+    // FIXME Later uses of LoopTripCount can crash the compiler, if it is not a
+    // compile-time constant.
+    ompBuilder->CurrentTargetInfo->LoopTripCount = loopInfo->getTripCount();
+  }
+
   allocaIP = findAllocaInsertPoint(builder, moduleTranslation);
 
   // TODO: Handle doacross loops when the ordered clause has a parameter.
@@ -1164,6 +1187,9 @@ convertOmpParallel(omp::ParallelOp opInst, llvm::IRBuilderBase &builder,
   builder.restoreIP(
       ompBuilder->createParallel(ompLoc, allocaIP, bodyGenCB, privCB, finiCB,
                                  ifCond, numThreads, pbKind, isCancellable));
+
+  if (ompBuilder->CurrentTargetInfo)
+    ++ompBuilder->CurrentTargetInfo->NumParallelRegions;
 
   return bodyGenStatus;
 }
@@ -2048,11 +2074,6 @@ static bool targetOpSupported(Operation &opInst) {
     return false;
   }
 
-  if (targetOp.getThreadLimit()) {
-    opInst.emitError("Thread limit clause not yet supported");
-    return false;
-  }
-
   if (targetOp.getNowait()) {
     opInst.emitError("Nowait clause not yet supported");
     return false;
@@ -2135,9 +2156,8 @@ convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
 
     // DistributeOp has only one region associated with it.
     builder.restoreIP(codeGenIP);
-    auto regionBlock =
-        convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region",
-                            builder, moduleTranslation, bodyGenStatus);
+    convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region", builder,
+                        moduleTranslation, bodyGenStatus);
   };
 
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
@@ -2145,6 +2165,10 @@ convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
 
   builder.restoreIP(ompBuilder->createDistribute(ompLoc, allocaIP, bodyGenCB));
+
+  if (ompBuilder->CurrentTargetInfo)
+    ++ompBuilder->CurrentTargetInfo->NumDistributeRegions;
+
   return bodyGenStatus;
 }
 
@@ -2155,6 +2179,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   if (!targetOpSupported(opInst))
     return failure();
 
+  auto *ompBuilder = moduleTranslation.getOpenMPBuilder();
   auto targetOp = cast<omp::TargetOp>(opInst);
   auto &targetRegion = targetOp.getRegion();
 
@@ -2187,6 +2212,19 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
     llvm::BasicBlock *exitBlock = convertOmpOpRegions(
         targetRegion, "omp.target", builder, moduleTranslation, bodyGenStatus);
     builder.SetInsertPoint(exitBlock);
+
+    // The thread_limit clause of the omp.teams operation takes precedence. Set
+    // it here if not already set and present in the omp.target operation.
+    if (!ompBuilder->CurrentTargetInfo->ThreadLimit) {
+      // FIXME Currently, adding the thread_limit clause to omp.target results
+      // in a compiler error due to deleting an arith.constant operation before
+      // all uses are removed. This might be related to implicit mapping, since
+      // the constant is created outside of omp.target.
+      if (Value threadLimit = targetOp.getThreadLimit())
+        ompBuilder->CurrentTargetInfo->ThreadLimit =
+            moduleTranslation.lookupValue(threadLimit);
+    }
+
     return builder.saveIP();
   };
 
@@ -2204,13 +2242,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   if (!getTargetEntryUniqueInfo(entryInfo, targetOp, parentName))
     return failure();
-
-  int32_t defaultValTeams = -1;
-  int32_t defaultValThreads = 0;
-
-  // TODO: Support num_teams() clause. Add information about loop trip count
-  // to kernel arguments.
-  opInst.walk([&defaultValTeams](omp::TeamsOp) { defaultValTeams = 64; });
 
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
@@ -2263,17 +2294,20 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
                                         allocaIP, codeGenIP);
   };
 
-  builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
-      ompLoc, allocaIP, builder.saveIP(), entryInfo, defaultValTeams,
-      defaultValThreads, inputs, genMapInfoCB, bodyCB, argAccessorCB));
+  ompBuilder->CurrentTargetInfo.emplace();
+  builder.restoreIP(ompBuilder->createTarget(ompLoc, allocaIP, builder.saveIP(),
+                                             entryInfo, inputs, genMapInfoCB,
+                                             bodyCB, argAccessorCB));
 
   // Remap access operations to declare target reference pointers for the
   // device, essentially generating extra loadop's as necessary
-  if (moduleTranslation.getOpenMPBuilder()->Config.isTargetDevice()) {
+  if (ompBuilder->Config.isTargetDevice()) {
     SmallVector<Value> mapOperands = targetOp.getMapOperands();
     handleDeclareTargetMapVar(llvm::ArrayRef(mapOperands), moduleTranslation,
                               builder);
   }
+
+  ompBuilder->CurrentTargetInfo.reset();
   return bodyGenStatus;
 }
 
