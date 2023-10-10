@@ -2687,6 +2687,67 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::applyStaticChunkedWorkshareLoop(
   return {DispatchAfter, DispatchAfter->getFirstInsertionPt()};
 }
 
+// Returns an LLVM function to call for executing an OpenMP static worksharing
+// for loop depending on `type`. Only i32 and i64 are supported by the runtime.
+// Always interpret integers as unsigned similarly to CanonicalLoopInfo.
+static FunctionCallee getKmpcForStaticLoopForType(Type *Ty,
+                                                  OpenMPIRBuilder &OMPBuilder,
+                                                  bool IsDistribute) {
+  unsigned Bitwidth = Ty->getIntegerBitWidth();
+  Module &M = OMPBuilder.M;
+  if (IsDistribute && Bitwidth == 32)
+    return OMPBuilder.getOrCreateRuntimeFunction(
+        M, omp::RuntimeFunction::OMPRTL___kmpc_distribute_for_static_loop_4u);
+  if (IsDistribute && Bitwidth == 64)
+    return OMPBuilder.getOrCreateRuntimeFunction(
+        M, omp::RuntimeFunction::OMPRTL___kmpc_distribute_for_static_loop_8u);
+  if (Bitwidth == 32)
+    return OMPBuilder.getOrCreateRuntimeFunction(
+        M, omp::RuntimeFunction::OMPRTL___kmpc_for_static_loop_4u);
+  if (Bitwidth == 64)
+    return OMPBuilder.getOrCreateRuntimeFunction(
+        M, omp::RuntimeFunction::OMPRTL___kmpc_for_static_loop_8u);
+  llvm_unreachable("unknown OpenMP loop iterator bitwidth");
+}
+
+// Inserts a call to proper OpenMP Device RTL function which handles
+// loop worksharing.
+static void
+createTargetLoopWorkshareCall(OpenMPIRBuilder &OMPBuilder, bool IsDistribute,
+                              BasicBlock *InsertBlock, Value *Ident,
+                              Value *LoopBodyArg, Type *ParallelTaskPtr,
+                              Value *TripCount, Function &LoopBodyFn) {
+  Type *TripCountTy = TripCount->getType();
+  Module &M = OMPBuilder.M;
+  IRBuilder<> &Builder = OMPBuilder.Builder;
+  FunctionCallee RTLFn =
+      getKmpcForStaticLoopForType(TripCountTy, OMPBuilder, IsDistribute);
+  FunctionCallee RTLNumThreads = OMPBuilder.getOrCreateRuntimeFunction(
+      M, omp::RuntimeFunction::OMPRTL_omp_get_num_threads);
+  Builder.restoreIP({InsertBlock, std::prev(InsertBlock->end())});
+  Value *NumThreads = Builder.CreateCall(RTLNumThreads, {});
+  SmallVector<Value *, 8> RealArgs;
+  RealArgs.push_back(Ident);
+  /*loop body func*/
+  RealArgs.push_back(Builder.CreateBitCast(&LoopBodyFn, ParallelTaskPtr));
+  /*loop body args*/
+  RealArgs.push_back(LoopBodyArg);
+  /*num of iters*/
+  RealArgs.push_back(TripCount);
+  /*num of threads*/ RealArgs.push_back(
+      Builder.CreateZExtOrTrunc(NumThreads, TripCountTy, "num.threads.cast"));
+  if (IsDistribute) {
+    /*block chunk*/ RealArgs.push_back(TripCountTy->getIntegerBitWidth() == 32
+                                           ? Builder.getInt32(0)
+                                           : Builder.getInt64(0));
+  }
+  /*thread chunk */ RealArgs.push_back(TripCountTy->getIntegerBitWidth() == 32
+                                           ? Builder.getInt32(1)
+                                           : Builder.getInt64(1));
+
+  Builder.CreateCall(RTLFn, RealArgs);
+}
+
 OpenMPIRBuilder::InsertPointTy
 OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI,
                                           bool IsDistribute) {
@@ -2730,7 +2791,6 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI,
   OI.collectBlocks(ParallelRegionBlockSet, Blocks);
   SmallVector<BasicBlock *, 32> BlocksT(ParallelRegionBlockSet.begin(),
                                         ParallelRegionBlockSet.end());
-  ;
 
   CodeExtractorAnalysisCache CEAC(*OuterFn);
   CodeExtractor Extractor(Blocks,
@@ -2812,64 +2872,20 @@ OpenMPIRBuilder::applyWorkshareLoopDevice(DebugLoc DL, CanonicalLoopInfo *CLI,
          ++instIt) {
       if (CallInst *CallInstruction = dyn_cast<CallInst>(instIt)) {
         if (CallInstruction->getCalledFunction() == &OutlinedFn) {
-          LoopBodyArg = CallInstruction->getArgOperand(1);
+          // Check in case no argument structure has been passed.
+          if (CallInstruction->arg_size() > 1)
+            LoopBodyArg = CallInstruction->getArgOperand(1);
+          else
+            LoopBodyArg = Constant::getNullValue(Builder.getPtrTy());
           CallInstruction->eraseFromParent();
           break;
         }
       }
     }
-    if (IsDistribute) {
-      // Create call to the OpenMP runtime function.
-      // TODO: Provide mechanism of choosing the right OpenMP device function
-      FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(
-          OMPRTL___kmpc_distribute_for_static_loop_4);
-      FunctionCallee RTLNumThreads =
-          getOrCreateRuntimeFunctionPtr(OMPRTL_omp_get_num_threads);
-      Builder.restoreIP({Preheader, std::prev(Preheader->end())});
-      Value *NumThreads = Builder.CreateCall(RTLNumThreads, {});
-      Value *ForStaticLoopCallArgs[] = {
-          /*identifier*/ Ident,
-          /*loop body func*/
-          Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
-          /*loop body args*/ LoopBodyArg,
-          /*num of iters*/
-          Builder.CreateZExtOrTrunc(TripCount, Type::getInt32Ty(M.getContext()),
-                                    "TripCountTrunc"),
-          /*num of threads*/ NumThreads,
-          /*block chunk*/ Builder.getInt32(0),
-          /*thread chunk */ Builder.getInt32(1)};
+    createTargetLoopWorkshareCall(*this, IsDistribute, Preheader, Ident,
+                                  LoopBodyArg, ParallelTaskPtr, TripCount,
+                                  OutlinedFn);
 
-      SmallVector<Value *, 8> RealArgs;
-      RealArgs.append(std::begin(ForStaticLoopCallArgs),
-                      std::end(ForStaticLoopCallArgs));
-
-      Builder.CreateCall(RTLFn, RealArgs);
-    } else {
-      // Create call to the OpenMP runtime function.
-      // TODO: Provide mechanism of choosing the right OpenMP device function
-      FunctionCallee RTLFn =
-          getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_for_static_loop_4);
-      FunctionCallee RTLNumThreads =
-          getOrCreateRuntimeFunctionPtr(OMPRTL_omp_get_num_threads);
-      Builder.restoreIP({Preheader, std::prev(Preheader->end())});
-      Value *NumThreads = Builder.CreateCall(RTLNumThreads, {});
-      Value *ForStaticLoopCallArgs[] = {
-          /*identifier*/ Ident,
-          /*loop body func*/
-          Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
-          /*loop body args*/ LoopBodyArg,
-          /*num of iters*/
-          Builder.CreateZExtOrTrunc(TripCount, Type::getInt32Ty(M.getContext()),
-                                    "TripCountTrunc"),
-          /*num of threads*/ NumThreads,
-          /*thread chunk*/ Builder.getInt32(1)};
-
-      SmallVector<Value *, 8> RealArgs;
-      RealArgs.append(std::begin(ForStaticLoopCallArgs),
-                      std::end(ForStaticLoopCallArgs));
-
-      Builder.CreateCall(RTLFn, RealArgs);
-    }
     for (auto &ToBeDeletedItem : ToBeDeleted)
       ToBeDeletedItem->eraseFromParent();
     CLI->invalidate();
