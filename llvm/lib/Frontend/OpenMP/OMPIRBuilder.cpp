@@ -4560,6 +4560,10 @@ void OpenMPIRBuilder::setOutlinedTargetRegionFunctionAttributes(
     OutlinedFn->setVisibility(GlobalValue::ProtectedVisibility);
     if (Triple(M.getTargetTriple()).isAMDGCN())
       OutlinedFn->setCallingConv(CallingConv::AMDGPU_KERNEL);
+    if (!Config.TargetCPU.empty())
+      OutlinedFn->addFnAttr("target-cpu", Config.TargetCPU);
+    if (!Config.TargetFeatures.empty())
+      OutlinedFn->addFnAttr("target-features", Config.TargetFeatures);
   }
 
   // Try to get constant values for NumTeams and ThreadLimit, and set default

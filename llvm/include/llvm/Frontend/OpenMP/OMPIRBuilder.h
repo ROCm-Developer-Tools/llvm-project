@@ -89,8 +89,13 @@ public:
   /// Flag for specifying if the compilation is done for an accelerator.
   std::optional<bool> IsGPU;
 
-  // Flag for specifying if offloading is mandatory.
+  /// Flag for specifying if offloading is mandatory.
   std::optional<bool> OpenMPOffloadMandatory;
+
+  /// Name of the target processor.
+  StringRef TargetCPU;
+  /// String representation of the target processor's features.
+  StringRef TargetFeatures;
 
   /// First separator used between the initial two parts of a name.
   std::optional<StringRef> FirstSeparator;

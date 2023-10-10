@@ -2527,6 +2527,17 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::amendOperation(
             }
             return failure();
           })
+      .Case("omp.target",
+            [&](Attribute attr) {
+              if (auto targetAttr = attr.dyn_cast<omp::TargetAttr>()) {
+                llvm::OpenMPIRBuilderConfig &config =
+                    moduleTranslation.getOpenMPBuilder()->Config;
+                config.TargetCPU = targetAttr.getTargetCpu();
+                config.TargetFeatures = targetAttr.getTargetFeatures();
+                return success();
+              }
+              return failure();
+            })
       .Default([](Attribute) {
         // Fall through for omp attributes that do not require lowering.
         return success();
