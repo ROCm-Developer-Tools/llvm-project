@@ -101,6 +101,18 @@ static void gatherFuncAndVarSyms(
   }
 }
 
+static mlir::omp::TargetOp findParentTargetOp(mlir::OpBuilder &builder) {
+  mlir::Operation *parentOp = builder.getBlock()->getParentOp();
+  if (!parentOp)
+    return nullptr;
+
+  auto targetOp = llvm::dyn_cast<mlir::omp::TargetOp>(parentOp);
+  if (!targetOp)
+    targetOp = parentOp->getParentOfType<mlir::omp::TargetOp>();
+
+  return targetOp;
+}
+
 //===----------------------------------------------------------------------===//
 // DataSharingProcessor
 //===----------------------------------------------------------------------===//
@@ -1843,6 +1855,34 @@ void ClauseProcessor::processTODO(mlir::Location currentLocation,
 }
 
 //===----------------------------------------------------------------------===//
+// HostClausesInsertionGuard
+//===----------------------------------------------------------------------===//
+
+/// If the insertion point of the builder is located inside of an omp.target
+/// region, this RAII guard moves the insertion point to just before that
+/// omp.target operation and then restores the original insertion point when
+/// destroyed. If not currently inserting inside an omp.target, it remains
+/// unchanged.
+class HostClausesInsertionGuard {
+public:
+  HostClausesInsertionGuard(mlir::OpBuilder &builder) : builder(builder) {
+    if (mlir::omp::TargetOp targetOp = findParentTargetOp(builder)) {
+      ip = builder.saveInsertionPoint();
+      builder.setInsertionPoint(targetOp);
+    }
+  }
+
+  ~HostClausesInsertionGuard() {
+    if (ip.isSet())
+      builder.restoreInsertionPoint(ip);
+  }
+
+private:
+  mlir::OpBuilder &builder;
+  mlir::OpBuilder::InsertPoint ip;
+};
+
+//===----------------------------------------------------------------------===//
 // Code generation helper functions
 //===----------------------------------------------------------------------===//
 
@@ -2413,12 +2453,7 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
   llvm::SmallVector<mlir::Value> mapOperands;
 
   ClauseProcessor cp(converter, clauseList);
-  cp.processIf(stmtCtx,
-               Fortran::parser::OmpIfClause::DirectiveNameModifier::Target,
-               ifClauseOperand);
   cp.processDevice(stmtCtx, deviceOperand);
-  cp.processThreadLimit(stmtCtx, threadLimitOperand);
-  cp.processNowait(nowaitAttr);
   cp.processMap(currentLocation, directive, semanticsContext, stmtCtx,
                 mapOperands);
   cp.processTODO<Fortran::parser::OmpClause::Private,
@@ -2432,6 +2467,17 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
                  Fortran::parser::OmpClause::UsesAllocators,
                  Fortran::parser::OmpClause::Defaultmap>(
       currentLocation, llvm::omp::Directive::OMPD_target);
+
+  // Process host-only clauses.
+  if (!llvm::cast<mlir::omp::OffloadModuleInterface>(
+           converter.getModuleOp().getOperation())
+           .getIsTargetDevice()) {
+    cp.processIf(stmtCtx,
+                 Fortran::parser::OmpIfClause::DirectiveNameModifier::Target,
+                 ifClauseOperand);
+    cp.processThreadLimit(stmtCtx, threadLimitOperand);
+    cp.processNowait(nowaitAttr);
+  }
 
   return genOpWithBody<mlir::omp::TargetOp>(
       converter, eval, currentLocation, outerCombined, &clauseList,
@@ -2457,10 +2503,19 @@ genTeamsOp(Fortran::lower::AbstractConverter &converter,
                ifClauseOperand);
   cp.processAllocate(allocatorOperands, allocateOperands);
   cp.processDefault();
-  cp.processNumTeams(stmtCtx, numTeamsClauseOperand);
-  cp.processThreadLimit(stmtCtx, threadLimitClauseOperand);
   cp.processTODO<Fortran::parser::OmpClause::Reduction>(
       currentLocation, llvm::omp::Directive::OMPD_teams);
+
+  // Evaluate num_teams and thread_limit on the host device, if inside of an
+  // omp.target operation.
+  auto offloadModOp = llvm::cast<mlir::omp::OffloadModuleInterface>(
+      converter.getModuleOp().getOperation());
+  if (!findParentTargetOp(converter.getFirOpBuilder()) ||
+      !offloadModOp.getIsTargetDevice()) {
+    HostClausesInsertionGuard guard(converter.getFirOpBuilder());
+    cp.processNumTeams(stmtCtx, numTeamsClauseOperand);
+    cp.processThreadLimit(stmtCtx, threadLimitClauseOperand);
+  }
 
   return genOpWithBody<mlir::omp::TeamsOp>(
       converter, eval, currentLocation, outerCombined, &clauseList,

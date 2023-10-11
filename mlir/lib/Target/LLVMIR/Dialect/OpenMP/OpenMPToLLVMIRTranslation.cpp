@@ -688,8 +688,6 @@ convertOmpTeams(omp::TeamsOp op, llvm::IRBuilderBase &builder,
     // child op is allowed. Here we just assume this is the case.
     ompBuilder->CurrentTargetInfo->HasTeamsRegion = true;
 
-    // FIXME Later uses of NumTeams and ThreadLimit can crash the compiler, if
-    // they are not compile-time constants.
     if (Value numTeamsUpper = op.getNumTeamsUpper())
       ompBuilder->CurrentTargetInfo->NumTeams =
           moduleTranslation.lookupValue(numTeamsUpper);
@@ -2216,10 +2214,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
     // The thread_limit clause of the omp.teams operation takes precedence. Set
     // it here if not already set and present in the omp.target operation.
     if (!ompBuilder->CurrentTargetInfo->ThreadLimit) {
-      // FIXME Currently, adding the thread_limit clause to omp.target results
-      // in a compiler error due to deleting an arith.constant operation before
-      // all uses are removed. This might be related to implicit mapping, since
-      // the constant is created outside of omp.target.
       if (Value threadLimit = targetOp.getThreadLimit())
         ompBuilder->CurrentTargetInfo->ThreadLimit =
             moduleTranslation.lookupValue(threadLimit);

@@ -4994,7 +4994,6 @@ static Function *createOutlinedFunction(
         ArgAccessorFuncCB(Arg, Input, InputCopy, AllocaIP, Builder.saveIP()));
 
     // Collect all the instructions
-    assert(InputCopy->getType()->isPointerTy() && "Not Pointer Type");
     for (User *User : make_early_inc_range(Input->users()))
       if (auto Instr = dyn_cast<Instruction>(User))
         if (Instr->getFunction() == Func)
