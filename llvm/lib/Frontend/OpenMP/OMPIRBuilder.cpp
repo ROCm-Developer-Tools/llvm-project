@@ -6217,6 +6217,11 @@ OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
   OI.ExcludeArgsFromAggregate.push_back(createFakeIntVal(
       Builder, OuterAllocaIP, ToBeDeleted, AllocaIP, "tid", true));
 
+#if 0
+  //  Upstream version of PostOutlineCB is temporarily commented out.
+  //    This needs logic to prevent generation on device pass such as is done
+  //    below with HostPostOutlineCB , i.e.  if (!Config.isTargetDevice()) {
+  //    or you get unresolved reference in device linking to __kmpc_fork_teams
   OI.PostOutlineCB = [this, Ident, ToBeDeleted](Function &OutlinedFn) mutable {
     // The stale call instruction will be replaced with a new call instruction
     // for runtime call with the outlined function.
@@ -6253,6 +6258,7 @@ OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
       ToBeDeleted.pop();
     }
   };
+#endif
 
     auto HostPostOutlineCB = [this, Ident](Function &OutlinedFn) {
     // The input IR here looks like the following-
