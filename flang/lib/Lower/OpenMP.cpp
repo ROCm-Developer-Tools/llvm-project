@@ -2087,6 +2087,54 @@ createAndSetPrivatizedLoopVar(Fortran::lower::AbstractConverter &converter,
   return storeOp;
 }
 
+static mlir::Value
+calculateTripCount(Fortran::lower::AbstractConverter &converter,
+                   mlir::Location loc, llvm::ArrayRef<mlir::Value> lbs,
+                   llvm::ArrayRef<mlir::Value> ubs,
+                   llvm::ArrayRef<mlir::Value> steps) {
+  using namespace mlir::arith;
+  using mlir::Value;
+  assert(lbs.size() == ubs.size() && lbs.size() == steps.size() &&
+         !lbs.empty() && "Invalid bounds or step");
+
+  fir::FirOpBuilder &b = converter.getFirOpBuilder();
+  mlir::Type stepType = steps.front().getType();
+  Value zeroConst = b.create<ConstantIntOp>(loc, 0, stepType);
+  Value oneConst = b.create<ConstantIntOp>(loc, 1, stepType);
+
+  Value tripCount;
+
+  for (std::tuple<Value, Value, Value> it : llvm::zip(lbs, ubs, steps)) {
+    Value lb = std::get<0>(it);
+    Value ub = std::get<1>(it);
+    Value step = std::get<2>(it);
+
+    Value reverseCond =
+        b.create<CmpIOp>(loc, CmpIPredicate::slt, step, zeroConst);
+    Value negStep = b.create<SubIOp>(loc, zeroConst, step);
+    Value absStep = b.create<SelectOp>(loc, reverseCond, negStep, step);
+    Value start = b.create<SelectOp>(loc, reverseCond, ub, lb);
+    Value end = b.create<SelectOp>(loc, reverseCond, lb, ub);
+    Value range = b.create<SubIOp>(loc, end, start);
+    Value rangeCond = b.create<CmpIOp>(loc, CmpIPredicate::slt, end, start);
+    Value numSteps = b.create<DivUIOp>(loc, range, absStep);
+    numSteps = b.create<AddIOp>(loc, numSteps, oneConst);
+
+    Value loopTripCount =
+        b.create<SelectOp>(loc, rangeCond, zeroConst, numSteps);
+    if (tripCount)
+      tripCount = b.create<MulIOp>(loc, tripCount, loopTripCount);
+    else
+      tripCount = loopTripCount;
+  }
+
+  mlir::Type tripCountType = b.getIntegerType(64);
+  if (tripCount.getType() != tripCountType)
+    tripCount = b.create<ExtUIOp>(loc, tripCountType, tripCount);
+
+  return tripCount;
+}
+
 /// Create the body (block) for an OpenMP Operation.
 ///
 /// \param [in]    op - the operation the body belongs to.
@@ -2481,8 +2529,8 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
 
   return genOpWithBody<mlir::omp::TargetOp>(
       converter, eval, currentLocation, outerCombined, &clauseList,
-      ifClauseOperand, deviceOperand, threadLimitOperand, nowaitAttr,
-      mapOperands);
+      ifClauseOperand, deviceOperand, threadLimitOperand,
+      /*trip_count=*/nullptr, nowaitAttr, mapOperands);
 }
 
 static mlir::omp::TeamsOp
@@ -2608,10 +2656,6 @@ getDeclareTargetFunctionDevice(
   return std::nullopt;
 }
 
-//===----------------------------------------------------------------------===//
-// genOMP() Code generation helper functions
-//===----------------------------------------------------------------------===//
-
 static void
 genOmpSimpleStandalone(Fortran::lower::AbstractConverter &converter,
                        Fortran::lower::pft::Evaluation &eval,
@@ -2677,6 +2721,10 @@ genOmpFlush(Fortran::lower::AbstractConverter &converter,
   converter.getFirOpBuilder().create<mlir::omp::FlushOp>(
       converter.getCurrentLocation(), operandRange);
 }
+
+//===----------------------------------------------------------------------===//
+// genOMP() Code generation helper functions
+//===----------------------------------------------------------------------===//
 
 static void
 genOMP(Fortran::lower::AbstractConverter &converter,
@@ -2863,6 +2911,26 @@ static void genOMP(Fortran::lower::AbstractConverter &converter,
   createBodyOfOp<mlir::omp::WsLoopOp>(wsLoopOp, converter, currentLocation,
                                       eval, &loopOpClauseList, iv,
                                       /*outer=*/false, &dsp);
+
+  // Create trip_count if inside of omp.target and this is host compilation
+  auto offloadMod = llvm::dyn_cast<mlir::omp::OffloadModuleInterface>(
+      firOpBuilder.getModule().getOperation());
+  auto targetOp = wsLoopOp->getParentOfType<mlir::omp::TargetOp>();
+
+  if (offloadMod && targetOp && !offloadMod.getIsTargetDevice() &&
+      targetOp.isTargetSPMDLoop()) {
+    // Lower loop bounds and step, and process collapsing again, putting lowered
+    // values outside of omp.target this time. This enables calculating and
+    // accessing the trip count in the host, which is needed when lowering to
+    // LLVM IR via the OMPIRBuilder.
+    HostClausesInsertionGuard guard(firOpBuilder);
+    llvm::SmallVector<mlir::Value> outsideLB, outsideUB, outsideStep;
+    llvm::SmallVector<const Fortran::semantics::Symbol *> outsideIV;
+    cp.processCollapse(currentLocation, eval, outsideLB, outsideUB, outsideStep,
+                       outsideIV, loopVarTypeSize);
+    targetOp.getTripCountMutable().assign(calculateTripCount(
+        converter, currentLocation, outsideLB, outsideUB, outsideStep));
+  }
 }
 
 static void

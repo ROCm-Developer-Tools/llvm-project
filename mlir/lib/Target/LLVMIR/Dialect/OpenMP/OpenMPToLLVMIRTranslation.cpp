@@ -1007,13 +1007,6 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::CanonicalLoopInfo *loopInfo =
       ompBuilder->collapseLoops(ompLoc.DL, loopInfos, {});
 
-  if (ompBuilder->CurrentTargetInfo &&
-      !ompBuilder->CurrentTargetInfo->NumLoopRegions++) {
-    // FIXME Later uses of LoopTripCount can crash the compiler, if it is not a
-    // compile-time constant.
-    ompBuilder->CurrentTargetInfo->LoopTripCount = loopInfo->getTripCount();
-  }
-
   allocaIP = findAllocaInsertPoint(builder, moduleTranslation);
 
   // TODO: Handle doacross loops when the ordered clause has a parameter.
@@ -1035,6 +1028,9 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   // potential further loop transformations. Use the insertion point stored
   // before collapsing loops instead.
   builder.restoreIP(afterIP);
+
+  if (ompBuilder->CurrentTargetInfo)
+    ++ompBuilder->CurrentTargetInfo->NumLoopRegions;
 
   // Process the reductions if required.
   if (loop.getNumReductionVars() == 0)
@@ -2218,6 +2214,10 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
         ompBuilder->CurrentTargetInfo->ThreadLimit =
             moduleTranslation.lookupValue(threadLimit);
     }
+
+    if (Value tripCount = targetOp.getTripCount())
+      ompBuilder->CurrentTargetInfo->LoopTripCount =
+          moduleTranslation.lookupValue(tripCount);
 
     return builder.saveIP();
   };

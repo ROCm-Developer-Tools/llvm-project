@@ -887,8 +887,46 @@ LogicalResult ExitDataOp::verify() {
   return verifyMapClause(*this, getMapOperands());
 }
 
+//===----------------------------------------------------------------------===//
+// TargetOp
+//===----------------------------------------------------------------------===//
+
+template <typename OpTy>
+static OpTy getSingleNestedOpOfType(Region &region) {
+  auto ops = region.getOps<OpTy>();
+  return std::distance(ops.begin(), ops.end()) != 1 ? OpTy() : *ops.begin();
+}
+
 LogicalResult TargetOp::verify() {
+  auto teamsOps = getOps<TeamsOp>();
+  if (std::distance(teamsOps.begin(), teamsOps.end()) > 1)
+    return emitError("target containing multiple teams constructs");
+
+  if (getTripCount() && !isTargetSPMDLoop())
+    return emitError("trip_count set on non-SPMD target region");
+
   return verifyMapClause(*this, getMapOperands());
+}
+
+bool TargetOp::isTargetSPMDLoop() {
+  // TODO Check for additional ops that may break the pattern. Currently we only
+  // check the necessary but not sufficient condition of having a single
+  // omp.teams+omp.distribute+omp.parallel+omp.wsloop nest.
+  auto teamsOp = getSingleNestedOpOfType<TeamsOp>(getRegion());
+  if (!teamsOp)
+    return false;
+
+  auto distributeOp =
+      getSingleNestedOpOfType<DistributeOp>(teamsOp.getRegion());
+  if (!distributeOp)
+    return false;
+
+  auto parallelOp =
+      getSingleNestedOpOfType<ParallelOp>(distributeOp.getRegion());
+  if (!parallelOp)
+    return false;
+
+  return getSingleNestedOpOfType<WsLoopOp>(parallelOp.getRegion());
 }
 
 //===----------------------------------------------------------------------===//

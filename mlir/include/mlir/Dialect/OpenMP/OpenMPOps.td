@@ -1410,6 +1410,9 @@ def TargetOp : OpenMP_Op<"target",[OutlineableOpenMPOpInterface, AttrSizedOperan
 
     The optional $thread_limit specifies the limit on the number of threads
 
+    The optional $trip_count indicates the total number of loop iterations, only if this
+    target region represents a single teams+distribute+parallel worksharing loop.
+
     The optional $nowait elliminates the implicit barrier so the parent task can make progress
     even if the target task is not yet completed.
 
@@ -1420,6 +1423,7 @@ def TargetOp : OpenMP_Op<"target",[OutlineableOpenMPOpInterface, AttrSizedOperan
   let arguments = (ins Optional<I1>:$if_expr,
                        Optional<AnyInteger>:$device,
                        Optional<AnyInteger>:$thread_limit,
+                       Optional<AnyInteger>:$trip_count,
                        UnitAttr:$nowait,
                        Variadic<OpenMP_PointerLikeType>:$map_operands);
 
@@ -1429,12 +1433,19 @@ def TargetOp : OpenMP_Op<"target",[OutlineableOpenMPOpInterface, AttrSizedOperan
     oilist( `if` `(` $if_expr `)`
     | `device` `(` $device `:` type($device) `)`
     | `thread_limit` `(` $thread_limit `:` type($thread_limit) `)`
+    | `trip_count` `(` $trip_count `:` type($trip_count) `)`
     | `nowait` $nowait
     | `map_entries` `(` $map_operands `:` type($map_operands) `)`
     ) $region attr-dict
   }];
 
   let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    /// Tells whether this target region represents a single worksharing loop
+    /// wrapped by omp.teams omp.distribute and omp.parallel constructs.
+    bool isTargetSPMDLoop();
+  }];
 }
 
 
