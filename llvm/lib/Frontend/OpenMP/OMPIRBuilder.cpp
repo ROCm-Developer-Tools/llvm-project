@@ -485,8 +485,8 @@ void OpenMPIRBuilder::getKernelArgsVector(TargetKernelArgs &KernelArgs,
 
   Value *NumTeams3D =
       Builder.CreateInsertValue(ZeroArray, KernelArgs.NumTeams, {0});
-  Value *NumThreads3D =
-      Builder.CreateInsertValue(ZeroArray, KernelArgs.NumThreads, {0});
+  Value *ThreadLimit3D =
+      Builder.CreateInsertValue(ZeroArray, KernelArgs.ThreadLimit, {0});
 
   ArgsVector = {Version,
                 PointerNum,
@@ -496,10 +496,10 @@ void OpenMPIRBuilder::getKernelArgsVector(TargetKernelArgs &KernelArgs,
                 KernelArgs.RTArgs.MapTypesArray,
                 KernelArgs.RTArgs.MapNamesArray,
                 KernelArgs.RTArgs.MappersArray,
-                KernelArgs.NumIterations,
+                KernelArgs.TripCount,
                 Flags,
                 NumTeams3D,
-                NumThreads3D,
+                ThreadLimit3D,
                 KernelArgs.DynCGGroupMem};
 }
 
@@ -1076,7 +1076,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::emitKernelLaunch(
   // of teams and threads so no additional calls to the runtime are required.
   // Check the error code and execute the host version if required.
   Builder.restoreIP(emitTargetKernel(Builder, AllocaIP, Return, RTLoc, DeviceID,
-                                     Args.NumTeams, Args.NumThreads,
+                                     Args.NumTeams, Args.ThreadLimit,
                                      OutlinedFnID, ArgsVector));
 
   BasicBlock *OffloadFailedBlock =
@@ -4552,7 +4552,7 @@ static const omp::GV &getGridValue(Function *Kernel) {
 }
 
 void OpenMPIRBuilder::setOutlinedTargetRegionFunctionAttributes(
-    Function *OutlinedFn, int32_t NumTeams, int32_t NumThreads) {
+    Function *OutlinedFn) {
   if (Config.isTargetDevice()) {
     OutlinedFn->setLinkage(GlobalValue::WeakODRLinkage);
     // TODO: Determine if DSO local can be set to true.
@@ -4560,18 +4560,38 @@ void OpenMPIRBuilder::setOutlinedTargetRegionFunctionAttributes(
     OutlinedFn->setVisibility(GlobalValue::ProtectedVisibility);
     if (Triple(M.getTargetTriple()).isAMDGCN())
       OutlinedFn->setCallingConv(CallingConv::AMDGPU_KERNEL);
+    if (!Config.TargetCPU.empty())
+      OutlinedFn->addFnAttr("target-cpu", Config.TargetCPU);
+    if (!Config.TargetFeatures.empty())
+      OutlinedFn->addFnAttr("target-features", Config.TargetFeatures);
   }
 
-  if (NumTeams > 0)
-    OutlinedFn->addFnAttr("omp_target_num_teams", std::to_string(NumTeams));
+  // Try to get constant values for NumTeams and ThreadLimit, and set default
+  // values if they are not constant.
+  int32_t NumTeamsValue = -1;
+  int32_t ThreadLimitValue = -1;
 
-  if (NumThreads == -1 && Config.isGPU())
-    NumThreads = getGridValue(OutlinedFn).GV_Default_WG_Size;
+  if (auto *NumTeamsConst =
+          dyn_cast_if_present<llvm::Constant>(CurrentTargetInfo->NumTeams))
+    NumTeamsValue = NumTeamsConst->getUniqueInteger().getSExtValue();
+  else if (CurrentTargetInfo->HasTeamsRegion)
+    NumTeamsValue = 0;
 
-  if (NumThreads > 0) {
+  if (auto *ThreadLimitConst =
+          dyn_cast_if_present<llvm::Constant>(CurrentTargetInfo->ThreadLimit))
+    ThreadLimitValue = ThreadLimitConst->getUniqueInteger().getSExtValue();
+
+  if (NumTeamsValue > 0)
+    OutlinedFn->addFnAttr("omp_target_num_teams",
+                          std::to_string(NumTeamsValue));
+
+  if (ThreadLimitValue == -1 && Config.isGPU())
+    ThreadLimitValue = getGridValue(OutlinedFn).GV_Default_WG_Size;
+
+  if (ThreadLimitValue > 0) {
     if (OutlinedFn->getCallingConv() == CallingConv::AMDGPU_KERNEL) {
       OutlinedFn->addFnAttr("amdgpu-flat-work-group-size",
-                            "1," + llvm::utostr(NumThreads));
+                            "1," + llvm::utostr(ThreadLimitValue));
     } else {
       // Update the "maxntidx" metadata for NVIDIA, or add it.
       NamedMDNode *MD = M.getOrInsertNamedMetadata("nvvm.annotations");
@@ -4595,19 +4615,19 @@ void OpenMPIRBuilder::setOutlinedTargetRegionFunctionAttributes(
         ExistingOp->replaceOperandWith(
             2, ConstantAsMetadata::get(
                    ConstantInt::get(OldVal->getValue()->getType(),
-                                    std::min(OldLimit, NumThreads))));
+                                    std::min(OldLimit, ThreadLimitValue))));
       } else {
         LLVMContext &Ctx = M.getContext();
         Metadata *MDVals[] = {ConstantAsMetadata::get(OutlinedFn),
                               MDString::get(Ctx, "maxntidx"),
                               ConstantAsMetadata::get(ConstantInt::get(
-                                  Type::getInt32Ty(Ctx), NumThreads))};
+                                  Type::getInt32Ty(Ctx), ThreadLimitValue))};
         // Append metadata to nvvm.annotations
         MD->addOperand(MDNode::get(Ctx, MDVals));
       }
     }
     OutlinedFn->addFnAttr("omp_target_thread_limit",
-                          std::to_string(NumThreads));
+                          std::to_string(ThreadLimitValue));
   }
 }
 
@@ -4637,9 +4657,8 @@ Constant *OpenMPIRBuilder::createTargetRegionEntryAddr(Function *OutlinedFn,
 
 void OpenMPIRBuilder::emitTargetRegionFunction(
     TargetRegionEntryInfo &EntryInfo,
-    FunctionGenCallback &GenerateFunctionCallback, int32_t NumTeams,
-    int32_t NumThreads, bool IsOffloadEntry, Function *&OutlinedFn,
-    Constant *&OutlinedFnID) {
+    FunctionGenCallback &GenerateFunctionCallback, bool IsOffloadEntry,
+    Function *&OutlinedFn, Constant *&OutlinedFnID) {
 
   SmallString<64> EntryFnName;
   OffloadInfoManager.getTargetRegionEntryFnName(EntryFnName, EntryInfo);
@@ -4659,16 +4678,15 @@ void OpenMPIRBuilder::emitTargetRegionFunction(
           ? std::string(EntryFnName)
           : createPlatformSpecificName({EntryFnName, "region_id"});
 
-  OutlinedFnID = registerTargetRegionFunction(
-      EntryInfo, OutlinedFn, EntryFnName, EntryFnIDName, NumTeams, NumThreads);
+  OutlinedFnID = registerTargetRegionFunction(EntryInfo, OutlinedFn,
+                                              EntryFnName, EntryFnIDName);
 }
 
 Constant *OpenMPIRBuilder::registerTargetRegionFunction(
     TargetRegionEntryInfo &EntryInfo, Function *OutlinedFn,
-    StringRef EntryFnName, StringRef EntryFnIDName, int32_t NumTeams,
-    int32_t NumThreads) {
+    StringRef EntryFnName, StringRef EntryFnIDName) {
   if (OutlinedFn)
-    setOutlinedTargetRegionFunctionAttributes(OutlinedFn, NumTeams, NumThreads);
+    setOutlinedTargetRegionFunctionAttributes(OutlinedFn);
   auto OutlinedFnID = createOutlinedFunctionID(OutlinedFn, EntryFnIDName);
   auto EntryAddr = createTargetRegionEntryAddr(OutlinedFn, EntryFnName);
   OffloadInfoManager.registerTargetRegionEntryInfo(
@@ -4976,7 +4994,6 @@ static Function *createOutlinedFunction(
         ArgAccessorFuncCB(Arg, Input, InputCopy, AllocaIP, Builder.saveIP()));
 
     // Collect all the instructions
-    assert(InputCopy->getType()->isPointerTy() && "Not Pointer Type");
     for (User *User : make_early_inc_range(Input->users()))
       if (auto Instr = dyn_cast<Instruction>(User))
         if (Instr->getFunction() == Func)
@@ -4992,27 +5009,23 @@ static Function *createOutlinedFunction(
 static void emitTargetOutlinedFunction(
     OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
     TargetRegionEntryInfo &EntryInfo, Function *&OutlinedFn,
-    Constant *&OutlinedFnID, int32_t NumTeams, int32_t NumThreads,
-    SmallVectorImpl<Value *> &Inputs,
+    Constant *&OutlinedFnID, SmallVectorImpl<Value *> &Inputs,
     OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
     OpenMPIRBuilder::TargetGenArgAccessorsCallbackTy &ArgAccessorFuncCB) {
 
   OpenMPIRBuilder::FunctionGenCallback &&GenerateOutlinedFunction =
-      [&OMPBuilder, &Builder, &Inputs, &CBFunc,
-       &ArgAccessorFuncCB](StringRef EntryFnName) {
+      [&](StringRef EntryFnName) {
         return createOutlinedFunction(OMPBuilder, Builder, EntryFnName, Inputs,
                                       CBFunc, ArgAccessorFuncCB);
       };
 
-  OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction,
-                                      NumTeams, NumThreads, true, OutlinedFn,
-                                      OutlinedFnID);
+  OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction, true,
+                                      OutlinedFn, OutlinedFnID);
 }
 
 static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
                            OpenMPIRBuilder::InsertPointTy AllocaIP,
                            Function *OutlinedFn, Constant *OutlinedFnID,
-                           int32_t NumTeams, int32_t NumThreads,
                            SmallVectorImpl<Value *> &Args,
                            OpenMPIRBuilder::GenMapInfoCallbackTy GenMapInfoCB) {
 
@@ -5039,22 +5052,33 @@ static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   unsigned NumTargetItems = MapInfo.BasePointers.size();
   // TODO: Use correct device ID
   Value *DeviceID = Builder.getInt64(OMP_DEVICEID_UNDEF);
-  Value *NumTeamsVal = Builder.getInt32(NumTeams);
-  Value *NumThreadsVal = Builder.getInt32(NumThreads);
   uint32_t SrcLocStrSize;
   Constant *SrcLocStr = OMPBuilder.getOrCreateDefaultSrcLocStr(SrcLocStrSize);
   Value *RTLoc = OMPBuilder.getOrCreateIdent(SrcLocStr, SrcLocStrSize,
                                              llvm::omp::IdentFlag(0), 0);
-  // TODO: Use correct NumIterations
-  Value *NumIterations = Builder.getInt64(0);
+
+  OpenMPIRBuilder::TargetRegionInfo &TRI = OMPBuilder.CurrentTargetInfo.value();
+
+  // Set to -1 if there is no teams directive, and 0 if clause unspecified.
+  Value *NumTeams = !TRI.HasTeamsRegion ? Builder.getInt32(-1)
+                    : TRI.NumTeams      ? TRI.NumTeams
+                                        : Builder.getInt32(0);
+
+  // Set to 0 if clause unspecified.
+  Value *ThreadLimit = TRI.ThreadLimit ? TRI.ThreadLimit : Builder.getInt32(0);
+
+  // Set to 0 if this is not a teams + single distribute loop.
+  Value *TripCount = TRI.isLoop() ? TRI.LoopTripCount : nullptr;
+  if (!TripCount)
+    TripCount = Builder.getInt64(0);
+
   // TODO: Use correct DynCGGroupMem
   Value *DynCGGroupMem = Builder.getInt32(0);
-
   bool HasNoWait = false;
 
-  OpenMPIRBuilder::TargetKernelArgs KArgs(NumTargetItems, RTArgs, NumIterations,
-                                          NumTeamsVal, NumThreadsVal,
-                                          DynCGGroupMem, HasNoWait);
+  OpenMPIRBuilder::TargetKernelArgs KArgs(NumTargetItems, RTArgs, TripCount,
+                                          NumTeams, ThreadLimit, DynCGGroupMem,
+                                          HasNoWait);
 
   Builder.restoreIP(OMPBuilder.emitKernelLaunch(
       Builder, OutlinedFn, OutlinedFnID, EmitTargetCallFallbackCB, KArgs,
@@ -5063,9 +5087,8 @@ static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
 
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
     const LocationDescription &Loc, InsertPointTy AllocaIP,
-    InsertPointTy CodeGenIP, TargetRegionEntryInfo &EntryInfo, int32_t NumTeams,
-    int32_t NumThreads, SmallVectorImpl<Value *> &Args,
-    GenMapInfoCallbackTy GenMapInfoCB,
+    InsertPointTy CodeGenIP, TargetRegionEntryInfo &EntryInfo,
+    SmallVectorImpl<Value *> &Args, GenMapInfoCallbackTy GenMapInfoCB,
     OpenMPIRBuilder::TargetBodyGenCallbackTy CBFunc,
     OpenMPIRBuilder::TargetGenArgAccessorsCallbackTy ArgAccessorFuncCB) {
   if (!updateToLocation(Loc))
@@ -5076,11 +5099,10 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
   Function *OutlinedFn;
   Constant *OutlinedFnID;
   emitTargetOutlinedFunction(*this, Builder, EntryInfo, OutlinedFn,
-                             OutlinedFnID, NumTeams, NumThreads, Args, CBFunc,
-                             ArgAccessorFuncCB);
+                             OutlinedFnID, Args, CBFunc, ArgAccessorFuncCB);
   if (!Config.isTargetDevice())
-    emitTargetCall(*this, Builder, AllocaIP, OutlinedFn, OutlinedFnID, NumTeams,
-                   NumThreads, Args, GenMapInfoCB);
+    emitTargetCall(*this, Builder, AllocaIP, OutlinedFn, OutlinedFnID, Args,
+                   GenMapInfoCB);
 
   return Builder.saveIP();
 }

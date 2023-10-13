@@ -89,8 +89,13 @@ public:
   /// Flag for specifying if the compilation is done for an accelerator.
   std::optional<bool> IsGPU;
 
-  // Flag for specifying if offloading is mandatory.
+  /// Flag for specifying if offloading is mandatory.
   std::optional<bool> OpenMPOffloadMandatory;
+
+  /// Name of the target processor.
+  StringRef TargetCPU;
+  /// String representation of the target processor's features.
+  StringRef TargetFeatures;
 
   /// First separator used between the initial two parts of a name.
   std::optional<StringRef> FirstSeparator;
@@ -1610,6 +1615,27 @@ public:
           MapNamesArray(MapNamesArray) {}
   };
 
+  /// Container for target information, gathered from the target region body,
+  /// needed to populate some __tgt_target_kernel arguments.
+  struct TargetRegionInfo {
+    bool HasTeamsRegion = false;
+    int NumDistributeRegions = 0;
+    int NumParallelRegions = 0;
+    int NumLoopRegions = 0;
+    Value *NumTeams = nullptr;
+    Value *ThreadLimit = nullptr;
+    Value *LoopTripCount = nullptr;
+
+    /// Whether this target region defines a single parallel loop.
+    bool isLoop() const {
+      return NumLoopRegions == 1 && NumParallelRegions == 1 &&
+             (!HasTeamsRegion || NumDistributeRegions == 1);
+    }
+  };
+
+  /// Information for the target region being currently translated.
+  std::optional<TargetRegionInfo> CurrentTargetInfo;
+
   /// Data structure that contains the needed information to construct the
   /// kernel args vector.
   struct TargetKernelArgs {
@@ -1618,11 +1644,11 @@ public:
     /// Arguments passed to the runtime library
     TargetDataRTArgs RTArgs;
     /// The number of iterations
-    Value *NumIterations;
+    Value *TripCount;
     /// The number of teams.
     Value *NumTeams;
     /// The number of threads.
-    Value *NumThreads;
+    Value *ThreadLimit;
     /// The size of the dynamic shared memory.
     Value *DynCGGroupMem;
     /// True if the kernel has 'no wait' clause.
@@ -1630,12 +1656,11 @@ public:
 
     /// Constructor for TargetKernelArgs
     TargetKernelArgs(unsigned NumTargetItems, TargetDataRTArgs RTArgs,
-                     Value *NumIterations, Value *NumTeams, Value *NumThreads,
+                     Value *TripCount, Value *NumTeams, Value *ThreadLimit,
                      Value *DynCGGroupMem, bool HasNoWait)
-        : NumTargetItems(NumTargetItems), RTArgs(RTArgs),
-          NumIterations(NumIterations), NumTeams(NumTeams),
-          NumThreads(NumThreads), DynCGGroupMem(DynCGGroupMem),
-          HasNoWait(HasNoWait) {}
+        : NumTargetItems(NumTargetItems), RTArgs(RTArgs), TripCount(TripCount),
+          NumTeams(NumTeams), ThreadLimit(ThreadLimit),
+          DynCGGroupMem(DynCGGroupMem), HasNoWait(HasNoWait) {}
   };
 
   /// Create the kernel args vector used by emitTargetKernel. This function
@@ -2078,9 +2103,7 @@ public:
 
 private:
   // Sets the function attributes expected for the outlined function
-  void setOutlinedTargetRegionFunctionAttributes(Function *OutlinedFn,
-                                                 int32_t NumTeams,
-                                                 int32_t NumThreads);
+  void setOutlinedTargetRegionFunctionAttributes(Function *OutlinedFn);
 
   // Creates the function ID/Address for the given outlined function.
   // In the case of an embedded device function the address of the function is
@@ -2125,13 +2148,10 @@ public:
   /// \param InfoManager The info manager keeping track of the offload entries
   /// \param EntryInfo The entry information about the function
   /// \param GenerateFunctionCallback The callback function to generate the code
-  /// \param NumTeams Number default teams
-  /// \param NumThreads Number default threads
   /// \param OutlinedFunction Pointer to the outlined function
   /// \param EntryFnIDName Name of the ID o be created
   void emitTargetRegionFunction(TargetRegionEntryInfo &EntryInfo,
                                 FunctionGenCallback &GenerateFunctionCallback,
-                                int32_t NumTeams, int32_t NumThreads,
                                 bool IsOffloadEntry, Function *&OutlinedFn,
                                 Constant *&OutlinedFnID);
 
@@ -2143,13 +2163,10 @@ public:
   /// \param OutlinedFunction Pointer to the outlined function
   /// \param EntryFnName Name of the outlined function
   /// \param EntryFnIDName Name of the ID o be created
-  /// \param NumTeams Number default teams
-  /// \param NumThreads Number default threads
   Constant *registerTargetRegionFunction(TargetRegionEntryInfo &EntryInfo,
                                          Function *OutlinedFunction,
                                          StringRef EntryFnName,
-                                         StringRef EntryFnIDName,
-                                         int32_t NumTeams, int32_t NumThreads);
+                                         StringRef EntryFnIDName);
   /// Type of BodyGen to use for region codegen
   ///
   /// Priv: If device pointer privatization is required, emit the body of the
@@ -2211,8 +2228,6 @@ public:
   /// \param CodeGenIP The insertion point where the call to the outlined
   /// function should be emitted.
   /// \param EntryInfo The entry information about the function.
-  /// \param NumTeams Number of teams specified in the num_teams clause.
-  /// \param NumThreads Number of teams specified in the thread_limit clause.
   /// \param Inputs The input values to the region that will be passed.
   /// as arguments to the outlined function.
   /// \param BodyGenCB Callback that will generate the region code.
@@ -2221,8 +2236,7 @@ public:
   InsertPointTy createTarget(const LocationDescription &Loc,
                              OpenMPIRBuilder::InsertPointTy AllocaIP,
                              OpenMPIRBuilder::InsertPointTy CodeGenIP,
-                             TargetRegionEntryInfo &EntryInfo, int32_t NumTeams,
-                             int32_t NumThreads,
+                             TargetRegionEntryInfo &EntryInfo,
                              SmallVectorImpl<Value *> &Inputs,
                              GenMapInfoCallbackTy GenMapInfoCB,
                              TargetBodyGenCallbackTy BodyGenCB,
