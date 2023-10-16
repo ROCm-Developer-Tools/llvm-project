@@ -666,10 +666,9 @@ convertOmpTeams(omp::TeamsOp op, llvm::IRBuilderBase &builder,
                 LLVM::ModuleTranslation &moduleTranslation) {
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
   LogicalResult bodyGenStatus = success();
-  if (op.getNumTeamsLower() || op.getIfExpr() ||
-      !op.getAllocatorsVars().empty() || op.getReductions()) {
+  if (op.getIfExpr() || !op.getAllocatorsVars().empty() || op.getReductions())
     return op.emitError("unhandled clauses for translation to LLVM IR");
-  }
+
   auto bodyCB = [&](InsertPointTy allocaIP, InsertPointTy codegenIP) {
     LLVM::ModuleTranslation::SaveStack<OpenMPAllocaStackFrame> frame(
         moduleTranslation, allocaIP);
@@ -678,24 +677,21 @@ convertOmpTeams(omp::TeamsOp op, llvm::IRBuilderBase &builder,
                         moduleTranslation, bodyGenStatus);
   };
 
-  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  llvm::Value *numTeamsLower = nullptr;
+  if (Value numTeamsLowerVar = op.getNumTeamsLower())
+    numTeamsLower = moduleTranslation.lookupValue(numTeamsLowerVar);
+
+  llvm::Value *numTeamsUpper = nullptr;
+  if (Value numTeamsUpperVar = op.getNumTeamsUpper())
+    numTeamsUpper = moduleTranslation.lookupValue(numTeamsUpperVar);
+
+  llvm::Value *threadLimit = nullptr;
+  if (Value threadLimitVar = op.getThreadLimit())
+    threadLimit = moduleTranslation.lookupValue(threadLimitVar);
+
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-  builder.restoreIP(ompBuilder->createTeams(ompLoc, bodyCB));
-
-  if (ompBuilder->CurrentTargetInfo) {
-    // TODO The omp.target op verifier needs to ensure that a single omp.teams
-    // child op is allowed. Here we just assume this is the case.
-    ompBuilder->CurrentTargetInfo->HasTeamsRegion = true;
-
-    if (Value numTeamsUpper = op.getNumTeamsUpper())
-      ompBuilder->CurrentTargetInfo->NumTeams =
-          moduleTranslation.lookupValue(numTeamsUpper);
-
-    if (Value threadLimit = op.getThreadLimit())
-      ompBuilder->CurrentTargetInfo->ThreadLimit =
-          moduleTranslation.lookupValue(threadLimit);
-  }
-
+  builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTeams(
+      ompLoc, bodyCB, numTeamsLower, numTeamsUpper, threadLimit));
   return bodyGenStatus;
 }
 
