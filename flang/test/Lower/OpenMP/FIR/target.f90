@@ -210,8 +210,8 @@ end subroutine omp_target
 !CHECK-LABEL: func.func @_QPomp_target_thread_limit() {
 subroutine omp_target_thread_limit
    integer :: a
-   !CHECK: %[[VAL_1:.*]] = arith.constant 64 : i32
-   !CHECK: %[[MAP:.*]] = omp.map_info var_ptr({{.*}})   map_clauses(tofrom) capture(ByRef) -> !fir.ref<i32> {name = "a"}
+   !CHECK-DAG: %[[VAL_1:.*]] = arith.constant 64 : i32
+   !CHECK-DAG: %[[MAP:.*]] = omp.map_info var_ptr({{.*}})   map_clauses(tofrom) capture(ByRef) -> !fir.ref<i32> {name = "a"}
    !CHECK: omp.target   thread_limit(%[[VAL_1]] : i32) map_entries(%[[MAP]] : !fir.ref<i32>) {
    !$omp target map(tofrom: a) thread_limit(64)
       a = 10
