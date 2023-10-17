@@ -2225,6 +2225,7 @@ public:
   /// Generator for '#omp target'
   ///
   /// \param Loc where the target data construct was encountered.
+  /// \param IsSPMD whether this is an SPMD target launch.
   /// \param CodeGenIP The insertion point where the call to the outlined
   /// function should be emitted.
   /// \param EntryInfo The entry information about the function.
@@ -2233,7 +2234,7 @@ public:
   /// \param BodyGenCB Callback that will generate the region code.
   /// \param ArgAccessorFuncCB Callback that will generate accessors
   /// instructions for passed in target arguments where neccessary
-  InsertPointTy createTarget(const LocationDescription &Loc,
+  InsertPointTy createTarget(const LocationDescription &Loc, bool IsSPMD,
                              OpenMPIRBuilder::InsertPointTy AllocaIP,
                              OpenMPIRBuilder::InsertPointTy CodeGenIP,
                              TargetRegionEntryInfo &EntryInfo,
