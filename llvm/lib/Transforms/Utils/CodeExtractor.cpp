@@ -943,6 +943,7 @@ Function *CodeExtractor::constructFunction(const ValueSet &inputs,
       case Attribute::NoSanitizeBounds:
       case Attribute::NoSanitizeCoverage:
       case Attribute::NullPointerIsValid:
+      case Attribute::OptimizeForDebugging:
       case Attribute::OptForFuzzing:
       case Attribute::OptimizeNone:
       case Attribute::OptimizeForSize:
@@ -1190,8 +1191,8 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
                         : &codeReplacer->getParent()->front().front());
 
     if (ArgsInZeroAddressSpace && DL.getAllocaAddrSpace() != 0) {
-      AddrSpaceCastInst *StructSpaceCast = new AddrSpaceCastInst(
-          Struct, Struct->getType()->getPointerTo(), "structArg.ascast");
+      auto *StructSpaceCast = new AddrSpaceCastInst(
+          Struct, PointerType ::get(Context, 0), "structArg.ascast");
       StructSpaceCast->insertAfter(Struct);
       params.push_back(StructSpaceCast);
     } else {
