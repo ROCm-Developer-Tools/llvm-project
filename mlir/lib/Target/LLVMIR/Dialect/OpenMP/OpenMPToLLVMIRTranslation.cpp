@@ -693,9 +693,17 @@ convertOmpTeams(omp::TeamsOp op, llvm::IRBuilderBase &builder,
   if (Value ifExprVar = op.getIfExpr())
     ifExpr = moduleTranslation.lookupValue(ifExprVar);
 
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-  builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTeams(
+  builder.restoreIP(ompBuilder->createTeams(
       ompLoc, bodyCB, numTeamsLower, numTeamsUpper, threadLimit, ifExpr));
+
+  if (ompBuilder->CurrentTargetInfo) {
+    ompBuilder->CurrentTargetInfo->HasTeamsRegion = true;
+    ompBuilder->CurrentTargetInfo->NumTeams = numTeamsUpper;
+    ompBuilder->CurrentTargetInfo->ThreadLimit = threadLimit;
+  }
+
   return bodyGenStatus;
 }
 
@@ -2288,9 +2296,9 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   };
 
   ompBuilder->CurrentTargetInfo.emplace();
-  builder.restoreIP(ompBuilder->createTarget(ompLoc, allocaIP, builder.saveIP(),
-                                             entryInfo, inputs, genMapInfoCB,
-                                             bodyCB, argAccessorCB));
+  builder.restoreIP(ompBuilder->createTarget(
+      ompLoc, targetOp.isTargetSPMDLoop(), allocaIP, builder.saveIP(),
+      entryInfo, inputs, genMapInfoCB, bodyCB, argAccessorCB));
 
   // Remap access operations to declare target reference pointers for the
   // device, essentially generating extra loadop's as necessary

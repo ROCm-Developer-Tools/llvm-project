@@ -5723,8 +5723,8 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
   OpenMPIRBuilder::LocationDescription OmpLoc({Builder.saveIP(), DL});
   OMPBuilder.CurrentTargetInfo.emplace();
   Builder.restoreIP(OMPBuilder.createTarget(
-      OmpLoc, Builder.saveIP(), Builder.saveIP(), EntryInfo, Inputs,
-      GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
+      OmpLoc, /*IsSPMD=*/false, Builder.saveIP(), Builder.saveIP(), EntryInfo,
+      Inputs, GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
 
@@ -5827,9 +5827,9 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
                                   /*Line=*/3, /*Count=*/0);
 
   OMPBuilder.CurrentTargetInfo.emplace();
-  Builder.restoreIP(OMPBuilder.createTarget(Loc, EntryIP, EntryIP, EntryInfo,
-                                            CapturedArgs, GenMapInfoCB,
-                                            BodyGenCB, SimpleArgAccessorCB));
+  Builder.restoreIP(OMPBuilder.createTarget(
+      Loc, /*IsSPMD=*/false, EntryIP, EntryIP, EntryInfo, CapturedArgs,
+      GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
 
   Builder.CreateRetVoid();
   OMPBuilder.finalize();
