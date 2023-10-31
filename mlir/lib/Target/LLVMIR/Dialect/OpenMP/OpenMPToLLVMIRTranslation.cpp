@@ -2553,6 +2553,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       kernelInput.push_back(useValue);
   }
 
+  ompBuilder->CurrentTargetInfo.emplace();
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
       ompLoc, targetOp.isTargetSPMDLoop(), allocaIP, builder.saveIP(), entryInfo,
        kernelInput, genMapInfoCB, bodyCB, argAccessorCB));
@@ -2561,6 +2562,8 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   // device, essentially generating extra loadop's as necessary
   if (moduleTranslation.getOpenMPBuilder()->Config.isTargetDevice())
     handleDeclareTargetMapVar(mapData, moduleTranslation, builder);
+
+  ompBuilder->CurrentTargetInfo.reset();
 
   return bodyGenStatus;
 }

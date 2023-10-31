@@ -4682,7 +4682,7 @@ void OpenMPIRBuilder::setOutlinedTargetRegionFunctionAttributes(
                           std::to_string(NumTeamsValue));
 
   if (ThreadLimitValue == -1 && Config.isGPU())
-    ThreadLimitValue = getGridValue(OutlinedFn).GV_Default_WG_Size;
+    ThreadLimitValue = getGridValue(T, OutlinedFn).GV_Default_WG_Size;
 
   if (ThreadLimitValue > 0) {
     if (OutlinedFn->getCallingConv() == CallingConv::AMDGPU_KERNEL) {
