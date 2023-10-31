@@ -2767,6 +2767,40 @@ TEST_F(FormatTest, ShortEnums) {
                Style);
 }
 
+TEST_F(FormatTest, ShortCompoundRequirement) {
+  FormatStyle Style = getLLVMStyle();
+  EXPECT_TRUE(Style.AllowShortCompoundRequirementOnASingleLine);
+  verifyFormat("template <typename T>\n"
+               "concept c = requires(T x) {\n"
+               "  { x + 1 } -> std::same_as<int>;\n"
+               "};",
+               Style);
+  verifyFormat("template <typename T>\n"
+               "concept c = requires(T x) {\n"
+               "  { x + 1 } -> std::same_as<int>;\n"
+               "  { x + 2 } -> std::same_as<int>;\n"
+               "};",
+               Style);
+  Style.AllowShortCompoundRequirementOnASingleLine = false;
+  verifyFormat("template <typename T>\n"
+               "concept c = requires(T x) {\n"
+               "  {\n"
+               "    x + 1\n"
+               "  } -> std::same_as<int>;\n"
+               "};",
+               Style);
+  verifyFormat("template <typename T>\n"
+               "concept c = requires(T x) {\n"
+               "  {\n"
+               "    x + 1\n"
+               "  } -> std::same_as<int>;\n"
+               "  {\n"
+               "    x + 2\n"
+               "  } -> std::same_as<int>;\n"
+               "};",
+               Style);
+}
+
 TEST_F(FormatTest, ShortCaseLabels) {
   FormatStyle Style = getLLVMStyle();
   Style.AllowShortCaseLabelsOnASingleLine = true;
@@ -26145,7 +26179,6 @@ TEST_F(FormatTest, RemoveSemicolon) {
 
 TEST_F(FormatTest, BreakAfterAttributes) {
   FormatStyle Style = getLLVMStyle();
-  EXPECT_EQ(Style.BreakAfterAttributes, FormatStyle::ABS_Never);
 
   constexpr StringRef Code("[[nodiscard]] inline int f(int &i);\n"
                            "[[foo([[]])]] [[nodiscard]]\n"
@@ -26160,6 +26193,10 @@ TEST_F(FormatTest, BreakAfterAttributes) {
                            "  return 1;\n"
                            "}");
 
+  EXPECT_EQ(Style.BreakAfterAttributes, FormatStyle::ABS_Leave);
+  verifyNoChange(Code, Style);
+
+  Style.BreakAfterAttributes = FormatStyle::ABS_Never;
   verifyFormat("[[nodiscard]] inline int f(int &i);\n"
                "[[foo([[]])]] [[nodiscard]] int g(int &i);\n"
                "[[nodiscard]] inline int f(int &i) {\n"
@@ -26171,9 +26208,6 @@ TEST_F(FormatTest, BreakAfterAttributes) {
                "  return 1;\n"
                "}",
                Code, Style);
-
-  Style.BreakAfterAttributes = FormatStyle::ABS_Leave;
-  verifyNoChange(Code, Style);
 
   Style.BreakAfterAttributes = FormatStyle::ABS_Always;
   verifyFormat("[[nodiscard]]\n"

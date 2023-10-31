@@ -19,6 +19,10 @@ on:
       - 'lldb/docs/**'
       - 'libunwind/docs/**'
       - 'libcxx/docs/**'
+      - 'libc/docs/**'
+      - 'lld/docs/**'
+      - 'openmp/docs/**'
+      - 'polly/docs/**'
   pull_request:
     paths:
       - 'llvm/docs/**'
@@ -27,6 +31,10 @@ on:
       - 'lldb/docs/**'
       - 'libunwind/docs/**'
       - 'libcxx/docs/**'
+      - 'libc/docs/**'
+      - 'lld/docs/**'
+      - 'openmp/docs/**'
+      - 'polly/docs/**'
 
 jobs:
   check-docs-build:
@@ -59,6 +67,14 @@ jobs:
               - 'libunwind/docs/**'
             libcxx:
               - 'libcxx/docs/**'
+            libc:
+              - 'libc/docs/**'
+            lld:
+              - 'lld/docs/**'
+            openmp:
+              - 'openmp/docs/**'
+            polly:
+              - 'polly/docs/**'
       - name: Fetch LLVM sources (PR)
         if: ${{ github.event_name == 'pull_request' }}
         uses: actions/checkout@v4
@@ -107,4 +123,24 @@ jobs:
         run: |
           cmake -B libcxx-build -GNinja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_RUNTIMES="libcxxabi;libcxx" -DLLVM_ENABLE_SPHINX=ON ./runtimes
           TZ=UTC ninja -C libcxx-build docs-libcxx-html
+      - name: Build libc docs
+        if: steps.docs-changed-subprojects.outputs.libc_any_changed == 'true'
+        run: |
+          cmake -B libc-build -GNinja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_RUNTIMES="libc" -DLLVM_ENABLE_SPHINX=ON ./runtimes
+          TZ=UTC ninja -C libc-build docs-libc-html
+      - name: Build LLD docs
+        if: steps.docs-changed-subprojects.outputs.lld_any_changed == 'true'
+        run: |
+          cmake -B lld-build -GNinja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="lld" -DLLVM_ENABLE_SPHINX=ON ./llvm
+          TZ=UTC ninja -C lld-build docs-lld-html
+      - name: Build OpenMP docs
+        if: steps.docs-changed-subprojects.outputs.openmp_any_changed == 'true'
+        run: |
+          cmake -B openmp-build -GNinja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="clang;openmp" -DLLVM_ENABLE_SPHINX=ON ./llvm
+          TZ=UTC ninja -C openmp-build docs-openmp-html
+      - name: Build Polly docs
+        if: steps.docs-changed-subprojects.outputs.polly_any_changed == 'true'
+        run: |
+          cmake -B polly-build -GNinja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="polly" -DLLVM_ENABLE_SPHINX=ON ./llvm
+          TZ=UTC ninja -C polly-build docs-polly-html docs-polly-man
 
