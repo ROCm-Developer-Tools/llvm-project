@@ -2122,12 +2122,7 @@ genProcedureRef(CallContext &callContext) {
   mlir::Location loc = callContext.loc;
   if (auto *intrinsic = callContext.procRef.proc().GetSpecificIntrinsic())
     return genIntrinsicRef(intrinsic, callContext);
-  // If it is an intrinsic module procedure reference - then treat as
-  // intrinsic unless it is bind(c) (since implementation is external from
-  // module).
-  if (Fortran::lower::isIntrinsicModuleProcRef(callContext.procRef) &&
-      !Fortran::semantics::IsBindCProcedure(
-          *callContext.procRef.proc().GetSymbol()))
+  if (Fortran::lower::isIntrinsicModuleProcRef(callContext.procRef))
     return genIntrinsicRef(nullptr, callContext);
 
   if (callContext.isStatementFunctionCall())
@@ -2232,7 +2227,8 @@ bool Fortran::lower::isIntrinsicModuleProcRef(
     return false;
   const Fortran::semantics::Symbol *module =
       symbol->GetUltimate().owner().GetSymbol();
-  return module && module->attrs().test(Fortran::semantics::Attr::INTRINSIC);
+  return module && module->attrs().test(Fortran::semantics::Attr::INTRINSIC) &&
+         module->name().ToString().find("omp_lib") == std::string::npos;
 }
 
 std::optional<hlfir::EntityWithAttributes> Fortran::lower::convertCallToHLFIR(
