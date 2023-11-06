@@ -593,6 +593,11 @@ TEST_F(OpenMPIRBuilderTest, DbgLoc) {
 
 TEST_F(OpenMPIRBuilderTest, ParallelSimpleGPU) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
+  std::string oldDLStr = M->getDataLayoutStr();
+  M->setDataLayout(
+      "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:"
+      "256:256:32-p8:128:128-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:"
+      "256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8");
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = true;
   OMPBuilder.initialize();
@@ -602,8 +607,6 @@ TEST_F(OpenMPIRBuilderTest, ParallelSimpleGPU) {
   Builder.CreateBr(EnterBB);
   Builder.SetInsertPoint(EnterBB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
-  Loc = OMPBuilder.createTargetInit(Loc, true);
-  OMPBuilder.M.print(errs(), nullptr);
 
   AllocaInst *PrivAI = nullptr;
 
@@ -665,11 +668,9 @@ TEST_F(OpenMPIRBuilderTest, ParallelSimpleGPU) {
   EXPECT_EQ(NumFinalizationPoints, 1U);
 
   Builder.restoreIP(AfterIP);
-  OMPBuilder.createTargetDeinit(Builder);
   Builder.CreateRetVoid();
 
   OMPBuilder.finalize();
-  OMPBuilder.M.print(llvm::errs(), nullptr);
   Function *OutlinedFn = PrivAI->getFunction();
   EXPECT_FALSE(verifyModule(*M, &errs()));
   EXPECT_NE(OutlinedFn, F);
@@ -679,7 +680,13 @@ TEST_F(OpenMPIRBuilderTest, ParallelSimpleGPU) {
 
   EXPECT_TRUE(OutlinedFn->hasInternalLinkage());
   EXPECT_EQ(OutlinedFn->arg_size(), 3U);
-
+  // Make sure that arguments are pointers in 0 address address space
+  EXPECT_EQ(OutlinedFn->getArg(0)->getType(),
+            PointerType::get(M->getContext(), 0));
+  EXPECT_EQ(OutlinedFn->getArg(1)->getType(),
+            PointerType::get(M->getContext(), 0));
+  EXPECT_EQ(OutlinedFn->getArg(2)->getType(),
+            PointerType::get(M->getContext(), 0));
   EXPECT_EQ(&OutlinedFn->getEntryBlock(), PrivAI->getParent());
   EXPECT_EQ(OutlinedFn->getNumUses(), 1U);
   User *Usr = OutlinedFn->user_back();
@@ -690,8 +697,10 @@ TEST_F(OpenMPIRBuilderTest, ParallelSimpleGPU) {
   EXPECT_EQ(Parallel51CI->getCalledFunction()->getName(), "__kmpc_parallel_51");
   EXPECT_EQ(Parallel51CI->arg_size(), 9U);
   EXPECT_EQ(Parallel51CI->getArgOperand(5), OutlinedFn);
-  EXPECT_TRUE(isa<GlobalVariable>(Parallel51CI->getArgOperand(0)));
+  EXPECT_TRUE(
+      isa<GlobalVariable>(Parallel51CI->getArgOperand(0)->stripPointerCasts()));
   EXPECT_EQ(Parallel51CI, Usr);
+  M->setDataLayout(oldDLStr);
 }
 
 TEST_F(OpenMPIRBuilderTest, ParallelSimple) {
@@ -4190,6 +4199,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeams) {
 TEST_F(OpenMPIRBuilderTest, CreateTeamsWithThreadLimit) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4240,6 +4250,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithThreadLimit) {
 TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsUpper) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4291,6 +4302,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsUpper) {
 TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsBoth) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4345,6 +4357,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsBoth) {
 TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsAndThreadLimit) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4404,6 +4417,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsAndThreadLimit) {
 TEST_F(OpenMPIRBuilderTest, CreateTeamsWithIfCondition) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4462,6 +4476,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithIfCondition) {
 TEST_F(OpenMPIRBuilderTest, CreateTeamsWithIfConditionAndNumTeams) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
+  OMPBuilder.Config.IsTargetDevice = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -5841,10 +5856,11 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
   EXPECT_NE(F, OutlinedFn);
 
   EXPECT_TRUE(OutlinedFn->hasWeakODRLinkage());
-  EXPECT_EQ(OutlinedFn->arg_size(), 2U);
+  // Account for the "implicit" first argument.
   EXPECT_EQ(OutlinedFn->getName(), "__omp_offloading_1_2_parent_l3");
-  EXPECT_TRUE(OutlinedFn->getArg(0)->getType()->isPointerTy());
+  EXPECT_EQ(OutlinedFn->arg_size(), 3U);
   EXPECT_TRUE(OutlinedFn->getArg(1)->getType()->isPointerTy());
+  EXPECT_TRUE(OutlinedFn->getArg(2)->getType()->isPointerTy());
 
   // Check entry block
   auto &EntryBlock = OutlinedFn->getEntryBlock();
@@ -5862,7 +5878,7 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
   auto *InitCall = dyn_cast<CallInst>(Store2->getNextNode());
   EXPECT_NE(InitCall, nullptr);
   EXPECT_EQ(InitCall->getCalledFunction()->getName(), "__kmpc_target_init");
-  EXPECT_EQ(InitCall->arg_size(), 1U);
+  EXPECT_EQ(InitCall->arg_size(), 2U);
   EXPECT_TRUE(isa<GlobalVariable>(InitCall->getArgOperand(0)));
   auto *KernelEnvGV = cast<GlobalVariable>(InitCall->getArgOperand(0));
   EXPECT_TRUE(isa<ConstantStruct>(KernelEnvGV->getInitializer()));

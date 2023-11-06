@@ -1108,14 +1108,16 @@ void OpenMPIRBuilder::emitCancelationCheckImpl(Value *CancelFlag,
   Builder.SetInsertPoint(NonCancellationBlock, NonCancellationBlock->begin());
 }
 
-static void targetParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
-                                   Function &OutlinedFn, Function *OuterFn,
-                                   Value *Ident, Value *IfCondition,
-                                   Value *NumThreads, Instruction *PrivTID,
-                                   AllocaInst *PrivTIDAddr, Value *ThreadID,
-                                   SmallVector<Instruction *, 4> ToBeDeleted) {
+// Callback used to create OpenMP runtime calls to support
+// omp parallel clause for the device.
+// We need to use this callback to replace call to the OutlinedFn in OuterFn
+// by the call to the OpenMP DeviceRTL runtime function (kmpc_parallel_51)
+static void targetParallelCallback(
+    OpenMPIRBuilder *OMPIRBuilder, Function &OutlinedFn, Function *OuterFn,
+    BasicBlock *OuterAllocaBB, Value *Ident, Value *IfCondition,
+    Value *NumThreads, Instruction *PrivTID, AllocaInst *PrivTIDAddr,
+    Value *ThreadID, const SmallVector<Instruction *, 4> &ToBeDeleted) {
   // Add some known attributes.
-  Module &M = OMPIRBuilder->M;
   IRBuilder<> &Builder = OMPIRBuilder->Builder;
   OutlinedFn.addParamAttr(0, Attribute::NoAlias);
   OutlinedFn.addParamAttr(1, Attribute::NoAlias);
@@ -1130,46 +1132,51 @@ static void targetParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
   CallInst *CI = cast<CallInst>(OutlinedFn.user_back());
   assert(CI && "Expected call instruction to outlined function");
   CI->getParent()->setName("omp_parallel");
-  // Replace direct call to the outlined function by the call to
-  // __kmpc_parallel_51
   Builder.SetInsertPoint(CI);
+  Type *PtrTy = OMPIRBuilder->VoidPtr;
+  Value *NullPtrValue = Constant::getNullValue(PtrTy);
 
-  // Build call __kmpc_parallel_51
-  auto PtrTy = Type::getInt8PtrTy(M.getContext());
-  Value *Void = ConstantPointerNull::get(PtrTy);
-  // Add alloca for kernel args. Put this instruction at the beginning
-  // of the function.
+  // Add alloca for kernel args
+  OpenMPIRBuilder ::InsertPointTy CurrentIP = Builder.saveIP();
+  Builder.SetInsertPoint(OuterAllocaBB, OuterAllocaBB->getFirstInsertionPt());
   AllocaInst *ArgsAlloca =
       Builder.CreateAlloca(ArrayType::get(PtrTy, NumCapturedVars));
-  Value *Args =
-      Builder.CreatePointerCast(ArgsAlloca, Type::getInt8PtrTy(M.getContext()));
+  Value *Args = ArgsAlloca;
+  // Add address space cast if array for storing arguments is not allocated
+  // in address space 0
+  if (ArgsAlloca->getAddressSpace())
+    Args = Builder.CreatePointerCast(ArgsAlloca, PtrTy);
+  Builder.restoreIP(CurrentIP);
+
   // Store captured vars which are used by kmpc_parallel_51
-  if (NumCapturedVars) {
-    for (unsigned Idx = 0; Idx < NumCapturedVars; Idx++) {
-      Value *V = *(CI->arg_begin() + 2 + Idx);
-      Value *StoreAddress = Builder.CreateConstInBoundsGEP2_64(
-          ArrayType::get(PtrTy, NumCapturedVars), Args, 0, Idx);
-      Builder.CreateStore(V, StoreAddress);
-    }
+  for (unsigned Idx = 0; Idx < NumCapturedVars; Idx++) {
+    Value *V = *(CI->arg_begin() + 2 + Idx);
+    Value *StoreAddress = Builder.CreateConstInBoundsGEP2_64(
+        ArrayType::get(PtrTy, NumCapturedVars), Args, 0, Idx);
+    Builder.CreateStore(V, StoreAddress);
   }
-  Value *Cond = IfCondition ? Builder.CreateSExtOrTrunc(
-                                  IfCondition, Type::getInt32Ty(M.getContext()))
-                            : Builder.getInt32(1);
+
+  Value *Cond =
+      IfCondition ? Builder.CreateSExtOrTrunc(IfCondition, OMPIRBuilder->Int32)
+                  : Builder.getInt32(1);
+
+  // Build kmpc_parallel_51 call
   Value *Parallel51CallArgs[] = {
       /* identifier*/ Ident,
       /* global thread num*/ ThreadID,
-      /* if expression */ Cond, NumThreads ? NumThreads : Builder.getInt32(-1),
+      /* if expression */ Cond,
+      /* number of threads */ NumThreads ? NumThreads : Builder.getInt32(-1),
       /* Proc bind */ Builder.getInt32(-1),
       /* outlined function */
-      Builder.CreateBitCast(&OutlinedFn, OMPIRBuilder->ParallelTaskPtr), Void,
-      Args, Builder.getInt64(NumCapturedVars)};
+      Builder.CreateBitCast(&OutlinedFn, OMPIRBuilder->ParallelTaskPtr),
+      /* wrapper function */ NullPtrValue,
+      /* arguments of the outlined funciton*/ Args,
+      /* number of arguments */ Builder.getInt64(NumCapturedVars)};
 
-  SmallVector<Value *, 16> RealArgs;
-  RealArgs.append(std::begin(Parallel51CallArgs), std::end(Parallel51CallArgs));
   FunctionCallee RTLFn =
       OMPIRBuilder->getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_parallel_51);
 
-  Builder.CreateCall(RTLFn, RealArgs);
+  Builder.CreateCall(RTLFn, Parallel51CallArgs);
 
   LLVM_DEBUG(dbgs() << "With kmpc_parallel_51 placed: "
                     << *Builder.GetInsertBlock()->getParent() << "\n");
@@ -1180,18 +1187,23 @@ static void targetParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
   Builder.CreateStore(Builder.CreateLoad(OMPIRBuilder->Int32, OutlinedAI),
                       PrivTIDAddr);
 
-  ToBeDeleted.insert(ToBeDeleted.begin(), CI);
+  // Remove redundant call to the outlined function.
+  CI->eraseFromParent();
 
   for (Instruction *I : ToBeDeleted) {
     I->eraseFromParent();
   }
 }
-static void hostParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
-                                 Function &OutlinedFn, Function *OuterFn,
-                                 Value *Ident, Value *IfCondition,
-                                 Instruction *PrivTID, AllocaInst *PrivTIDAddr,
-                                 SmallVector<Instruction *, 4> ToBeDeleted) {
-  Module &M = OMPIRBuilder->M;
+
+// Callback used to create OpenMP runtime calls to support
+// omp parallel clause for the host.
+// We need to use this callback to replace call to the OutlinedFn in OuterFn
+// by the call to the OpenMP host runtime function ( __kmpc_fork_call[_if])
+static void
+hostParallelCallback(OpenMPIRBuilder *OMPIRBuilder, Function &OutlinedFn,
+                     Function *OuterFn, Value *Ident, Value *IfCondition,
+                     Instruction *PrivTID, AllocaInst *PrivTIDAddr,
+                     const SmallVector<Instruction *, 4> &ToBeDeleted) {
   IRBuilder<> &Builder = OMPIRBuilder->Builder;
   FunctionCallee RTLFn;
   if (IfCondition) {
@@ -1201,20 +1213,19 @@ static void hostParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
     RTLFn =
         OMPIRBuilder->getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_fork_call);
   }
-  if (auto *F = dyn_cast<llvm::Function>(RTLFn.getCallee())) {
-    if (!F->hasMetadata(llvm::LLVMContext::MD_callback)) {
-      llvm::LLVMContext &Ctx = F->getContext();
+  if (auto *F = dyn_cast<Function>(RTLFn.getCallee())) {
+    if (!F->hasMetadata(LLVMContext::MD_callback)) {
+      LLVMContext &Ctx = F->getContext();
       MDBuilder MDB(Ctx);
       // Annotate the callback behavior of the __kmpc_fork_call:
       //  - The callback callee is argument number 2 (microtask).
       //  - The first two arguments of the callback callee are unknown (-1).
       //  - All variadic arguments to the __kmpc_fork_call are passed to the
       //    callback callee.
-      F->addMetadata(
-          llvm::LLVMContext::MD_callback,
-          *llvm::MDNode::get(
-              Ctx, {MDB.createCallbackEncoding(2, {-1, -1},
-                                               /* VarArgsArePassed */ true)}));
+      F->addMetadata(LLVMContext::MD_callback,
+                     *MDNode::get(Ctx, {MDB.createCallbackEncoding(
+                                           2, {-1, -1},
+                                           /* VarArgsArePassed */ true)}));
     }
   }
   // Add some known attributes.
@@ -1238,18 +1249,17 @@ static void hostParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
   SmallVector<Value *, 16> RealArgs;
   RealArgs.append(std::begin(ForkCallArgs), std::end(ForkCallArgs));
   if (IfCondition) {
-    Value *Cond = Builder.CreateSExtOrTrunc(IfCondition,
-                                            Type::getInt32Ty(M.getContext()));
+    Value *Cond = Builder.CreateSExtOrTrunc(IfCondition, OMPIRBuilder->Int32);
     RealArgs.push_back(Cond);
   }
   RealArgs.append(CI->arg_begin() + /* tid & bound tid */ 2, CI->arg_end());
 
   // __kmpc_fork_call_if always expects a void ptr as the last argument
   // If there are no arguments, pass a null pointer.
-  auto PtrTy = Type::getInt8PtrTy(M.getContext());
+  auto PtrTy = OMPIRBuilder->VoidPtr;
   if (IfCondition && NumCapturedVars == 0) {
-    Value *Void = ConstantPointerNull::get(PtrTy);
-    RealArgs.push_back(Void);
+    Value *NullPtrValue = Constant::getNullValue(PtrTy);
+    RealArgs.push_back(NullPtrValue);
   }
   if (IfCondition && RealArgs.back()->getType() != PtrTy)
     RealArgs.back() = Builder.CreateBitCast(RealArgs.back(), PtrTy);
@@ -1265,7 +1275,8 @@ static void hostParallelCallback(OpenMPIRBuilder *OMPIRBuilder,
   Builder.CreateStore(Builder.CreateLoad(OMPIRBuilder->Int32, OutlinedAI),
                       PrivTIDAddr);
 
-  ToBeDeleted.insert(ToBeDeleted.begin(), CI);
+  // Remove redundant call to the outlined function.
+  CI->eraseFromParent();
 
   for (Instruction *I : ToBeDeleted) {
     I->eraseFromParent();
@@ -1328,23 +1339,19 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(
   AllocaInst *TIDAddrAlloca = Builder.CreateAlloca(Int32, nullptr, "tid.addr");
   AllocaInst *ZeroAddrAlloca =
       Builder.CreateAlloca(Int32, nullptr, "zero.addr");
-  Instruction *TIDAddr = nullptr;
-  Instruction *ZeroAddr = nullptr;
+  Instruction *TIDAddr = TIDAddrAlloca;
+  Instruction *ZeroAddr = ZeroAddrAlloca;
   if (ArgsInZeroAddressSpace && M.getDataLayout().getAllocaAddrSpace() != 0) {
-    // Add additional casts to enforce pointers in zero address spac
-    TIDAddr = new AddrSpaceCastInst(TIDAddrAlloca,
-                                    TIDAddrAlloca->getType()->getPointerTo(),
-                                    "tid.addr.ascast");
+    // Add additional casts to enforce pointers in zero address space
+    TIDAddr = new AddrSpaceCastInst(
+        TIDAddrAlloca, PointerType ::get(M.getContext(), 0), "tid.addr.ascast");
     TIDAddr->insertAfter(TIDAddrAlloca);
     ToBeDeleted.push_back(TIDAddr);
     ZeroAddr = new AddrSpaceCastInst(ZeroAddrAlloca,
-                                     ZeroAddrAlloca->getType()->getPointerTo(),
+                                     PointerType ::get(M.getContext(), 0),
                                      "zero.addr.ascast");
     ZeroAddr->insertAfter(ZeroAddrAlloca);
     ToBeDeleted.push_back(ZeroAddr);
-  } else {
-    TIDAddr = TIDAddrAlloca;
-    ZeroAddr = ZeroAddrAlloca;
   }
 
   // We only need TIDAddr and ZeroAddr for modeling purposes to get the
@@ -1422,16 +1429,18 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(
   OutlineInfo OI;
   if (Config.isTargetDevice()) {
     // Generate OpenMP target specific runtime call
-    OI.PostOutlineCB = [=](Function &OutlinedFn) {
-      targetParallelCallback(this, OutlinedFn, OuterFn, Ident, IfCondition,
-                             NumThreads, PrivTID, PrivTIDAddr, ThreadID,
-                             ToBeDeleted);
+    OI.PostOutlineCB = [=, ToBeDeletedVec =
+                               std::move(ToBeDeleted)](Function &OutlinedFn) {
+      targetParallelCallback(this, OutlinedFn, OuterFn, OuterAllocaBlock, Ident,
+                             IfCondition, NumThreads, PrivTID, PrivTIDAddr,
+                             ThreadID, ToBeDeletedVec);
     };
   } else {
     // Generate OpenMP host runtime call
-    OI.PostOutlineCB = [=](Function &OutlinedFn) {
+    OI.PostOutlineCB = [=, ToBeDeletedVec =
+                               std::move(ToBeDeleted)](Function &OutlinedFn) {
       hostParallelCallback(this, OutlinedFn, OuterFn, Ident, IfCondition,
-                           PrivTID, PrivTIDAddr, ToBeDeleted);
+                           PrivTID, PrivTIDAddr, ToBeDeletedVec);
     };
   }
 
@@ -4450,6 +4459,7 @@ OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
   Constant *MaxThreads = ConstantInt::getSigned(Int32, MaxThreadsVal);
   Constant *MinTeams = ConstantInt::getSigned(Int32, MinTeamsVal);
   Constant *MaxTeams = ConstantInt::getSigned(Int32, MaxTeamsVal);
+  Constant *ReductionBufferSize = ConstantInt::getSigned(Int32, 0);
 
   // We need to strip the debug prefix to get the correct kernel name.
   StringRef KernelName = Kernel->getName();
@@ -4486,6 +4496,7 @@ OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
                                     MaxThreads,
                                     MinTeams,
                                     MaxTeams,
+                                    ReductionBufferSize,
                                 });
   Constant *KernelEnvironmentInitializer = ConstantStruct::get(
       KernelEnvironment, {
@@ -4506,7 +4517,9 @@ OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
           ? KernelEnvironmentGV
           : ConstantExpr::getAddrSpaceCast(KernelEnvironmentGV,
                                            KernelEnvironmentPtr);
-  CallInst *ThreadKind = Builder.CreateCall(Fn, {KernelEnvironment});
+  Value *KernelLaunchEnvironment = Kernel->getArg(0);
+  CallInst *ThreadKind =
+      Builder.CreateCall(Fn, {KernelEnvironment, KernelLaunchEnvironment});
 
   Value *ExecUserCode = Builder.CreateICmpEQ(
       ThreadKind, ConstantInt::get(ThreadKind->getType(), -1),
@@ -4539,7 +4552,8 @@ OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
   return InsertPointTy(UserCodeEntryBB, UserCodeEntryBB->getFirstInsertionPt());
 }
 
-void OpenMPIRBuilder::createTargetDeinit(const LocationDescription &Loc) {
+void OpenMPIRBuilder::createTargetDeinit(const LocationDescription &Loc,
+                                         int32_t TeamsReductionBufferSize) {
   if (!updateToLocation(Loc))
     return;
 
@@ -4547,6 +4561,24 @@ void OpenMPIRBuilder::createTargetDeinit(const LocationDescription &Loc) {
       omp::RuntimeFunction::OMPRTL___kmpc_target_deinit);
 
   Builder.CreateCall(Fn, {});
+
+  if (!TeamsReductionBufferSize)
+    return;
+
+  Function *Kernel = Builder.GetInsertBlock()->getParent();
+  // We need to strip the debug prefix to get the correct kernel name.
+  StringRef KernelName = Kernel->getName();
+  const std::string DebugPrefix = "_debug__";
+  if (KernelName.ends_with(DebugPrefix))
+    KernelName = KernelName.drop_back(DebugPrefix.length());
+  auto *KernelEnvironmentGV =
+      M.getNamedGlobal((KernelName + "_kernel_environment").str());
+  assert(KernelEnvironmentGV && "Expected kernel environment global\n");
+  auto *KernelEnvironmentInitializer = KernelEnvironmentGV->getInitializer();
+  auto *NewInitializer = ConstantFoldInsertValueInstruction(
+      KernelEnvironmentInitializer,
+      ConstantInt::get(Int32, TeamsReductionBufferSize), {0, 7});
+  KernelEnvironmentGV->setInitializer(NewInitializer);
 }
 
 static MDNode *getNVPTXMDNode(Function &Kernel, StringRef Name) {
@@ -5031,6 +5063,11 @@ static Function *createOutlinedFunction(
     OpenMPIRBuilder::TargetGenArgAccessorsCallbackTy &ArgAccessorFuncCB) {
   SmallVector<Type *> ParameterTypes;
   if (OMPBuilder.Config.isTargetDevice()) {
+    // Add the "implicit" runtime argument we use to provide launch specific
+    // information for target devices.
+    auto *Int8PtrTy = Type::getInt8PtrTy(Builder.getContext());
+    ParameterTypes.push_back(Int8PtrTy);
+
     // All parameters to target devices are passed as pointers
     // or i64. This assumes 64-bit address spaces/pointers.
     for (auto &Arg : Inputs)
@@ -5080,8 +5117,14 @@ static Function *createOutlinedFunction(
 
   Builder.SetInsertPoint(UserCodeEntryBB->getFirstNonPHIOrDbg());
 
+  // Skip the artificial dyn_ptr on the device.
+  const auto &ArgRange =
+      OMPBuilder.Config.isTargetDevice()
+          ? make_range(Func->arg_begin() + 1, Func->arg_end())
+          : Func->args();
+
   // Rewrite uses of input valus to parameters.
-  for (auto InArg : zip(Inputs, Func->args())) {
+  for (auto InArg : zip(Inputs, ArgRange)) {
     Value *Input = std::get<0>(InArg);
     Argument &Arg = std::get<1>(InArg);
     Value *InputCopy = nullptr;

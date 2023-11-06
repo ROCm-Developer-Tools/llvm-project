@@ -22,6 +22,7 @@
 #include "mlir/Interfaces/FoldInterfaces.h"
 
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -679,10 +680,7 @@ static LogicalResult verifySynchronizationHint(Operation *op, uint64_t hint) {
 // Helper function to get bitwise AND of `value` and 'flag'
 uint64_t mapTypeToBitFlag(uint64_t value,
                           llvm::omp::OpenMPOffloadMappingFlags flag) {
-  return value &
-         static_cast<
-             std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
-             flag);
+  return value & llvm::to_underlying(flag);
 }
 
 /// Parses a map_entries map type from a string format back into its numeric
@@ -731,8 +729,7 @@ static ParseResult parseMapClause(OpAsmParser &parser, IntegerAttr &mapType) {
 
   mapType = parser.getBuilder().getIntegerAttr(
       parser.getBuilder().getIntegerType(64, /*isSigned=*/false),
-      static_cast<std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
-          mapTypeBits));
+      llvm::to_underlying(mapTypeBits));
 
   return success();
 }
