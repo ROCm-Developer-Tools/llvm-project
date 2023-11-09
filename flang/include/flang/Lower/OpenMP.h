@@ -30,6 +30,7 @@ namespace Fortran {
 namespace parser {
 struct OpenMPConstruct;
 struct OpenMPBlockConstruct;
+struct OpenMPLoopConstruct;
 struct OpenMPDeclarativeConstruct;
 struct OmpEndLoopDirective;
 struct OmpClauseList;
@@ -67,6 +68,12 @@ void genImplicitMapsForTarget(
     Fortran::lower::pft::Evaluation &eval,
     const Fortran::parser::OpenMPBlockConstruct &ompBlock);
 
+void genImplicitMapsForTarget(
+    Fortran::lower::AbstractConverter &converter,
+    Fortran::semantics::SemanticsContext &semanticsContext,
+    Fortran::lower::pft::Evaluation &eval,
+    const Fortran::parser::OpenMPLoopConstruct &ompLoop);
+    
 mlir::Operation *findReductionChain(mlir::Value, mlir::Value * = nullptr);
 fir::ConvertOp getConvertFromReductionOp(mlir::Operation *, mlir::Value);
 void updateReduction(mlir::Operation *, fir::FirOpBuilder &, mlir::Value,

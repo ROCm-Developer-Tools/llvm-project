@@ -2432,6 +2432,11 @@ private:
                                *ompBlock);
     }
 
+    if (ompLoop) {
+      genImplicitMapsForTarget(*this, bridge.getSemanticsContext(), *curEval,
+                               *ompLoop);
+    }
+
     localSymbols.popScope();
     builder->restoreInsertionPoint(insertPt);
 
