@@ -1,7 +1,7 @@
 ! RUN: %flang_fc1 -fopenmp -emit-fir %s -o - | FileCheck %s
 
 ! Check that this testcase is lowered to FIR successfully.
-! CHECK: arith.divui
+! CHECK: omp.target trip_count
 
 module Test
     use, intrinsic :: ISO_Fortran_env, only: REAL64,INT64
