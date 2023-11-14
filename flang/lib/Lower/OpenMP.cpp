@@ -2177,9 +2177,7 @@ calculateTripCount(Fortran::lower::AbstractConverter &converter,
   // Start with signless i32 by default.
   auto tripCount = b.createIntegerConstant(loc, b.getI32Type(), 1);
 
-  for (auto it : llvm::zip(lbs, ubs, steps)) {
-    auto [origLb, origUb, origStep] = it;
-
+  for (auto [origLb, origUb, origStep] : llvm::zip(lbs, ubs, steps)) {
     auto tmpS0 = b.createIntegerConstant(loc, origStep.getType(), 0);
     auto [step, step0] = unifyToSignless(b, origStep, tmpS0);
     auto reverseCond = b.create<CmpIOp>(loc, CmpIPredicate::slt, step, step0);
