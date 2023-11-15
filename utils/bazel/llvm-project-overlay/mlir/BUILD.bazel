@@ -925,6 +925,7 @@ cc_library(
         ":CAPIIR",
         ":CAPIInterfaces",
         ":MLIRBindingsPythonHeadersAndDeps",
+        ":Support",
         "//llvm:Support",
         "@pybind11",
         "@python_runtime//:headers",
@@ -1835,16 +1836,29 @@ td_library(
 
 gentbl_cc_library(
     name = "ArmSMETransformsPassIncGen",
-    tbl_outs = [(
-        [
-            "-gen-pass-decls",
-            "-name=ArmSME",
-        ],
-        "include/mlir/Dialect/ArmSME/Transforms/Passes.h.inc",
-    )],
+    tbl_outs = [
+        (
+            [
+                "-gen-pass-decls",
+                "-name=ArmSME",
+            ],
+            "include/mlir/Dialect/ArmSME/Transforms/Passes.h.inc",
+        ),
+        (
+            ["-gen-enum-decls"],
+            "include/mlir/Dialect/ArmSME/Transforms/PassesEnums.h.inc",
+        ),
+        (
+            ["-gen-enum-defs"],
+            "include/mlir/Dialect/ArmSME/Transforms/PassesEnums.cpp.inc",
+        ),
+    ],
     tblgen = ":mlir-tblgen",
     td_file = "include/mlir/Dialect/ArmSME/Transforms/Passes.td",
-    deps = [":PassBaseTdFiles"],
+    deps = [
+        ":OpBaseTdFiles",
+        ":PassBaseTdFiles",
+    ],
 )
 
 gentbl_cc_library(
@@ -3817,6 +3831,7 @@ cc_library(
         ":TensorToSPIRV",
         ":TosaToArith",
         ":TosaToLinalg",
+        ":TosaToMLProgram",
         ":TosaToSCF",
         ":TosaToTensor",
         ":UBToLLVM",
@@ -5256,6 +5271,7 @@ cc_library(
         ":Support",
         ":ToLLVMIRTranslation",
         ":Transforms",
+        ":VectorDialect",
         "//llvm:Core",
         "//llvm:MC",
         "//llvm:Support",
@@ -5318,6 +5334,7 @@ cc_library(
         ":GPUDialect",
         ":GPUPassIncGen",
         ":Pass",
+        ":SPIRVDialect",
         ":Support",
         "//llvm:Support",
     ],
@@ -6529,12 +6546,12 @@ cc_library(
 cc_library(
     name = "SPIRVTarget",
     srcs = ["lib/Target/SPIRV/Target.cpp"],
-    hdrs = glob(["include/mlir/Target/SPIRV/*.h"]),
+    hdrs = ["include/mlir/Target/SPIRV/Target.h"],
     includes = ["include"],
     deps = [
         ":GPUDialect",
         ":SPIRVDialect",
-        ":Support",
+        ":SPIRVSerialization",
     ],
 )
 
@@ -11208,6 +11225,30 @@ cc_library(
         ":TosaDialect",
         ":Transforms",
         "//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "TosaToMLProgram",
+    srcs = glob([
+        "lib/Conversion/TosaToMLProgram/*.cpp",
+        "lib/Conversion/TosaToMLProgram/*.h",
+    ]),
+    hdrs = glob([
+        "include/mlir/Conversion/TosaToMLProgram/*.h",
+    ]),
+    includes = [
+        "include",
+        "lib/Conversion/TosaToMLProgram",
+    ],
+    deps = [
+        ":ConversionPassIncGen",
+        ":FuncDialect",
+        ":IR",
+        ":MLProgramDialect",
+        ":Pass",
+        ":TosaDialect",
+        ":Transforms",
     ],
 )
 
