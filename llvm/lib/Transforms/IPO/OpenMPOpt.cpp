@@ -623,7 +623,7 @@ struct OMPInformationCache : public InformationCache {
       for (Function &F : M) {
         for (StringRef Prefix : {"__kmpc", "_ZN4ompx", "omp_"})
           if (F.hasFnAttribute(Attribute::NoInline) &&
-              F.getName().startswith(Prefix) &&
+              F.getName().starts_with(Prefix) &&
               !F.hasFnAttribute(Attribute::OptimizeNone))
             F.removeFnAttr(Attribute::NoInline);
       }
@@ -1997,7 +1997,7 @@ private:
     Function *F = I->getParent()->getParent();
     auto &ORE = OREGetter(F);
 
-    if (RemarkName.startswith("OMP"))
+    if (RemarkName.starts_with("OMP"))
       ORE.emit([&]() {
         return RemarkCB(RemarkKind(DEBUG_TYPE, RemarkName, I))
                << " [" << RemarkName << "]";
@@ -2013,7 +2013,7 @@ private:
                   RemarkCallBack &&RemarkCB) const {
     auto &ORE = OREGetter(F);
 
-    if (RemarkName.startswith("OMP"))
+    if (RemarkName.starts_with("OMP"))
       ORE.emit([&]() {
         return RemarkCB(RemarkKind(DEBUG_TYPE, RemarkName, F))
                << " [" << RemarkName << "]";

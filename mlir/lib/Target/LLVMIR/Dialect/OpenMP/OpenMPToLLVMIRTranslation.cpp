@@ -1648,10 +1648,10 @@ convertToCaptureClauseKind(
   switch (captureClasue) {
   case mlir::omp::DeclareTargetCaptureClause::to:
     return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryTo;
-    break;
   case mlir::omp::DeclareTargetCaptureClause::link:
     return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryLink;
-    break;
+  case mlir::omp::DeclareTargetCaptureClause::enter:
+    return llvm::OffloadEntriesInfoManager::OMPTargetGlobalVarEntryEnter;
   }
   llvm_unreachable("unhandled capture clause");
 }
@@ -1821,12 +1821,13 @@ void collectMapDataFromMapOperands(MapInfoData &mapData,
            "missing map info operation or incorrect map info operation type");
     if (auto mapOp = mlir::dyn_cast_if_present<mlir::omp::MapInfoOp>(
             mapValue.getDefiningOp())) {
-      mapData.OriginalValue.push_back(
-          moduleTranslation.lookupValue(mapOp.getVarPtr()));
+      mapData.OriginalValue.push_back(moduleTranslation.lookupValue(
+          mapOp.getVarPtr() ? mapOp.getVarPtr() : mapOp.getVal()));
       mapData.Pointers.push_back(mapData.OriginalValue.back());
 
       if (llvm::Value *refPtr = getRefPtrIfDeclareTarget(
-              mapOp.getVarPtr(), moduleTranslation)) { // declare target
+              mapOp.getVarPtr() ? mapOp.getVarPtr() : mapOp.getVal(),
+              moduleTranslation)) { // declare target
         mapData.IsDeclareTarget.push_back(true);
         mapData.BasePointers.push_back(refPtr);
       } else { // regular mapped variable
@@ -1834,10 +1835,14 @@ void collectMapDataFromMapOperands(MapInfoData &mapData,
         mapData.BasePointers.push_back(mapData.OriginalValue.back());
       }
 
-      mapData.Sizes.push_back(getSizeInBytes(dl, mapOp.getVarType(), mapOp,
-                                             builder, moduleTranslation));
-      mapData.BaseType.push_back(
-          moduleTranslation.convertType(mapOp.getVarType()));
+      mapData.Sizes.push_back(
+          getSizeInBytes(dl,
+                         mapOp.getVal() ? mapOp.getVal().getType()
+                                        : mapOp.getVarType().value(),
+                         mapOp, builder, moduleTranslation));
+      mapData.BaseType.push_back(moduleTranslation.convertType(
+          mapOp.getVal() ? mapOp.getVal().getType()
+                         : mapOp.getVarType().value()));
       mapData.MapClause.push_back(mapOp.getOperation());
       mapData.Types.push_back(
           llvm::omp::OpenMPOffloadMappingFlags(mapOp.getMapType().value()));
@@ -1883,6 +1888,13 @@ static void genMapInfos(llvm::IRBuilderBase &builder,
       mapFlag |= llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_PTR_AND_OBJ;
     else if (isTargetParams)
       mapFlag |= llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_TARGET_PARAM;
+
+    if (auto mapInfoOp = dyn_cast<mlir::omp::MapInfoOp>(mapData.MapClause[i]))
+      if (mapInfoOp.getMapCaptureType().value() ==
+              mlir::omp::VariableCaptureKind::ByCopy &&
+          !(mapInfoOp.getVarType().has_value() &&
+            mapInfoOp.getVarType()->isa<LLVM::LLVMPointerType>()))
+        mapFlag |= llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_LITERAL;
 
     combinedInfo.BasePointers.emplace_back(mapData.BasePointers[i]);
     combinedInfo.Pointers.emplace_back(mapData.Pointers[i]);
@@ -2367,7 +2379,11 @@ createAlteredByCaptureMap(MapInfoData &mapData,
       } break;
       case mlir::omp::VariableCaptureKind::ByCopy: {
         llvm::Type *type = mapData.BaseType[i];
-        llvm::Value *newV = builder.CreateLoad(type, mapData.Pointers[i]);
+        llvm::Value *newV;
+        if (mapData.Pointers[i]->getType()->isPointerTy())
+          newV = builder.CreateLoad(type, mapData.Pointers[i]);
+        else
+          newV = mapData.Pointers[i];
 
         if (!type->isPointerTy()) {
           auto curInsert = builder.saveIP();
@@ -2436,6 +2452,19 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   auto *ompBuilder = moduleTranslation.getOpenMPBuilder();
   auto targetOp = cast<omp::TargetOp>(opInst);
   auto &targetRegion = targetOp.getRegion();
+  DataLayout dl = DataLayout(opInst.getParentOfType<ModuleOp>());
+  SmallVector<Value> mapOperands = targetOp.getMapOperands();
+
+  // Remove mapOperands/blockArgs that have no use inside the region.
+  assert(mapOperands.size() == targetRegion.getNumArguments() &&
+         "Number of mapOperands must be same as block_arguments");
+  for (size_t i = 0; i < mapOperands.size(); i++) {
+    if (targetRegion.getArgument(i).use_empty()) {
+      targetRegion.eraseArgument(i);
+      mapOperands.erase(&mapOperands[i]);
+      i--;
+    }
+  }
 
   LogicalResult bodyGenStatus = success();
 
@@ -2443,6 +2472,16 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   auto bodyCB = [&](InsertPointTy allocaIP,
                     InsertPointTy codeGenIP) -> InsertPointTy {
     builder.restoreIP(codeGenIP);
+    unsigned argIndex = 0;
+    for (auto &mapOp : mapOperands) {
+      auto mapInfoOp =
+          mlir::dyn_cast<mlir::omp::MapInfoOp>(mapOp.getDefiningOp());
+      llvm::Value *mapOpValue = moduleTranslation.lookupValue(
+          mapInfoOp.getVarPtr() ? mapInfoOp.getVarPtr() : mapInfoOp.getVal());
+      const auto &arg = targetRegion.front().getArgument(argIndex);
+      moduleTranslation.mapValue(arg, mapOpValue);
+      argIndex++;
+    }
     llvm::BasicBlock *exitBlock = convertOmpOpRegions(
         targetRegion, "omp.target", builder, moduleTranslation, bodyGenStatus);
     builder.SetInsertPoint(exitBlock);
@@ -2480,8 +2519,6 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
 
-  DataLayout dl = DataLayout(opInst.getParentOfType<ModuleOp>());
-  llvm::SmallVector<Value> mapOperands = targetOp.getMapOperands();
   MapInfoData mapData;
   collectMapDataFromMapOperands(mapData, mapOperands, moduleTranslation, dl,
                                 builder);
@@ -2553,7 +2590,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       kernelInput.push_back(useValue);
   }
 
-  ompBuilder->CurrentTargetInfo.emplace();
+  ompBuilder->CurrentTargetInfo = llvm::OpenMPIRBuilder::TargetRegionInfo();
   builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
       ompLoc, targetOp.isTargetSPMDLoop(), allocaIP, builder.saveIP(), entryInfo,
        kernelInput, genMapInfoCB, bodyCB, argAccessorCB));
