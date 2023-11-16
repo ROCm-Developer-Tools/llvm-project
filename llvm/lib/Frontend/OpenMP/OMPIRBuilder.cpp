@@ -4425,6 +4425,31 @@ CallInst *OpenMPIRBuilder::createCachedThreadPrivate(
   return Builder.CreateCall(Fn, Args);
 }
 
+void OpenMPIRBuilder::emit__oclc_ABI_version(Module &M, int32_t CodeObjVers) {
+  StringRef Name = "__oclc_ABI_version";
+  llvm::GlobalVariable *GVorig = M.getNamedGlobal(Name);
+  if (GVorig && !llvm::GlobalVariable::isExternalLinkage(GVorig->getLinkage()))
+    return;
+
+  auto *Int32Ty = Type::getInt32Ty(M.getContext());
+  llvm::Constant *COV = llvm::ConstantInt::get(Int32Ty, CodeObjVers);
+
+  // It needs to be constant weak_odr without externally_initialized so that
+  // the load instuction can be eliminated by the IPSCCP.
+  auto *GV = new llvm::GlobalVariable(
+      M, Int32Ty, true, llvm::GlobalValue::WeakODRLinkage, COV, Name, nullptr,
+      llvm::GlobalValue::ThreadLocalMode::NotThreadLocal);
+  GV->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Local);
+  GV->setVisibility(llvm::GlobalValue::VisibilityTypes::HiddenVisibility);
+
+  // Replace any external references to this variable with the new global.
+  if (GVorig) {
+    GVorig->replaceAllUsesWith(GV);
+    GV->takeName(GVorig);
+    GVorig->eraseFromParent();
+  }
+}
+
 OpenMPIRBuilder::InsertPointTy
 OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
                                   int32_t MinThreadsVal, int32_t MaxThreadsVal,
@@ -4549,6 +4574,9 @@ OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
 
   CheckBBTI->eraseFromParent();
   UI->eraseFromParent();
+
+  if (M.getTargetTriple().rfind("amdgcn", 0) == 0)
+    emit__oclc_ABI_version(M, 400); // FIXME: get actual value from option
 
   // Continue in the "user_code" block, see diagram above and in
   // openmp/libomptarget/deviceRTLs/common/include/target.h .
