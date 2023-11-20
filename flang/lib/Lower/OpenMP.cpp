@@ -36,6 +36,19 @@ static llvm::cl::opt<bool> treatIndexAsSection(
     llvm::cl::desc("In the OpenMP data clauses treat `a(N)` as `a(N:N)`."),
     llvm::cl::init(true));
 
+#include <algorithm>
+#include <functional>
+#include <iterator>
+#include <list>
+#include <numeric>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
 using DeclareTargetCapturePair =
     std::pair<mlir::omp::DeclareTargetCaptureClause,
               Fortran::semantics::Symbol>;
@@ -2148,44 +2161,73 @@ calculateTripCount(Fortran::lower::AbstractConverter &converter,
                    llvm::ArrayRef<mlir::Value> ubs,
                    llvm::ArrayRef<mlir::Value> steps) {
   using namespace mlir::arith;
-  using mlir::Value;
   assert(lbs.size() == ubs.size() && lbs.size() == steps.size() &&
          !lbs.empty() && "Invalid bounds or step");
 
   fir::FirOpBuilder &b = converter.getFirOpBuilder();
-  mlir::Type stepType = steps.front().getType();
-  Value zeroConst = b.create<ConstantIntOp>(loc, 0, stepType);
-  Value oneConst = b.create<ConstantIntOp>(loc, 1, stepType);
 
-  Value tripCount;
+  // Get the bit width of an integer-like type.
+  auto widthOf = [](mlir::Type ty) -> unsigned {
+    if (mlir::isa<mlir::IndexType>(ty)) {
+      return mlir::IndexType::kInternalStorageBitWidth;
+    }
+    if (auto tyInt = mlir::dyn_cast<mlir::IntegerType>(ty)) {
+      return tyInt.getWidth();
+    }
+    llvm_unreachable("Unexpected type");
+  };
 
-  for (std::tuple<Value, Value, Value> it : llvm::zip(lbs, ubs, steps)) {
-    Value lb = std::get<0>(it);
-    Value ub = std::get<1>(it);
-    Value step = std::get<2>(it);
+  // For a type that is either IntegerType or IndexType, return the
+  // equivalent IntegerType. In the former case this is a no-op.
+  auto asIntTy = [&](mlir::Type ty) -> mlir::IntegerType {
+    if (ty.isIndex()) {
+      return mlir::IntegerType::get(ty.getContext(), widthOf(ty));
+    }
+    assert(ty.isIntOrIndex() && "Unexpected type");
+    return mlir::cast<mlir::IntegerType>(ty);
+  };
 
-    Value reverseCond =
-        b.create<CmpIOp>(loc, CmpIPredicate::slt, step, zeroConst);
-    Value negStep = b.create<SubIOp>(loc, zeroConst, step);
-    Value absStep = b.create<SelectOp>(loc, reverseCond, negStep, step);
-    Value start = b.create<SelectOp>(loc, reverseCond, ub, lb);
-    Value end = b.create<SelectOp>(loc, reverseCond, lb, ub);
-    Value range = b.create<SubIOp>(loc, end, start);
-    Value rangeCond = b.create<CmpIOp>(loc, CmpIPredicate::slt, end, start);
-    Value numSteps = b.create<DivUIOp>(loc, range, absStep);
-    numSteps = b.create<AddIOp>(loc, numSteps, oneConst);
+  // For two given values, establish a common signless IntegerType
+  // that can represent any value of type of x and of type of y,
+  // and return the pair of x, y converted to the new type.
+  auto unifyToSignless =
+      [&](fir::FirOpBuilder &b, mlir::Value x,
+          mlir::Value y) -> std::pair<mlir::Value, mlir::Value> {
+    auto tyX = asIntTy(x.getType()), tyY = asIntTy(y.getType());
+    unsigned width = std::max(widthOf(tyX), widthOf(tyY));
+    auto wideTy = mlir::IntegerType::get(b.getContext(), width,
+                                         mlir::IntegerType::Signless);
+    return std::make_pair(b.createConvert(loc, wideTy, x),
+                          b.createConvert(loc, wideTy, y));
+  };
 
-    Value loopTripCount =
-        b.create<SelectOp>(loc, rangeCond, zeroConst, numSteps);
-    if (tripCount)
-      tripCount = b.create<MulIOp>(loc, tripCount, loopTripCount);
-    else
-      tripCount = loopTripCount;
+  // Start with signless i32 by default.
+  auto tripCount = b.createIntegerConstant(loc, b.getI32Type(), 1);
+
+  for (auto [origLb, origUb, origStep] : llvm::zip(lbs, ubs, steps)) {
+    auto tmpS0 = b.createIntegerConstant(loc, origStep.getType(), 0);
+    auto [step, step0] = unifyToSignless(b, origStep, tmpS0);
+    auto reverseCond = b.create<CmpIOp>(loc, CmpIPredicate::slt, step, step0);
+    auto negStep = b.create<SubIOp>(loc, step0, step);
+    mlir::Value absStep = b.create<SelectOp>(loc, reverseCond, negStep, step);
+
+    auto [lb, ub] = unifyToSignless(b, origLb, origUb);
+    auto start = b.create<SelectOp>(loc, reverseCond, ub, lb);
+    auto end = b.create<SelectOp>(loc, reverseCond, lb, ub);
+
+    mlir::Value range = b.create<SubIOp>(loc, end, start);
+    auto rangeCond = b.create<CmpIOp>(loc, CmpIPredicate::slt, end, start);
+    std::tie(range, absStep) = unifyToSignless(b, range, absStep);
+    // numSteps = (range /u absStep) + 1
+    auto numSteps =
+        b.create<AddIOp>(loc, b.create<DivUIOp>(loc, range, absStep),
+                         b.createIntegerConstant(loc, range.getType(), 1));
+
+    auto trip0 = b.createIntegerConstant(loc, numSteps.getType(), 0);
+    auto loopTripCount = b.create<SelectOp>(loc, rangeCond, trip0, numSteps);
+    auto [totalTC, thisTC] = unifyToSignless(b, tripCount, loopTripCount);
+    tripCount = b.create<MulIOp>(loc, totalTC, thisTC);
   }
-
-  mlir::Type tripCountType = b.getIntegerType(64);
-  if (tripCount.getType() != tripCountType)
-    tripCount = b.create<ExtUIOp>(loc, tripCountType, tripCount);
 
   return tripCount;
 }
