@@ -3797,6 +3797,15 @@ public:
     if (mlir::failed(runPipeline(mathConvertionPM, mod)))
       return signalPassFailure();
 
+    // HLFIR/FIR specific processing pass required for
+    // OpenMP dialect operations. Allows access to FIR
+    // machinary not accessible in the OpenMP dialect
+    // rewriters.
+    mlir::OpPassManager openmpConversionPM("builtin.module");
+    openmpConversionPM.addPass(fir::createOpenMPFIRConversionsToLLVMPass());
+    if (mlir::failed(runPipeline(openmpConversionPM, mod)))
+      return signalPassFailure();
+
     auto *context = getModule().getContext();
     fir::LLVMTypeConverter typeConverter{getModule(),
                                          options.applyTBAA || applyTBAA,

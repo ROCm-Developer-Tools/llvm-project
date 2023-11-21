@@ -24,6 +24,7 @@ struct NameUniquer;
 #define GEN_PASS_DECL_CODEGENREWRITE
 #define GEN_PASS_DECL_TARGETREWRITEPASS
 #define GEN_PASS_DECL_BOXEDPROCEDUREPASS
+#define GEN_PASS_DECL_OPENMPFIRCONVERSIONSTOLLVM
 #include "flang/Optimizer/CodeGen/CGPasses.h.inc"
 
 /// Prerequiste pass for code gen. Perform intermediate rewrites to perform
@@ -78,6 +79,11 @@ std::unique_ptr<mlir::Pass> createLLVMDialectToLLVMPass(
 /// use function pointers and thunks.
 std::unique_ptr<mlir::Pass> createBoxedProcedurePass();
 std::unique_ptr<mlir::Pass> createBoxedProcedurePass(bool useThunks);
+
+/// Specialised conversion of OpenMP operations containing FIR to LLVM dialect,
+/// utilised in cases where the default OpenMP dialect handling does not cover
+/// all cases.
+std::unique_ptr<mlir::Pass> createOpenMPFIRConversionsToLLVMPass();
 
 // declarative passes
 #define GEN_PASS_REGISTRATION

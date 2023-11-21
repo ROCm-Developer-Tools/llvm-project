@@ -76,4 +76,13 @@ def BoxedProcedurePass : Pass<"boxed-procedure", "mlir::ModuleOp"> {
   ];
 }
 
+def OpenMPFIRConversionsToLLVM : Pass<"openmp-fir-conversions-to-llvm", "mlir::ModuleOp"> {
+  let description = [{
+    Special conversion pass for special handling of HLFIR/FIR types or operations 
+    contained within OpenMP dialect operations when converting to the LLVM-IR dialect.
+  }];
+  let constructor = "::fir::createOpenMPFIRConversionsToLLVMPass()";
+  let dependentDialects = ["mlir::LLVM::LLVMDialect, mlir::omp::OpenMPDialect"];
+}
+
 #endif // FORTRAN_OPTIMIZER_CODEGEN_FIR_PASSES

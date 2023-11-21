@@ -1735,7 +1735,7 @@ createMapInfoOp(fir::FirOpBuilder &builder, mlir::Location loc,
                 mlir::Value baseAddr, std::stringstream &name,
                 mlir::SmallVector<mlir::Value> bounds, uint64_t mapType,
                 mlir::omp::VariableCaptureKind mapCaptureType, mlir::Type retTy,
-                bool isVal = false) {
+                bool isAllocatable = false, bool isVal = false) {
   mlir::Value val, varPtr, varPtrPtr;
   mlir::TypeAttr varType;
 
@@ -1757,6 +1757,9 @@ createMapInfoOp(fir::FirOpBuilder &builder, mlir::Location loc,
       builder.getIntegerAttr(builder.getIntegerType(64, false), mapType),
       builder.getAttr<mlir::omp::VariableCaptureKindAttr>(mapCaptureType),
       builder.getStringAttr(name.str()));
+
+  op.setIsFortranAllocatable(isAllocatable);
+
   return op;
 }
 
@@ -1825,6 +1828,13 @@ bool ClauseProcessor::processMap(
               converter, firOpBuilder, semanticsContext, stmtCtx, ompObject,
               clauseLocation, asFortran, bounds, treatIndexAsSection);
 
+          // Address of the descriptor, not the de-referenced data, currently
+          // required for later lowering to LLVM-IR
+          if (Fortran::semantics::IsAllocatableOrPointer(
+                  *getOmpObjectSymbol(ompObject)))
+            baseAddr =
+                converter.getSymbolAddress(*getOmpObjectSymbol(ompObject));
+
           // Explicit map captures are captured ByRef by default,
           // optimisation passes may alter this to ByCopy or other capture
           // types to optimise
@@ -1833,7 +1843,9 @@ bool ClauseProcessor::processMap(
               static_cast<
                   std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
                   mapTypeBits),
-              mlir::omp::VariableCaptureKind::ByRef, baseAddr.getType());
+              mlir::omp::VariableCaptureKind::ByRef, baseAddr.getType(),
+              Fortran::semantics::IsAllocatableOrPointer(
+                  *getOmpObjectSymbol(ompObject)));
 
           mapOperands.push_back(mapOp);
           if (mapSymTypes)
@@ -2796,7 +2808,8 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
             static_cast<
                 std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
                 mapFlag),
-            captureKind, baseOp.getType());
+            captureKind, baseOp.getType(),
+            Fortran::semantics::IsAllocatableOrPointer(sym));
 
         mapOperands.push_back(mapOp);
         mapSymTypes.push_back(baseOp.getType());
@@ -2821,7 +2834,7 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
           static_cast<
               std::underlying_type_t<llvm::omp::OpenMPOffloadMappingFlags>>(
               llvm::omp::OpenMPOffloadMappingFlags::OMP_MAP_IMPLICIT),
-          mlir::omp::VariableCaptureKind::ByCopy, val.getType(), true);
+          mlir::omp::VariableCaptureKind::ByCopy, val.getType(), false, true);
       mapOperands.push_back(mapOp);
     }
   };

@@ -1172,7 +1172,8 @@ def MapInfoOp : OpenMP_Op<"map_info", [AttrSizedOperandSegments]> {
                        Variadic<DataBoundsType>:$bounds, /* rank-0 to rank-{n-1} */
                        OptionalAttr<UI64Attr>:$map_type,
                        OptionalAttr<VariableCaptureKindAttr>:$map_capture_type,
-                       OptionalAttr<StrAttr>:$name);
+                       OptionalAttr<StrAttr>:$name,
+                       UnitAttr:$is_fortran_allocatable);
   let results = (outs AnyType:$omp_ptr);
 
   let description = [{
@@ -1219,6 +1220,9 @@ def MapInfoOp : OpenMP_Op<"map_info", [AttrSizedOperandSegments]> {
     - 'map_capture_type': Capture type for the variable e.g. this, byref, byvalue, byvla
        this can affect how the variable is lowered.
     - `name`: Holds the name of variable as specified in user clause (including bounds).
+    -  'is_fortran_allocatable': Indicates if the var_ptr variable is a fortran allocatable 
+        type, e.g. a pointer or allocatable containing a descriptor mapping that wraps the 
+        data and contains further information on the mapped variable.
   }];
 
   let assemblyFormat = [{
