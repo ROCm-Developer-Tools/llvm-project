@@ -1945,20 +1945,52 @@ void ClauseProcessor::processTODO(mlir::Location currentLocation,
 class HostClausesInsertionGuard {
 public:
   HostClausesInsertionGuard(mlir::OpBuilder &builder) : builder(builder) {
-    if (mlir::omp::TargetOp targetOp = findParentTargetOp(builder)) {
+    targetOp = findParentTargetOp(builder);
+    if (targetOp) {
       ip = builder.saveInsertionPoint();
       builder.setInsertionPoint(targetOp);
     }
   }
 
   ~HostClausesInsertionGuard() {
-    if (ip.isSet())
+    if (ip.isSet()) {
+      fixupExtractedHostOps();
       builder.restoreInsertionPoint(ip);
+    }
   }
 
 private:
   mlir::OpBuilder &builder;
   mlir::OpBuilder::InsertPoint ip;
+  mlir::omp::TargetOp targetOp;
+
+  /// Fixup any uses of target region block arguments that we have just created
+  /// outside of the target region, and replace them by their host values.
+  void fixupExtractedHostOps() {
+    auto useOutsideTargetRegion = [](mlir::OpOperand &operand) {
+      if (mlir::Operation *owner = operand.getOwner())
+        return !owner->getParentOfType<mlir::omp::TargetOp>();
+      return false;
+    };
+
+    mlir::OperandRange map = targetOp.getMapOperands();
+    for (mlir::BlockArgument arg : targetOp.getRegion().getArguments()) {
+      mlir::Value hostVal = map[arg.getArgNumber()]
+                                .getDefiningOp<mlir::omp::MapInfoOp>()
+                                .getVarPtr();
+
+      arg.replaceUsesWithIf(hostVal, [&](mlir::OpOperand &operand) -> bool {
+        if (mlir::Operation *owner = operand.getOwner()) {
+          if (auto declareOp = llvm::dyn_cast<hlfir::DeclareOp>(owner)) {
+            auto hostDeclareOp = hostVal.getDefiningOp<hlfir::DeclareOp>();
+            declareOp->replaceUsesWithIf(hostDeclareOp.getResults(),
+                                         useOutsideTargetRegion);
+          }
+        }
+        return useOutsideTargetRegion(operand);
+      });
+    }
+  }
 };
 
 //===----------------------------------------------------------------------===//
@@ -2434,6 +2466,27 @@ genOrderedRegionOp(Fortran::lower::AbstractConverter &converter,
       /*clauseList=*/nullptr, /*simd=*/false);
 }
 
+static bool evalHasSiblings(Fortran::lower::pft::Evaluation &eval) {
+  return eval.parent.visit(Fortran::common::visitors{
+      [&](const Fortran::lower::pft::Program &parent) {
+        return parent.getUnits().size() + parent.getCommonBlocks().size() > 1;
+      },
+      [&](const Fortran::lower::pft::Evaluation &parent) {
+        for (auto &sibling : *parent.evaluationList)
+          if (&sibling != &eval && !sibling.isEndStmt())
+            return true;
+
+        return false;
+      },
+      [&](const auto &parent) {
+        for (auto &sibling : parent.evaluationList)
+          if (&sibling != &eval && !sibling.isEndStmt())
+            return true;
+
+        return false;
+      }});
+}
+
 static mlir::omp::ParallelOp
 genParallelOp(Fortran::lower::AbstractConverter &converter,
               Fortran::lower::pft::Evaluation &eval,
@@ -2450,23 +2503,46 @@ genParallelOp(Fortran::lower::AbstractConverter &converter,
   ClauseProcessor cp(converter, clauseList);
   cp.processIf(Fortran::parser::OmpIfClause::DirectiveNameModifier::Parallel,
                ifClauseOperand);
-  cp.processNumThreads(stmtCtx, numThreadsClauseOperand);
   cp.processProcBind(procBindKindAttr);
   cp.processDefault();
   cp.processAllocate(allocatorOperands, allocateOperands);
   if (!outerCombined)
     cp.processReduction(currentLocation, reductionVars, reductionDeclSymbols);
 
-  return genOpWithBody<mlir::omp::ParallelOp>(
+  auto offloadModOp =
+      llvm::cast<mlir::omp::OffloadModuleInterface>(*converter.getModuleOp());
+  mlir::omp::TargetOp targetOp =
+      findParentTargetOp(converter.getFirOpBuilder());
+
+  bool mustEvalOutsideTarget =
+      targetOp && !offloadModOp.getIsTargetDevice() && !evalHasSiblings(eval);
+  if (mustEvalOutsideTarget) {
+    HostClausesInsertionGuard guard(converter.getFirOpBuilder());
+    cp.processNumThreads(stmtCtx, numThreadsClauseOperand);
+  } else {
+    cp.processNumThreads(stmtCtx, numThreadsClauseOperand);
+  }
+
+  auto parallelOp = genOpWithBody<mlir::omp::ParallelOp>(
       converter, eval, currentLocation, outerCombined, &clauseList,
       /*resultTypes=*/mlir::TypeRange(), ifClauseOperand,
-      numThreadsClauseOperand, allocateOperands, allocatorOperands,
+      /*num_threads_var=*/nullptr, allocateOperands, allocatorOperands,
       reductionVars,
       reductionDeclSymbols.empty()
           ? nullptr
           : mlir::ArrayAttr::get(converter.getFirOpBuilder().getContext(),
                                  reductionDeclSymbols),
       procBindKindAttr);
+
+  if (mustEvalOutsideTarget) {
+    if (numThreadsClauseOperand)
+      targetOp.getNumThreadsMutable().assign(numThreadsClauseOperand);
+  } else {
+    if (numThreadsClauseOperand)
+      parallelOp.getNumThreadsVarMutable().assign(numThreadsClauseOperand);
+  }
+
+  return parallelOp;
 }
 
 static mlir::omp::SingleOp
@@ -2783,6 +2859,9 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
   cp.processDevice(stmtCtx, deviceOperand);
   cp.processMap(currentLocation, directive, semanticsContext, stmtCtx,
                 mapOperands, &mapSymTypes, &mapSymLocs, &mapSymbols);
+  cp.processIf(Fortran::parser::OmpIfClause::DirectiveNameModifier::Target,
+               ifClauseOperand);
+  cp.processThreadLimit(stmtCtx, threadLimitOperand);
   cp.processTODO<Fortran::parser::OmpClause::Private,
                  Fortran::parser::OmpClause::Depend,
                  Fortran::parser::OmpClause::Firstprivate,
@@ -2796,14 +2875,9 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
       currentLocation, llvm::omp::Directive::OMPD_target);
 
   // Process host-only clauses.
-  if (!llvm::cast<mlir::omp::OffloadModuleInterface>(
-           converter.getModuleOp().getOperation())
-           .getIsTargetDevice()) {
-    cp.processIf(Fortran::parser::OmpIfClause::DirectiveNameModifier::Target,
-                 ifClauseOperand);
-    cp.processThreadLimit(stmtCtx, threadLimitOperand);
+  if (!llvm::cast<mlir::omp::OffloadModuleInterface>(*converter.getModuleOp())
+           .getIsTargetDevice())
     cp.processNowait(nowaitAttr);
-  }
 
   // 5.8.1 Implicit Data-Mapping Attribute Rules
   // The following code follows the implicit data-mapping rules to map all the
@@ -2872,7 +2946,9 @@ genTargetOp(Fortran::lower::AbstractConverter &converter,
 
   auto targetOp = converter.getFirOpBuilder().create<mlir::omp::TargetOp>(
       currentLocation, ifClauseOperand, deviceOperand, threadLimitOperand,
-      /*trip_count=*/nullptr, nowaitAttr, mapOperands);
+      /*trip_count=*/nullptr, nowaitAttr, mapOperands,
+      /*num_teams_lower=*/nullptr, /*num_teams_upper=*/nullptr,
+      /*teams_thread_limit=*/nullptr, /*num_threads=*/nullptr);
 
   genBodyOfTargetOp(converter, eval, targetOp, mapSymTypes, mapSymLocs,
                     mapSymbols, currentLocation);
@@ -2900,26 +2976,45 @@ genTeamsOp(Fortran::lower::AbstractConverter &converter,
   cp.processTODO<Fortran::parser::OmpClause::Reduction>(
       currentLocation, llvm::omp::Directive::OMPD_teams);
 
-  // Evaluate num_teams and thread_limit on the host device, if inside of an
-  // omp.target operation.
+  // Evaluate NUM_TEAMS and THREAD_LIMIT on the host device, if currently inside
+  // of an omp.target operation.
   auto offloadModOp = llvm::cast<mlir::omp::OffloadModuleInterface>(
       converter.getModuleOp().getOperation());
-  if (!findParentTargetOp(converter.getFirOpBuilder()) ||
-      !offloadModOp.getIsTargetDevice()) {
+  mlir::omp::TargetOp targetOp =
+      findParentTargetOp(converter.getFirOpBuilder());
+
+  bool mustEvalOutsideTarget = targetOp && !offloadModOp.getIsTargetDevice();
+  if (mustEvalOutsideTarget) {
     HostClausesInsertionGuard guard(converter.getFirOpBuilder());
+    cp.processNumTeams(stmtCtx, numTeamsClauseOperand);
+    cp.processThreadLimit(stmtCtx, threadLimitClauseOperand);
+  } else {
     cp.processNumTeams(stmtCtx, numTeamsClauseOperand);
     cp.processThreadLimit(stmtCtx, threadLimitClauseOperand);
   }
 
-  return genOpWithBody<mlir::omp::TeamsOp>(
+  auto teamsOp = genOpWithBody<mlir::omp::TeamsOp>(
       converter, eval, currentLocation, outerCombined, &clauseList,
-      /*num_teams_lower=*/nullptr, numTeamsClauseOperand, ifClauseOperand,
-      threadLimitClauseOperand, allocateOperands, allocatorOperands,
+      /*num_teams_lower=*/nullptr, /*num_teams_upper=*/nullptr, ifClauseOperand,
+      /*thread_limit=*/nullptr, allocateOperands, allocatorOperands,
       reductionVars,
       reductionDeclSymbols.empty()
           ? nullptr
           : mlir::ArrayAttr::get(converter.getFirOpBuilder().getContext(),
                                  reductionDeclSymbols));
+  if (mustEvalOutsideTarget) {
+    if (numTeamsClauseOperand)
+      targetOp.getNumTeamsUpperMutable().assign(numTeamsClauseOperand);
+    if (threadLimitClauseOperand)
+      targetOp.getTeamsThreadLimitMutable().assign(threadLimitClauseOperand);
+  } else {
+    if (numTeamsClauseOperand)
+      teamsOp.getNumTeamsUpperMutable().assign(numTeamsClauseOperand);
+    if (threadLimitClauseOperand)
+      teamsOp.getThreadLimitMutable().assign(threadLimitClauseOperand);
+  }
+
+  return teamsOp;
 }
 
 static mlir::omp::DistributeOp

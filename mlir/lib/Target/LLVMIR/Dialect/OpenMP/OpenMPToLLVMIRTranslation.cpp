@@ -699,12 +699,6 @@ convertOmpTeams(omp::TeamsOp op, llvm::IRBuilderBase &builder,
   builder.restoreIP(ompBuilder->createTeams(
       ompLoc, bodyCB, numTeamsLower, numTeamsUpper, threadLimit, ifExpr));
 
-  if (ompBuilder->CurrentTargetInfo) {
-    ompBuilder->CurrentTargetInfo->HasTeamsRegion = true;
-    ompBuilder->CurrentTargetInfo->NumTeams = numTeamsUpper;
-    ompBuilder->CurrentTargetInfo->ThreadLimit = threadLimit;
-  }
-
   return bodyGenStatus;
 }
 
@@ -1047,9 +1041,6 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   // before collapsing loops instead.
   builder.restoreIP(afterIP);
 
-  if (ompBuilder->CurrentTargetInfo)
-    ++ompBuilder->CurrentTargetInfo->NumLoopRegions;
-
   // Process the reductions if required.
   if (loop.getNumReductionVars() == 0)
     return success();
@@ -1199,9 +1190,6 @@ convertOmpParallel(omp::ParallelOp opInst, llvm::IRBuilderBase &builder,
   builder.restoreIP(
       ompBuilder->createParallel(ompLoc, allocaIP, bodyGenCB, privCB, finiCB,
                                  ifCond, numThreads, pbKind, isCancellable));
-
-  if (ompBuilder->CurrentTargetInfo)
-    ++ompBuilder->CurrentTargetInfo->NumParallelRegions;
 
   return bodyGenStatus;
 }
@@ -2106,6 +2094,37 @@ convertOmpTargetData(Operation *op, llvm::IRBuilderBase &builder,
   return bodyGenStatus;
 }
 
+static LogicalResult
+convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
+                     LLVM::ModuleTranslation &moduleTranslation) {
+
+  using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+  // TODO: support error propagation in OpenMPIRBuilder and use it instead of
+  // relying on captured variables.
+  LogicalResult bodyGenStatus = success();
+
+  auto bodyGenCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP) {
+    // Save the alloca insertion point on ModuleTranslation stack for use in
+    // nested regions.
+    LLVM::ModuleTranslation::SaveStack<OpenMPAllocaStackFrame> frame(
+        moduleTranslation, allocaIP);
+
+    // DistributeOp has only one region associated with it.
+    builder.restoreIP(codeGenIP);
+    convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region", builder,
+                        moduleTranslation, bodyGenStatus);
+  };
+
+  llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
+      findAllocaInsertPoint(builder, moduleTranslation);
+  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
+
+  builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createDistribute(
+      ompLoc, allocaIP, bodyGenCB));
+
+  return bodyGenStatus;
+}
+
 /// Lowers the FlagsAttr which is applied to the module on the device
 /// pass when offloading, this attribute contains OpenMP RTL globals that can
 /// be passed as flags to the frontend, otherwise they are set to default
@@ -2398,38 +2417,143 @@ createAlteredByCaptureMap(MapInfoData &mapData,
   }
 }
 
-static LogicalResult
-convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
-                     LLVM::ModuleTranslation &moduleTranslation) {
+template <typename OpTy>
+static OpTy castOrGetParentOfType(Operation *op, bool immediateParent = false) {
+  if (!op)
+    return OpTy();
 
-  using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
-  // TODO: support error propagation in OpenMPIRBuilder and use it instead of
-  // relying on captured variables.
-  LogicalResult bodyGenStatus = success();
-  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  if (OpTy casted = dyn_cast<OpTy>(op))
+    return casted;
 
-  auto bodyGenCB = [&](InsertPointTy allocaIP, InsertPointTy codeGenIP) {
-    // Save the alloca insertion point on ModuleTranslation stack for use in
-    // nested regions.
-    LLVM::ModuleTranslation::SaveStack<OpenMPAllocaStackFrame> frame(
-        moduleTranslation, allocaIP);
+  if (immediateParent)
+    return dyn_cast_if_present<OpTy>(op->getParentOp());
 
-    // DistributeOp has only one region associated with it.
-    builder.restoreIP(codeGenIP);
-    convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region", builder,
-                        moduleTranslation, bodyGenStatus);
+  return op->getParentOfType<OpTy>();
+}
+
+/// Populate default `MinTeams`, `MaxTeams` and `MaxThreads` to their default
+/// values as stated by the corresponding clauses, if constant.
+///
+/// These default values must be set before the creation of the outlined LLVM
+/// function for the target region, so that they can be used to initialize the
+/// corresponding global `ConfigurationEnvironmentTy` structure.
+static void initTargetDefaultBounds(
+    omp::TargetOp targetOp,
+    llvm::OpenMPIRBuilder::TargetKernelDefaultBounds &bounds,
+    bool isTargetDevice) {
+  // TODO Handle constant IF clauses
+  Operation *innermostCapturedOmpOp = targetOp.getInnermostCapturedOmpOp();
+
+  // Handle clauses impacting the number of teams.
+  int32_t minTeamsVal = 1, maxTeamsVal = -1;
+  if (auto teamsOp =
+          castOrGetParentOfType<omp::TeamsOp>(innermostCapturedOmpOp)) {
+    // TODO Use teamsOp.getNumTeamsLower() to initialize `minTeamsVal`. For now,
+    // just match clang and set min and max to the same value.
+    Value numTeamsClause = isTargetDevice ? teamsOp.getNumTeamsUpper()
+                                          : targetOp.getNumTeamsUpper();
+    if (numTeamsClause) {
+      if (auto constOp = dyn_cast_if_present<LLVM::ConstantOp>(
+              numTeamsClause.getDefiningOp())) {
+        if (auto constAttr = constOp.getValue().dyn_cast<IntegerAttr>())
+          minTeamsVal = maxTeamsVal = constAttr.getInt();
+      }
+    } else {
+      minTeamsVal = maxTeamsVal = 0;
+    }
+  } else if (castOrGetParentOfType<omp::ParallelOp>(innermostCapturedOmpOp,
+                                                    /*immediateParent=*/true) ||
+             castOrGetParentOfType<omp::SimdLoopOp>(innermostCapturedOmpOp,
+                                                    /*immediateParent=*/true)) {
+    minTeamsVal = maxTeamsVal = 1;
+  } else {
+    minTeamsVal = maxTeamsVal = -1;
+  }
+
+  // Handle clauses impacting the number of threads.
+  int32_t targetThreadLimitVal = -1;
+  int32_t teamsThreadLimitVal = -1;
+  int32_t maxThreadsVal = -1;
+
+  auto setMaxValueFromClause = [](Value clauseValue, int32_t &result) {
+    if (clauseValue) {
+      if (auto constOp = dyn_cast_if_present<LLVM::ConstantOp>(
+              clauseValue.getDefiningOp())) {
+        if (auto constAttr = constOp.getValue().dyn_cast<IntegerAttr>())
+          result = constAttr.getInt();
+      }
+      // Found an applicable clause, so it's not undefined. Mark as unknown
+      // because it's not constant.
+      if (result < 0)
+        result = 0;
+    }
   };
 
-  llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
-      findAllocaInsertPoint(builder, moduleTranslation);
-  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
+  // Extract THREAD_LIMIT clause from TARGET and TEAMS directives.
+  setMaxValueFromClause(targetOp.getThreadLimit(), targetThreadLimitVal);
 
-  builder.restoreIP(ompBuilder->createDistribute(ompLoc, allocaIP, bodyGenCB));
+  if (auto teamsOp =
+          castOrGetParentOfType<omp::TeamsOp>(innermostCapturedOmpOp)) {
+    Value threadLimitClause = isTargetDevice ? teamsOp.getThreadLimit()
+                                             : targetOp.getTeamsThreadLimit();
+    setMaxValueFromClause(threadLimitClause, teamsThreadLimitVal);
+  }
 
-  if (ompBuilder->CurrentTargetInfo)
-    ++ompBuilder->CurrentTargetInfo->NumDistributeRegions;
+  // Extract MAX_THREADS clause from PARALLEL or set to 1 if it's SIMD.
+  if (innermostCapturedOmpOp) {
+    if (auto parallelOp =
+            castOrGetParentOfType<omp::ParallelOp>(innermostCapturedOmpOp,
+                                                   /*immediateParent=*/true)) {
+      Value numThreadsClause = isTargetDevice ? parallelOp.getNumThreadsVar()
+                                              : targetOp.getNumThreads();
+      setMaxValueFromClause(numThreadsClause, maxThreadsVal);
+    } else if (isa<omp::SimdLoopOp>(innermostCapturedOmpOp)) {
+      maxThreadsVal = 1;
+    }
+  }
 
-  return bodyGenStatus;
+  // For max values, < 0 means unset, == 0 means set but unknown. Select the
+  // minimum value between MAX_THREADS and THREAD_LIMIT clauses that were set.
+  int32_t combinedMaxThreadsVal = targetThreadLimitVal;
+  if (combinedMaxThreadsVal < 0 ||
+      (teamsThreadLimitVal >= 0 && teamsThreadLimitVal < combinedMaxThreadsVal))
+    combinedMaxThreadsVal = teamsThreadLimitVal;
+
+  if (combinedMaxThreadsVal < 0 ||
+      (maxThreadsVal >= 0 && maxThreadsVal < combinedMaxThreadsVal))
+    combinedMaxThreadsVal = maxThreadsVal;
+
+  // Update kernel bounds structure for the `OpenMPIRBuilder` to use.
+  bounds.MinTeams = minTeamsVal;
+  bounds.MaxTeams = maxTeamsVal;
+  bounds.MinThreads = 1;
+  bounds.MaxThreads = combinedMaxThreadsVal;
+}
+
+/// Gather LLVM runtime values for all clauses evaluated in the host that are
+/// passed to the kernel invocation.
+///
+/// This function must be called only when compiling for the host. Also, it will
+/// only provide correct results if it's called after the body of \c targetOp
+/// has been fully generated.
+static void initTargetRuntimeBounds(
+    LLVM::ModuleTranslation &moduleTranslation, omp::TargetOp targetOp,
+    llvm::OpenMPIRBuilder::TargetKernelRuntimeBounds &bounds) {
+  // TODO Handle IF clauses.
+  if (Value numTeamsLower = targetOp.getNumTeamsLower())
+    bounds.MinTeams = moduleTranslation.lookupValue(numTeamsLower);
+
+  if (Value numTeamsUpper = targetOp.getNumTeamsUpper())
+    bounds.MaxTeams = moduleTranslation.lookupValue(numTeamsUpper);
+
+  if (Value teamsThreadLimit = targetOp.getTeamsThreadLimit())
+    bounds.TeamsThreadLimit = moduleTranslation.lookupValue(teamsThreadLimit);
+
+  if (Value numThreads = targetOp.getNumThreads())
+    bounds.MaxThreads = moduleTranslation.lookupValue(numThreads);
+
+  if (Value tripCount = targetOp.getTripCount())
+    bounds.LoopTripCount = moduleTranslation.lookupValue(tripCount);
 }
 
 static LogicalResult
@@ -2439,12 +2563,14 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   if (!targetOpSupported(opInst))
     return failure();
 
-  auto *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
+  bool isTargetDevice = ompBuilder->Config.isTargetDevice();
   auto targetOp = cast<omp::TargetOp>(opInst);
   auto &targetRegion = targetOp.getRegion();
   DataLayout dl = DataLayout(opInst.getParentOfType<ModuleOp>());
   SmallVector<Value> mapOperands = targetOp.getMapOperands();
 
+  llvm::OpenMPIRBuilder::TargetKernelRuntimeBounds runtimeBounds;
   LogicalResult bodyGenStatus = success();
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
   auto bodyCB = [&](InsertPointTy allocaIP,
@@ -2464,17 +2590,8 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
         targetRegion, "omp.target", builder, moduleTranslation, bodyGenStatus);
     builder.SetInsertPoint(exitBlock);
 
-    // The thread_limit clause of the omp.teams operation takes precedence. Set
-    // it here if not already set and present in the omp.target operation.
-    if (!ompBuilder->CurrentTargetInfo->ThreadLimit) {
-      if (Value threadLimit = targetOp.getThreadLimit())
-        ompBuilder->CurrentTargetInfo->ThreadLimit =
-            moduleTranslation.lookupValue(threadLimit);
-    }
-
-    if (Value tripCount = targetOp.getTripCount())
-      ompBuilder->CurrentTargetInfo->LoopTripCount =
-          moduleTranslation.lookupValue(tripCount);
+    if (!isTargetDevice)
+      initTargetRuntimeBounds(moduleTranslation, targetOp, runtimeBounds);
 
     return builder.saveIP();
   };
@@ -2512,7 +2629,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   // kernel arg structure. It primarily becomes relevant in cases like
   // bycopy, or byref range'd arrays. In the default case, we simply
   // pass thee pointer byref as both basePointer and pointer.
-  if (!moduleTranslation.getOpenMPBuilder()->Config.isTargetDevice())
+  if (!isTargetDevice)
     createAlteredByCaptureMap(mapData, moduleTranslation, builder);
 
   llvm::OpenMPIRBuilder::MapInfosTy combinedInfos;
@@ -2527,14 +2644,12 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   auto argAccessorCB = [&](llvm::Argument &arg, llvm::Value *input,
                            llvm::Value *&retVal, InsertPointTy allocaIP,
                            InsertPointTy codeGenIP) {
-    llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
-
     // We just return the unaltered argument for the host function
     // for now, some alterations may be required in the future to
     // keep host fallback functions working identically to the device
     // version (e.g. pass ByCopy values should be treated as such on
     // host and device, currently not always the case)
-    if (!ompBuilder->Config.isTargetDevice()) {
+    if (!isTargetDevice) {
       retVal = cast<llvm::Value>(&arg);
       return codeGenIP;
     }
@@ -2551,17 +2666,22 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
       kernelInput.push_back(mapData.OriginalValue[i]);
   }
 
-  ompBuilder->CurrentTargetInfo = llvm::OpenMPIRBuilder::TargetRegionInfo();
-  builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createTarget(
-      ompLoc, targetOp.isTargetSPMDLoop(), allocaIP, builder.saveIP(), entryInfo,
-       kernelInput, genMapInfoCB, bodyCB, argAccessorCB));
+  llvm::OpenMPIRBuilder::TargetKernelDefaultBounds defaultBounds;
+  initTargetDefaultBounds(targetOp, defaultBounds, isTargetDevice);
+
+  if (Value targetThreadLimit = targetOp.getThreadLimit())
+    runtimeBounds.TargetThreadLimit =
+        moduleTranslation.lookupValue(targetThreadLimit);
+
+  builder.restoreIP(ompBuilder->createTarget(
+      ompLoc, targetOp.isTargetSPMDLoop(), allocaIP, builder.saveIP(),
+      entryInfo, defaultBounds, runtimeBounds, kernelInput, genMapInfoCB,
+      bodyCB, argAccessorCB));
 
   // Remap access operations to declare target reference pointers for the
   // device, essentially generating extra loadop's as necessary
-  if (moduleTranslation.getOpenMPBuilder()->Config.isTargetDevice())
+  if (isTargetDevice)
     handleDeclareTargetMapVar(mapData, moduleTranslation, builder);
-
-  ompBuilder->CurrentTargetInfo.reset();
 
   return bodyGenStatus;
 }

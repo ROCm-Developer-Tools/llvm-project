@@ -5803,10 +5803,11 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
 
   TargetRegionEntryInfo EntryInfo("func", 42, 4711, 17);
   OpenMPIRBuilder::LocationDescription OmpLoc({Builder.saveIP(), DL});
-  OMPBuilder.CurrentTargetInfo.emplace();
   Builder.restoreIP(OMPBuilder.createTarget(
       OmpLoc, /*IsSPMD=*/false, Builder.saveIP(), Builder.saveIP(), EntryInfo,
-      Inputs, GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
+      /*DefaultBounds=*/OpenMPIRBuilder::TargetKernelDefaultBounds(),
+      /*RuntimeBounds=*/OpenMPIRBuilder::TargetKernelRuntimeBounds(), Inputs,
+      GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
 
@@ -5908,10 +5909,11 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
   TargetRegionEntryInfo EntryInfo("parent", /*DeviceID=*/1, /*FileID=*/2,
                                   /*Line=*/3, /*Count=*/0);
 
-  OMPBuilder.CurrentTargetInfo.emplace();
   Builder.restoreIP(OMPBuilder.createTarget(
-      Loc, /*IsSPMD=*/false, EntryIP, EntryIP, EntryInfo, CapturedArgs,
-      GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
+      Loc, /*IsSPMD=*/false, EntryIP, EntryIP, EntryInfo,
+      /*DefaultBounds=*/OpenMPIRBuilder::TargetKernelDefaultBounds(),
+      /*RuntimeBounds=*/OpenMPIRBuilder::TargetKernelRuntimeBounds(),
+      CapturedArgs, GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
 
   Builder.CreateRetVoid();
   OMPBuilder.finalize();

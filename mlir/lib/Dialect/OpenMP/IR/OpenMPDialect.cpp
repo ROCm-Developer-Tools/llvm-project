@@ -955,10 +955,51 @@ LogicalResult ExitDataOp::verify() {
 // TargetOp
 //===----------------------------------------------------------------------===//
 
+static LogicalResult verifyNumTeamsClause(Operation *op, Value lb, Value ub) {
+  if (lb) {
+    if (!ub)
+      return op->emitError("expected num_teams upper bound to be defined if "
+                           "the lower bound is defined");
+    if (lb.getType() != ub.getType())
+      return op->emitError(
+          "expected num_teams upper bound and lower bound to be the same type");
+  }
+  return success();
+}
+
 template <typename OpTy>
 static OpTy getSingleNestedOpOfType(Region &region) {
   auto ops = region.getOps<OpTy>();
   return std::distance(ops.begin(), ops.end()) != 1 ? OpTy() : *ops.begin();
+}
+
+/// Only allow OpenMP terminators and non-OpenMP ops that have known memory
+/// effects, but don't include a memory write effect.
+static bool siblingAllowedInCapture(Operation *op) {
+  if (!op)
+    return false;
+
+  bool isOmpDialect =
+      op->getContext()->getLoadedDialect<omp::OpenMPDialect>() ==
+      op->getDialect();
+
+  if (isOmpDialect)
+    return op->hasTrait<OpTrait::IsTerminator>();
+
+  if (auto memOp = dyn_cast<MemoryEffectOpInterface>(op)) {
+    SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>, 4> effects;
+    memOp.getEffects(effects);
+    return !llvm::any_of(effects, [&](MemoryEffects::EffectInstance &effect) {
+      // FIXME Ideally we'd just check for a memory write effect. However, this
+      // would break due to HLFIR operations that in reality have no side
+      // effects but are marked as having a memory write effect on a debug
+      // resource to avoid being deleted by DCE passes.
+      return isa<MemoryEffects::Write>(effect.getEffect()) &&
+             isa<SideEffects::AutomaticAllocationScopeResource>(
+                 effect.getResource());
+    });
+  }
+  return true;
 }
 
 LogicalResult TargetOp::verify() {
@@ -966,31 +1007,96 @@ LogicalResult TargetOp::verify() {
   if (std::distance(teamsOps.begin(), teamsOps.end()) > 1)
     return emitError("target containing multiple teams constructs");
 
-  if (getTripCount() && !isTargetSPMDLoop())
-    return emitError("trip_count set on non-SPMD target region");
+  if (!isTargetSPMDLoop()) {
+    if (getTripCount())
+      return emitError("trip_count set on non-SPMD target region");
+
+    if (getNumThreads() && !getSingleNestedOpOfType<ParallelOp>(getRegion()))
+      return emitError("num_threads set on non-SPMD or loop target region");
+  }
+
+  if (teamsOps.empty()) {
+    if (getNumTeamsLower() || getNumTeamsUpper() || getTeamsThreadLimit())
+      return emitError(
+          "num_teams and teams_thread_limit arguments only allowed if there is "
+          "an omp.teams child operation");
+  } else {
+    if (failed(verifyNumTeamsClause(*this, getNumTeamsLower(),
+                                    getNumTeamsUpper())))
+      return failure();
+  }
 
   return verifyMapClause(*this, getMapOperands());
 }
 
+Operation *TargetOp::getInnermostCapturedOmpOp() {
+  Dialect *ompDialect = (*this)->getDialect();
+  Operation *capturedOp = nullptr;
+  Region *capturedParentRegion = nullptr;
+
+  walk<WalkOrder::PostOrder>([&](Operation *op) {
+    if (op == *this)
+      return;
+
+    bool isOmpDialect = op->getDialect() == ompDialect;
+    bool hasRegions = op->getNumRegions() > 0;
+
+    if (capturedOp) {
+      bool isImmediateParent = false;
+      for (Region &region : op->getRegions()) {
+        if (&region == capturedParentRegion) {
+          isImmediateParent = true;
+          capturedParentRegion = op->getParentRegion();
+          break;
+        }
+      }
+
+      // Make sure the captured op is part of a (possibly multi-level) nest of
+      // OpenMP-only operations containing no unsupported siblings at any level.
+      if ((hasRegions && isOmpDialect != isImmediateParent) ||
+          (!isImmediateParent && !siblingAllowedInCapture(op))) {
+        capturedOp = nullptr;
+        capturedParentRegion = nullptr;
+      }
+    } else {
+      //  The first OpenMP dialect op containing a region found while visiting
+      //  in post-order should be the innermost captured OpenMP operation.
+      if (isOmpDialect && hasRegions) {
+        capturedOp = op;
+        capturedParentRegion = op->getParentRegion();
+
+        // Don't capture this op if it has a not-allowed sibling.
+        for (Operation &sibling : op->getParentRegion()->getOps()) {
+          if (&sibling != op && !siblingAllowedInCapture(&sibling)) {
+            capturedOp = nullptr;
+            capturedParentRegion = nullptr;
+          }
+        }
+      }
+    }
+  });
+
+  return capturedOp;
+}
+
 bool TargetOp::isTargetSPMDLoop() {
-  // TODO Check for additional ops that may break the pattern. Currently we only
-  // check the necessary but not sufficient condition of having a single
-  // omp.teams+omp.distribute+omp.parallel+omp.wsloop nest.
-  auto teamsOp = getSingleNestedOpOfType<TeamsOp>(getRegion());
-  if (!teamsOp)
+  Operation *capturedOp = getInnermostCapturedOmpOp();
+  if (!isa_and_present<WsLoopOp, SimdLoopOp>(capturedOp))
     return false;
 
-  auto distributeOp =
-      getSingleNestedOpOfType<DistributeOp>(teamsOp.getRegion());
-  if (!distributeOp)
+  Operation *parallelOp = capturedOp->getParentOp();
+  if (!isa_and_present<ParallelOp>(parallelOp))
     return false;
 
-  auto parallelOp =
-      getSingleNestedOpOfType<ParallelOp>(distributeOp.getRegion());
-  if (!parallelOp)
+  Operation *distributeOp = parallelOp->getParentOp();
+  if (!isa_and_present<DistributeOp>(distributeOp))
     return false;
 
-  return getSingleNestedOpOfType<WsLoopOp>(parallelOp.getRegion());
+  Operation *teamsOp = distributeOp->getParentOp();
+  if (!isa_and_present<TeamsOp>(teamsOp))
+    return false;
+
+  return teamsOp->getParentOp() == (*this);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1011,6 +1117,18 @@ LogicalResult ParallelOp::verify() {
   if (getAllocateVars().size() != getAllocatorsVars().size())
     return emitError(
         "expected equal sizes for allocate and allocator variables");
+
+  auto offloadModOp =
+      llvm::cast<OffloadModuleInterface>(*(*this)->getParentOfType<ModuleOp>());
+  if (!offloadModOp.getIsTargetDevice()) {
+    auto targetOp = (*this)->getParentOfType<omp::TargetOp>();
+    if (getNumThreadsVar() && targetOp &&
+        (targetOp.isTargetSPMDLoop() ||
+         getSingleNestedOpOfType<ParallelOp>(targetOp.getRegion()) == *this))
+      return emitError("num_threads argument expected to be attached to parent "
+                       "omp.target operation instead");
+  }
+
   return verifyReductionVarList(*this, getReductions(), getReductionVars());
 }
 
@@ -1029,23 +1147,23 @@ LogicalResult TeamsOp::verify() {
   // Check parent region
   // TODO If nested inside of a target region, also check that it does not
   // contain any statements, declarations or directives other than this
-  // omp.teams construct. The issue is how to support the initialization of
-  // this operation's own arguments (allow SSA values across omp.target?).
-  Operation *op = getOperation();
-  if (!isa<TargetOp>(op->getParentOp()) &&
-      !opInGlobalImplicitParallelRegion(op))
+  // omp.teams construct.
+  auto targetOp = dyn_cast_if_present<TargetOp>((*this)->getParentOp());
+
+  if (!targetOp && !opInGlobalImplicitParallelRegion(*this))
     return emitError("expected to be nested inside of omp.target or not nested "
                      "in any OpenMP dialect operations");
 
-  // Check for num_teams clause restrictions
-  if (auto numTeamsLowerBound = getNumTeamsLower()) {
-    auto numTeamsUpperBound = getNumTeamsUpper();
-    if (!numTeamsUpperBound)
-      return emitError("expected num_teams upper bound to be defined if the "
-                       "lower bound is defined");
-    if (numTeamsLowerBound.getType() != numTeamsUpperBound.getType())
-      return emitError(
-          "expected num_teams upper bound and lower bound to be the same type");
+  auto offloadModOp =
+      llvm::cast<OffloadModuleInterface>(*(*this)->getParentOfType<ModuleOp>());
+  if (targetOp && !offloadModOp.getIsTargetDevice()) {
+    if (getNumTeamsLower() || getNumTeamsUpper() || getThreadLimit())
+      return emitError("num_teams and thread_limit arguments expected to be "
+                       "attached to parent omp.target operation");
+  } else {
+    if (failed(verifyNumTeamsClause(*this, getNumTeamsLower(),
+                                    getNumTeamsUpper())))
+      return failure();
   }
 
   // Check for allocate clause restrictions
