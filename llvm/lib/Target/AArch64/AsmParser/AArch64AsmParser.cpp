@@ -3663,6 +3663,7 @@ static const struct Extension {
     {"sme-lutv2", {AArch64::FeatureSME_LUTv2}},
     {"sme-f8f16", {AArch64::FeatureSMEF8F16}},
     {"sme-f8f32", {AArch64::FeatureSMEF8F32}},
+    {"sme-fa64",  {AArch64::FeatureSMEFA64}},
 };
 
 static void setRequiredFeatureString(FeatureBitset FBS, std::string &Str) {
@@ -3696,6 +3697,8 @@ static void setRequiredFeatureString(FeatureBitset FBS, std::string &Str) {
     Str += "ARMv9.3a";
   else if (FBS[AArch64::HasV9_4aOps])
     Str += "ARMv9.4a";
+  else if (FBS[AArch64::HasV9_5aOps])
+    Str += "ARMv9.5a";
   else if (FBS[AArch64::HasV8_0rOps])
     Str += "ARMv8r";
   else {
