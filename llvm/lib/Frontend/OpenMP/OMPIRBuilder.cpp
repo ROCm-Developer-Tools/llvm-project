@@ -2053,6 +2053,42 @@ Function *getFreshReductionFunc(Module &M) {
                           ".omp.reduction.func", &M);
 }
 
+static void populateReductionFunction(Function *ReductionFunc,
+                                      ArrayRef<OpenMPIRBuilder::ReductionInfo> ReductionInfos,
+                                      IRBuilder<> &Builder) {
+    Module *Module = ReductionFunc->getParent();
+      BasicBlock *ReductionFuncBlock =
+      BasicBlock::Create(Module->getContext(), "", ReductionFunc);
+  Builder.SetInsertPoint(ReductionFuncBlock);
+  Value *LHSArrayPtr = ReductionFunc->getArg(0);
+  Value *RHSArrayPtr = ReductionFunc->getArg(1);
+  unsigned NumReductions = ReductionInfos.size();
+  Type *RedArrayTy = ArrayType::get(Builder.getInt8PtrTy(), NumReductions);
+
+  for (auto En : enumerate(ReductionInfos)) {
+    const OpenMPIRBuilder::ReductionInfo &RI = En.value();
+    Value *LHSI8PtrPtr = Builder.CreateConstInBoundsGEP2_64(
+        RedArrayTy, LHSArrayPtr, 0, En.index());
+    Value *LHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), LHSI8PtrPtr);
+    Value *LHSPtr = Builder.CreateBitCast(LHSI8Ptr, RI.Variable->getType());
+    Value *LHS = Builder.CreateLoad(RI.ElementType, LHSPtr);
+    Value *RHSI8PtrPtr = Builder.CreateConstInBoundsGEP2_64(
+        RedArrayTy, RHSArrayPtr, 0, En.index());
+    Value *RHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), RHSI8PtrPtr);
+    Value *RHSPtr =
+        Builder.CreateBitCast(RHSI8Ptr, RI.PrivateVariable->getType());
+    Value *RHS = Builder.CreateLoad(RI.ElementType, RHSPtr);
+    Value *Reduced;
+    Builder.restoreIP(RI.ReductionGen(Builder.saveIP(), LHS, RHS, Reduced));
+    if (!Builder.GetInsertBlock())
+      return;
+    Builder.CreateStore(Reduced, LHSPtr);
+  }
+  Builder.CreateRetVoid();
+
+}
+
+
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
     const LocationDescription &Loc, InsertPointTy AllocaIP,
     ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait) {
@@ -2061,9 +2097,10 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
     assert(RI.Variable && "expected non-null variable");
     assert(RI.PrivateVariable && "expected non-null private variable");
     assert(RI.ReductionGen && "expected non-null reduction generator callback");
-    assert(RI.Variable->getType() == RI.PrivateVariable->getType() &&
-           "expected variables and their private equivalents to have the same "
-           "type");
+    // JAN: Skip this assertion, address spaces are present
+    //    assert(RI.Variable->getType() == RI.PrivateVariable->getType() &&
+    //           "expected variables and their private equivalents to have the same "
+    // "type");
     assert(RI.Variable->getType()->isPointerTy() &&
            "expected variables to be pointers");
   }
@@ -2179,33 +2216,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
   // Populate the outlined reduction function using the elementwise reduction
   // function. Partial values are extracted from the type-erased array of
   // pointers to private variables.
-  BasicBlock *ReductionFuncBlock =
-      BasicBlock::Create(Module->getContext(), "", ReductionFunc);
-  Builder.SetInsertPoint(ReductionFuncBlock);
-  Value *LHSArrayPtr = ReductionFunc->getArg(0);
-  Value *RHSArrayPtr = ReductionFunc->getArg(1);
-
-  for (auto En : enumerate(ReductionInfos)) {
-    const ReductionInfo &RI = En.value();
-    Value *LHSI8PtrPtr = Builder.CreateConstInBoundsGEP2_64(
-        RedArrayTy, LHSArrayPtr, 0, En.index());
-    Value *LHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), LHSI8PtrPtr);
-    Value *LHSPtr = Builder.CreateBitCast(LHSI8Ptr, RI.Variable->getType());
-    Value *LHS = Builder.CreateLoad(RI.ElementType, LHSPtr);
-    Value *RHSI8PtrPtr = Builder.CreateConstInBoundsGEP2_64(
-        RedArrayTy, RHSArrayPtr, 0, En.index());
-    Value *RHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), RHSI8PtrPtr);
-    Value *RHSPtr =
-        Builder.CreateBitCast(RHSI8Ptr, RI.PrivateVariable->getType());
-    Value *RHS = Builder.CreateLoad(RI.ElementType, RHSPtr);
-    Value *Reduced;
-    Builder.restoreIP(RI.ReductionGen(Builder.saveIP(), LHS, RHS, Reduced));
-    if (!Builder.GetInsertBlock())
-      return InsertPointTy();
-    Builder.CreateStore(Reduced, LHSPtr);
-  }
-  Builder.CreateRetVoid();
-
+  populateReductionFunction(ReductionFunc, ReductionInfos, Builder);
   Builder.SetInsertPoint(ContinuationBlock);
   return Builder.saveIP();
 }

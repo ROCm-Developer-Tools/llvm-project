@@ -36,6 +36,8 @@
 #include <optional>
 #include <utility>
 
+#include <iostream>
+
 using namespace mlir;
 
 namespace {
