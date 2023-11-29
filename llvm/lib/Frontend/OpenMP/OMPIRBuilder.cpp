@@ -2234,15 +2234,16 @@ emitReductionListCopy(CopyAction Action, Type *ReductionArrayTy,
     case RemoteLaneToThread: {
       OpenMPIRBuilder::InsertPointTy CurIP = Builder.saveIP();
       Builder.restoreIP(AllocaIP);
-      DestElementAddr = Builder.CreateAlloca(RI.PrivateVariable->getType(),
-                                             nullptr, ".omp.reduction.element");
+      DestElementAddr = Builder.CreateAlloca(RI.ElementType, nullptr,
+                                             ".omp.reduction.element");
       Builder.restoreIP(CurIP);
       ShuffleInElement = true;
       UpdateDestListPtr = true;
       break;
     }
     case ThreadCopy: {
-      DestElementAddr = Builder.CreateLoad(PtrTy, DestElementPtrAddr, "destelementaddr");
+      DestElementAddr =
+          Builder.CreateLoad(PtrTy, DestElementPtrAddr, "destelementaddr");
       break;
     }
     }
@@ -2252,13 +2253,12 @@ emitReductionListCopy(CopyAction Action, Type *ReductionArrayTy,
 
     if (ShuffleInElement) {
       shuffleAndStore(SrcElementAddr, DestElementAddr,
-                      RI.PrivateVariable->getType(), RemoteLaneOffset,
+                      RI.ElementType, RemoteLaneOffset,
                       ReductionArrayTy, Loc, M,
                       OMPBuilder, AllocaIP);
     } else {
       // FIXME(JAN): Assume Scalar here (TEK_Scalar in Clang)
-      Value *Elem  = Builder.CreateLoad(RI.PrivateVariable->getType(),
-                                        SrcElementAddr);
+      Value *Elem = Builder.CreateLoad(RI.ElementType, SrcElementAddr);
       Builder.CreateStore(Elem, DestElementAddr);
     }
     // Step 3.1: Modify reference in dest Reduce list as needed.
@@ -2305,10 +2305,10 @@ static Function *emitShuffleAndReduceFunction(
   Argument *Arg1 = SarFunc->getArg(1);
   Argument *Arg2 = SarFunc->getArg(2);
   Argument *Arg3 = SarFunc->getArg(3);
-  Arg0->setName("reduce_list");
-  Arg1->setName("lane_id");
-  Arg2->setName("remote_lane_offset");
-  Arg3->setName("algo_ver");
+  Arg0->setName("reduce_list_arg");
+  Arg1->setName("lane_id_arg");
+  Arg2->setName("remote_lane_offset_arg");
+  Arg3->setName("algo_ver_arg");
 
   BasicBlock *EntryBlock = BasicBlock::Create(Ctx, "", SarFunc);
   Builder.SetInsertPoint(EntryBlock);
@@ -2337,22 +2337,25 @@ static Function *emitShuffleAndReduceFunction(
       RemoteLaneOffsetAlloca->getName() + ".acast");
   Value *AlgoVerAddrCast = Builder.CreatePointerBitCastOrAddrSpaceCast(
       AlgoVerAlloca, ArgNPtrType, AlgoVerAlloca->getName() + ".acast");
+  Value *RemoteListAddrCast = Builder.CreatePointerBitCastOrAddrSpaceCast(
+      RemoteReductionListAlloca, PtrTy, RemoteReductionListAlloca->getName() + ".acast");
   
   Builder.CreateStore(Arg0, ReduceListAddrCast);
   Builder.CreateStore(Arg1, LaneIdAddrCast);
   Builder.CreateStore(Arg2, RemoteLaneOffsetAddrCast);
   Builder.CreateStore(Arg3, AlgoVerAddrCast);
 
-  Value *ReduceList = Builder.CreateLoad(Arg0Type, ReduceListAddrCast);
-  Value *LaneId = Builder.CreateLoad(ArgNType, LaneIdAddrCast);
-  Value *RemoteLaneOffset =
-      Builder.CreateLoad(ArgNType, RemoteLaneOffsetAddrCast);
-  Value *AlgoVer = Builder.CreateLoad(ArgNType, AlgoVerAddrCast);
+  Value *ReduceList =
+      Builder.CreateLoad(Arg0Type, ReduceListAddrCast, "reduce_list");
+  Value *LaneId = Builder.CreateLoad(ArgNType, LaneIdAddrCast, "lane_id");
+  Value *RemoteLaneOffset = Builder.CreateLoad(
+      ArgNType, RemoteLaneOffsetAddrCast, "remote_lane_offset");
+  Value *AlgoVer = Builder.CreateLoad(ArgNType, AlgoVerAddrCast, "algo_ver");
 
   OpenMPIRBuilder::InsertPointTy AllocaIP =
     getIPAfterInstr(RemoteReductionListAlloca);
   emitReductionListCopy(RemoteLaneToThread, RedListArrayTy, ReductionInfos,
-                        ReduceList, RemoteReductionListAlloca, M, OMPBuilder,
+                        ReduceList, RemoteListAddrCast, M, OMPBuilder,
                         Loc, AllocaIP, {RemoteLaneOffset, nullptr, nullptr});
 
   // The actions to be performed on the Remote Reduce list is dependent
@@ -2378,7 +2381,7 @@ static Function *emitShuffleAndReduceFunction(
   //    during compile time.
   Value *CondAlgo0 = Builder.CreateIsNull(AlgoVer);
   Value *Algo1 = Builder.CreateICmpEQ(AlgoVer, Builder.getInt16(1));
-  Value *LaneComp = Builder.CreateICmpEQ(LaneId, RemoteLaneOffset);
+  Value *LaneComp = Builder.CreateICmpULT(LaneId, RemoteLaneOffset);
   Value *CondAlgo1 = Builder.CreateAnd(Algo1, LaneComp);
   Value *Algo2 = Builder.CreateICmpEQ(AlgoVer, Builder.getInt16(2));
   Value *LaneIdAnd1 = Builder.CreateAnd(LaneId, Builder.getInt16(1));
@@ -2400,7 +2403,7 @@ static Function *emitShuffleAndReduceFunction(
   Value *LocalReduceListPtr =
       Builder.CreatePointerBitCastOrAddrSpaceCast(ReduceList, PtrTy);
   Value *RemoteReduceListPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
-      RemoteReductionListAlloca, PtrTy);
+      RemoteListAddrCast, PtrTy);
   Builder.CreateCall(ReduceFn, {LocalReduceListPtr, RemoteReduceListPtr});
   Builder.CreateBr(MergeBB);
   Builder.SetInsertPoint(ElseBB);
@@ -2419,7 +2422,7 @@ static Function *emitShuffleAndReduceFunction(
 
   Builder.SetInsertPoint(CpyThenBB);
   emitReductionListCopy(ThreadCopy, RedListArrayTy, ReductionInfos,
-                        RemoteReductionListAlloca, ReduceList, M, OMPBuilder,
+                        RemoteListAddrCast, ReduceListAddrCast, M, OMPBuilder,
                         Loc, AllocaIP);
   Builder.CreateBr(CpyMergeBB);
   Builder.SetInsertPoint(CpyElseBB);
