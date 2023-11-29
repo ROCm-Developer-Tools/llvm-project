@@ -58,6 +58,8 @@
 
 #define DEBUG_TYPE "openmp-ir-builder"
 
+#define FIXME_JAN_GPU_WARP_SIZE 32
+
 using namespace llvm;
 using namespace omp;
 
@@ -2041,9 +2043,210 @@ OpenMPIRBuilder::createSection(const LocationDescription &Loc,
                               /*IsCancellable*/ true);
 }
 
+static Value *getGPUWarpSize(Module &M, OpenMPIRBuilder &OMPBuilder) {
+  return OMPBuilder.Builder.CreateCall(
+      OMPBuilder.getOrCreateRuntimeFunction(M, OMPRTL___kmpc_get_warp_size),
+      {});
+}
+
+static Value *getGPUThreadID(Module &M, OpenMPIRBuilder &OMPBuilder) {
+  return OMPBuilder.Builder.CreateCall(
+      OMPBuilder.getOrCreateRuntimeFunction(
+          M, OMPRTL___kmpc_get_hardware_thread_id_in_block),
+      {});
+}
+
+static Value *getGPUNumThreads(Module &M, OpenMPIRBuilder &OMPBuilder) {
+  const char *LocSize = "__kmpc_get_hardware_num_threads_in_block";
+  llvm::Function *F = M.getFunction(LocSize);
+  if (!F) {
+    LLVMContext &Ctx = M.getContext();
+    Type *I32Type = Type::getInt32Ty(Ctx);
+
+    F = Function::Create(
+        FunctionType::get(I32Type, std::nullopt, false),
+        GlobalVariable::ExternalLinkage, LocSize, M);
+  }
+  return OMPBuilder.Builder.CreateCall(F, std::nullopt, "nvptx_num_threads");
+}
+
+static Value *getNVPTXWarpID(Module &M, OpenMPIRBuilder &OMPIRBuilder) {
+   unsigned LaneIDBits =
+      llvm::Log2_32(FIXME_JAN_GPU_WARP_SIZE);
+  return OMPIRBuilder.Builder.CreateAShr(
+      getGPUThreadID(M, OMPIRBuilder),
+      LaneIDBits, "nvptx_warp_id");
+}
+
+static Value *getNVPTXLaneID(Module &M, OpenMPIRBuilder &OMPIRBuilder) {
+   unsigned LaneIDBits =
+      llvm::Log2_32(FIXME_JAN_GPU_WARP_SIZE);
+  assert(LaneIDBits < 32 && "Invalid LaneIDBits size in NVPTX device.");
+  unsigned LaneIDMask = ~0u >> (32u - LaneIDBits);
+  return OMPIRBuilder.Builder.CreateAnd(
+      getGPUThreadID(M, OMPIRBuilder),
+      OMPIRBuilder.Builder.getInt32(LaneIDMask), "nvptx_lane_id");
+}
+
+static Function *emitInterWarpCopyFunction(
+    Module &M, const OpenMPIRBuilder::LocationDescription &Loc,
+    ArrayRef<OpenMPIRBuilder::ReductionInfo> ReductionInfos,
+    OpenMPIRBuilder &OMPBuilder) {
+  IRBuilder<> &Builder = OMPBuilder.Builder;
+  OpenMPIRBuilder::InsertPointTy OldIP = Builder.saveIP();
+  LLVMContext &Ctx = M.getContext();
+  Type *VoidTy = Type::getVoidTy(Ctx);
+  Type *Int8PtrTy = PointerType::getUnqual(Ctx);
+  Type *I32Type = Type::getInt32Ty(Ctx);
+  auto FuncTy =
+      FunctionType::get(VoidTy, {Int8PtrTy, I32Type}, /* IsVarArg */ false);
+  Function *WcFunc =
+      Function::Create(FuncTy, GlobalVariable::InternalLinkage,
+                       M.getDataLayout().getDefaultGlobalsAddressSpace(),
+                       "_omp_reduction_inter_warp_copy_func", &M);
+  WcFunc->setDoesNotRecurse();
+
+  // Set arg names
+  Argument *Arg0 = WcFunc->getArg(0);
+  Argument *Arg1 = WcFunc->getArg(1);
+  Arg0->setName("reduce_list");
+  Arg1->setName("num_warps");
+
+  // Ensure data transfer storage
+  unsigned WarpSize =
+      32; /*FIXME(Jan): CGF.getTarget().getGridValue().GV_Warp_Size;*/
+  // FIXME(Jan): Not sure about the array type here, but it is I32 in Clang
+  auto *ArrayTy = ArrayType::get(I32Type, WarpSize);
+  StringRef TransferMediumName =
+      "__openmp_nvptx_data_transfer_temporary_storage";
+  GlobalVariable *TransferMedium = M.getGlobalVariable(TransferMediumName);
+  if (!TransferMedium) {
+    unsigned SharedAddressSpace =
+        3; /* FIXME(Jan): C.getTargetAddressSpace(LangAS::cuda_shared); */
+    TransferMedium = new GlobalVariable(
+        M, ArrayTy, /*isConstant=*/false, GlobalVariable::WeakAnyLinkage,
+        UndefValue::get(ArrayTy), TransferMediumName,
+        /*InsertBefore=*/nullptr, GlobalVariable::NotThreadLocal,
+        SharedAddressSpace);
+  }
+
+  BasicBlock *EntryBlock = BasicBlock::Create(Ctx, "", WcFunc);
+  Builder.SetInsertPoint(EntryBlock);
+
+  Type *Arg0Type = Arg0->getType();
+  Type *Arg1Type = Arg1->getType();
+  Value *ReduceListAlloca =
+      Builder.CreateAlloca(Arg0Type, nullptr, Arg0->getName() + ".addr");
+  Value *NumWarpsAlloca =
+      Builder.CreateAlloca(Arg1Type, nullptr, Arg1->getName() + ".addr");
+  Value *ReduceListAddrCast = Builder.CreatePointerBitCastOrAddrSpaceCast(
+      ReduceListAlloca, Arg0Type, ReduceListAlloca->getName() + ".acast");
+  Value *NumWarpsAddrCast = Builder.CreatePointerBitCastOrAddrSpaceCast(
+      NumWarpsAlloca, Arg1Type->getPointerTo(),
+      NumWarpsAlloca->getName() + ".acast");
+  Builder.CreateStore(Arg0, ReduceListAddrCast);
+  Builder.CreateStore(Arg1, NumWarpsAddrCast);
+
+  // Get GPU Info
+  Value *ThreadID = getGPUThreadID(M, OMPBuilder);
+  Value *LaneID = getNVPTXLaneID(M, OMPBuilder);
+  Value *WarpID = getNVPTXWarpID(M, OMPBuilder);
+
+  Value *ReduceListArg =
+      Builder.CreateLoad(Int8PtrTy, ReduceListAddrCast, "reduce_list_arg");
+
+  for (auto En : enumerate(ReductionInfos)) {
+
+    // FIXME(JAN): This loop needs to be added later
+    // for (unsigned TySize = 4; TySize > 0 && RealTySize > 0; TySize /=2) {
+    //    const OpenMPIRBuilder::ReductionInfo &RI = En.value();
+    OMPBuilder.createBarrier(
+        OpenMPIRBuilder::LocationDescription(Builder.saveIP(), Loc.DL),
+        omp::Directive::OMPD_unknown,
+        /* ForceSimpleCall */ false,
+        /* CheckCancelFlag */ true);
+
+    BasicBlock *ThenBB = BasicBlock::Create(Ctx, "then", WcFunc);
+    BasicBlock *ElseBB = BasicBlock::Create(Ctx, "else", WcFunc);
+    BasicBlock *MergeBB = BasicBlock::Create(Ctx, "ifcont", WcFunc);
+
+    // if (lane_id  == 0)
+    Value *IsWarpMaster = Builder.CreateIsNull(LaneID, "warp_master");
+    Builder.CreateCondBr(IsWarpMaster, ThenBB, ElseBB);
+
+    // then
+    // Reduce element = LocalReduceList[i]
+    Builder.SetInsertPoint(ThenBB);
+    auto *RedListArrayTy = ArrayType::get(Int8PtrTy, 1);
+    // FIXME(JAN): maybe it should be 0,0 and not use En.index()
+    Value *ReduceListElementPtrPtr = Builder.CreateConstInBoundsGEP2_64(
+        RedListArrayTy, ReduceListArg, 0, En.index());
+    Value *ReduceListElementPtr = Builder.CreateLoad(
+        Int8PtrTy, ReduceListElementPtrPtr, "reduce_list_element_ptr");
+    Value *TransferElemAddr = Builder.CreateInBoundsGEP(
+        ArrayTy, TransferMedium, {Builder.getInt64(0), WarpID});
+    Value *ReduceListElement = Builder.CreateLoad(I32Type, ReduceListElementPtr,
+                                                  "reduce_list_element");
+    Builder.CreateStore(ReduceListElement, TransferElemAddr,
+                        /*IsVolatile*/ true);
+    Builder.CreateBr(MergeBB);
+
+    // else
+    Builder.SetInsertPoint(ElseBB);
+    Builder.CreateBr(MergeBB);
+
+    // endif
+    Builder.SetInsertPoint(MergeBB);
+    OMPBuilder.createBarrier(
+        OpenMPIRBuilder::LocationDescription(Builder.saveIP(), Loc.DL),
+        omp::Directive::OMPD_unknown,
+        /* ForceSimpleCall */ false,
+        /* CheckCancelFlag */ true);
+
+    // Warp 0 copies reduce element from transfer medium
+    BasicBlock *W0ThenBB = BasicBlock::Create(Ctx, "w0then", WcFunc);
+    BasicBlock *W0ElseBB = BasicBlock::Create(Ctx, "w0else", WcFunc);
+    BasicBlock *W0MergeBB = BasicBlock::Create(Ctx, "w0ifcont", WcFunc);
+
+    Value *NumWarpsVal =
+        Builder.CreateLoad(I32Type, NumWarpsAddrCast, "num_warps");
+    Value *IsActiveThread =
+        Builder.CreateICmpULT(ThreadID, NumWarpsVal, "is_active_thread");
+    Builder.CreateCondBr(IsActiveThread, W0ThenBB, W0ElseBB);
+
+    // W0then
+    // SecMEdiumPtr = &medium[tid]
+    Builder.SetInsertPoint(W0ThenBB);
+    Value *SrcMediumPtrVal = Builder.CreateInBoundsGEP(
+        ArrayTy, TransferMedium, {Builder.getInt64(0), ThreadID});
+    // SrcMediumVal = *SrcMediumPtr
+    // TODO(JAN): Bitcast here, but no load? skipping for now
+    Value *TargetElementPtrPtr = Builder.CreateConstInBoundsGEP2_64(
+        RedListArrayTy, ReduceListArg, 0, En.index());
+    Value *TargetElementPtr =
+        Builder.CreateLoad(Int8PtrTy, TargetElementPtrPtr);
+    Value *SrcMediumValue =
+        Builder.CreateLoad(I32Type, SrcMediumPtrVal, /*IsVolatile*/ true);
+    Builder.CreateStore(SrcMediumValue, TargetElementPtr);
+    Builder.CreateBr(W0MergeBB);
+
+    // W0else
+    Builder.SetInsertPoint(W0ElseBB);
+    Builder.CreateBr(W0MergeBB);
+
+    // W0endif
+    Builder.SetInsertPoint(W0MergeBB);
+    Builder.CreateRetVoid();
+  }
+
+  Builder.restoreIP(OldIP);
+
+  return WcFunc;
+}
+
 /// Create a function with a unique name and a "void (i8*, i8*)" signature in
 /// the given module and return it.
-Function *getFreshReductionFunc(Module &M) {
+static Function *getFreshReductionFunc(Module &M) {
   Type *VoidTy = Type::getVoidTy(M.getContext());
   Type *Int8PtrTy = PointerType::getUnqual(M.getContext());
   auto *FuncTy =
@@ -2146,6 +2349,11 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   populateReductionFunction(ReductionFunc, ReductionInfos, Builder, true);
   llvm::errs() << "----------- Reduction Function ----------\n";
   ReductionFunc->dump();
+
+  llvm::errs() << "----------- Inter Warp Copy Function ----------\n";
+  Function* WcFunc = emitInterWarpCopyFunction(M, Loc, ReductionInfos, *this);
+  WcFunc->dump();
+
   llvm::errs() << "----------- Module ----------\n";
   Module->dump();
 
