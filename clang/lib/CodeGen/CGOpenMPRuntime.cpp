@@ -4881,6 +4881,8 @@ llvm::Function *CGOpenMPRuntime::emitReductionFunction(
   }
   Scope.ForceCleanup();
   CGF.FinishFunction();
+  llvm::errs() << " -------------- Reduction Func ---------------";
+  Fn->dump();
   return Fn;
 }
 

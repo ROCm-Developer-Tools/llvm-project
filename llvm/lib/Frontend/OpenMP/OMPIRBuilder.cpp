@@ -2053,15 +2053,42 @@ Function *getFreshReductionFunc(Module &M) {
                           ".omp.reduction.func", &M);
 }
 
-static void populateReductionFunction(Function *ReductionFunc,
-                                      ArrayRef<OpenMPIRBuilder::ReductionInfo> ReductionInfos,
-                                      IRBuilder<> &Builder) {
-    Module *Module = ReductionFunc->getParent();
-      BasicBlock *ReductionFuncBlock =
+static void populateReductionFunction(
+    Function *ReductionFunc,
+    ArrayRef<OpenMPIRBuilder::ReductionInfo> ReductionInfos,
+    IRBuilder<> &Builder, bool IsGPU) {
+  Module *Module = ReductionFunc->getParent();
+  BasicBlock *ReductionFuncBlock =
       BasicBlock::Create(Module->getContext(), "", ReductionFunc);
   Builder.SetInsertPoint(ReductionFuncBlock);
-  Value *LHSArrayPtr = ReductionFunc->getArg(0);
-  Value *RHSArrayPtr = ReductionFunc->getArg(1);
+  Value *LHSArrayPtr  = nullptr;
+  Value *RHSArrayPtr = nullptr;
+  if (IsGPU) {
+    // Need to alloca memory here and deal with the pointers before getting
+    // LHS/RHS pointers out
+    //
+    Argument *Arg0 = ReductionFunc->getArg(0);
+    Argument *Arg1 = ReductionFunc->getArg(1);
+    Type *Arg0Type = Arg0->getType();
+    Type *Arg1Type = Arg1->getType();
+
+    Value *LHSAlloca =
+        Builder.CreateAlloca(Arg0Type, nullptr, Arg0->getName() + ".addr");
+    Value *RHSAlloca =
+        Builder.CreateAlloca(Arg1Type, nullptr, Arg1->getName() + ".addr");
+    Value *LHSAddrCast =
+        Builder.CreatePointerBitCastOrAddrSpaceCast(LHSAlloca, Arg0Type);
+    Value *RHSAddrCast =
+        Builder.CreatePointerBitCastOrAddrSpaceCast(RHSAlloca, Arg1Type);
+    Builder.CreateStore(Arg0, LHSAddrCast);
+    Builder.CreateStore(Arg1, RHSAddrCast);
+    LHSArrayPtr = Builder.CreateLoad(Arg0Type, LHSAddrCast);
+    RHSArrayPtr = Builder.CreateLoad(Arg1Type, RHSAddrCast);
+  } else {
+    LHSArrayPtr = ReductionFunc->getArg(0);
+    RHSArrayPtr = ReductionFunc->getArg(1);
+  }
+
   unsigned NumReductions = ReductionInfos.size();
   Type *RedArrayTy = ArrayType::get(Builder.getInt8PtrTy(), NumReductions);
 
@@ -2070,13 +2097,14 @@ static void populateReductionFunction(Function *ReductionFunc,
     Value *LHSI8PtrPtr = Builder.CreateConstInBoundsGEP2_64(
         RedArrayTy, LHSArrayPtr, 0, En.index());
     Value *LHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), LHSI8PtrPtr);
-    Value *LHSPtr = Builder.CreateBitCast(LHSI8Ptr, RI.Variable->getType());
+    Value *LHSPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
+        LHSI8Ptr, RI.Variable->getType());
     Value *LHS = Builder.CreateLoad(RI.ElementType, LHSPtr);
     Value *RHSI8PtrPtr = Builder.CreateConstInBoundsGEP2_64(
         RedArrayTy, RHSArrayPtr, 0, En.index());
     Value *RHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), RHSI8PtrPtr);
-    Value *RHSPtr =
-        Builder.CreateBitCast(RHSI8Ptr, RI.PrivateVariable->getType());
+    Value *RHSPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
+        RHSI8Ptr, RI.PrivateVariable->getType());
     Value *RHS = Builder.CreateLoad(RI.ElementType, RHSPtr);
     Value *Reduced;
     Builder.restoreIP(RI.ReductionGen(Builder.saveIP(), LHS, RHS, Reduced));
@@ -2085,25 +2113,54 @@ static void populateReductionFunction(Function *ReductionFunc,
     Builder.CreateStore(Reduced, LHSPtr);
   }
   Builder.CreateRetVoid();
-
 }
 
-
-OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
-    const LocationDescription &Loc, InsertPointTy AllocaIP,
-    ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait) {
-  for (const ReductionInfo &RI : ReductionInfos) {
+static void
+checkReductionInfos(ArrayRef<OpenMPIRBuilder::ReductionInfo> ReductionInfos,
+                    bool IsGPU) {
+  for (const OpenMPIRBuilder::ReductionInfo &RI : ReductionInfos) {
     (void)RI;
     assert(RI.Variable && "expected non-null variable");
     assert(RI.PrivateVariable && "expected non-null private variable");
     assert(RI.ReductionGen && "expected non-null reduction generator callback");
-    // JAN: Skip this assertion, address spaces are present
-    //    assert(RI.Variable->getType() == RI.PrivateVariable->getType() &&
-    //           "expected variables and their private equivalents to have the same "
-    // "type");
+    // JAN: Skip this assertion for GPU, address spaces are present
+    if (!IsGPU) {
+      assert(
+          RI.Variable->getType() == RI.PrivateVariable->getType() &&
+          "expected variables and their private equivalents to have the same "
+          "type");
+    }
     assert(RI.Variable->getType()->isPointerTy() &&
            "expected variables to be pointers");
   }
+}
+
+OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
+    const LocationDescription &Loc, InsertPointTy AllocaIP,
+    ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait) {
+  checkReductionInfos(ReductionInfos, /*IsGPU*/ true);
+  Module *Module = Builder.GetInsertBlock()->getParent()->getParent();
+  if (!updateToLocation(Loc))
+    return InsertPointTy();
+  Function *ReductionFunc = getFreshReductionFunc(*Module);
+  populateReductionFunction(ReductionFunc, ReductionInfos, Builder, true);
+  llvm::errs() << "----------- Reduction Function ----------\n";
+  ReductionFunc->dump();
+  llvm::errs() << "----------- Module ----------\n";
+  Module->dump();
+
+  Builder.CreateRetVoid();
+
+  return Builder.saveIP();
+}
+
+OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
+    const LocationDescription &Loc, InsertPointTy AllocaIP,
+    ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait) {
+  if (Config.isGPU())
+    return createReductionsGPU(Loc, AllocaIP, ReductionInfos, IsNoWait);
+
+  checkReductionInfos(ReductionInfos, /*IsGPU*/ false);
 
   if (!updateToLocation(Loc))
     return InsertPointTy();
@@ -2172,9 +2229,9 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
   Switch->addCase(Builder.getInt32(1), NonAtomicRedBlock);
   Switch->addCase(Builder.getInt32(2), AtomicRedBlock);
 
-  // Populate the non-atomic reduction using the elementwise reduction function.
-  // This loads the elements from the global and private variables and reduces
-  // them before storing back the result to the global variable.
+  // Populate the non-atomic reduction using the elementwise reduction
+  // function. This loads the elements from the global and private variables
+  // and reduces them before storing back the result to the global variable.
   Builder.SetInsertPoint(NonAtomicRedBlock);
   for (auto En : enumerate(ReductionInfos)) {
     const ReductionInfo &RI = En.value();
@@ -2216,7 +2273,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
   // Populate the outlined reduction function using the elementwise reduction
   // function. Partial values are extracted from the type-erased array of
   // pointers to private variables.
-  populateReductionFunction(ReductionFunc, ReductionInfos, Builder);
+  populateReductionFunction(ReductionFunc, ReductionInfos, Builder, false);
   Builder.SetInsertPoint(ContinuationBlock);
   return Builder.saveIP();
 }
@@ -2335,7 +2392,7 @@ CanonicalLoopInfo *OpenMPIRBuilder::createLoopSkeleton(
   CL->assertOK();
 #endif
   return CL;
-}
+  }
 
 CanonicalLoopInfo *
 OpenMPIRBuilder::createCanonicalLoop(const LocationDescription &Loc,

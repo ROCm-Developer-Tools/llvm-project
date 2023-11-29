@@ -1272,6 +1272,19 @@ public:
     AtomicReductionGenTy AtomicReductionGen;
   };
 
+  /// \param Loc                The location where the reduction was
+  ///                           encountered. Must be within the associate
+  ///                           directive and after the last local access to the
+  ///                           reduction variables.
+  /// \param AllocaIP           An insertion point suitable for allocas usable
+  ///                           in reductions.
+  /// \param ReductionInfos     A list of info on each reduction variable.
+  /// \param IsNoWait           A flag set if the reduction is marked as nowait.
+  InsertPointTy createReductionsGPU(const LocationDescription &Loc,
+                                    InsertPointTy AllocaIP,
+                                    ArrayRef<ReductionInfo> ReductionInfos,
+                                    bool IsNoWait = false);
+
   // TODO: provide atomic and non-atomic reduction generators for reduction
   // operators defined by the OpenMP specification.
 

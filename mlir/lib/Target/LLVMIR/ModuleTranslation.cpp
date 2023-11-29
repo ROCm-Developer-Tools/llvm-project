@@ -1542,6 +1542,9 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
     return nullptr;
   }
 
+  //  llvm::errs() << "Input Moudle: \n";
+  //  module->dump();
+  
   std::unique_ptr<llvm::Module> llvmModule =
       prepareLLVMModule(module, llvmContext, name);
   if (!llvmModule)
@@ -1586,6 +1589,7 @@ mlir::translateModuleToLLVMIR(Operation *module, llvm::LLVMContext &llvmContext,
 
   if (llvm::verifyModule(*translator.llvmModule, &llvm::errs()))
     return nullptr;
-
+  //  llvm::errs() << "Created LLVM-IR Module:\n";
+  //  (*translator.llvmModule).dump();
   return std::move(translator.llvmModule);
 }
