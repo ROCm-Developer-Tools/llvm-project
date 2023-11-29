@@ -2130,9 +2130,9 @@ static Value *castValueToType(Module &M, OpenMPIRBuilder &OMPBuilder,
   Builder.restoreIP(CurIP);
 
   Value *ValCastItem = Builder.CreatePointerBitCastOrAddrSpaceCast(
-      CastItem, FromType->getPointerTo());
+      CastItem, FromType->getPointerTo(), "valcastitem");
   Builder.CreateStore(From, ValCastItem);
-  return Builder.CreateLoad(ToType, CastItem);
+  return Builder.CreateLoad(ToType, CastItem, "castitemload");
 }
 
 static Value *
@@ -2140,6 +2140,7 @@ createRuntimeShuffleFunction(Module &M, OpenMPIRBuilder &OMPBuilder,
                              const OpenMPIRBuilder::LocationDescription &Loc,
                              OpenMPIRBuilder::InsertPointTy AllocaIP,
                              Value *Element, Type *ElementType, Value *Offset) {
+  LLVMContext &Ctx = M.getContext();
   IRBuilder<> &Builder = OMPBuilder.Builder;
   uint64_t Size =
       divideCeil(M.getDataLayout().getTypeSizeInBits(ElementType), 8);
@@ -2149,9 +2150,11 @@ createRuntimeShuffleFunction(Module &M, OpenMPIRBuilder &OMPBuilder,
                 : RuntimeFunction::OMPRTL___kmpc_shuffle_int64);
   Type *IntType = Builder.getIntNTy(Size <= 4 ? 32 : 64);
   Value *ElemCast = Builder.CreateCast(Instruction::SExt, Element, IntType);
-  Value *WarpSize = Builder.getInt16(FIXME_JAN_GPU_WARP_SIZE);
+  Value *WarpSize = getGPUWarpSize(M, OMPBuilder);
+  Value *WarpSizeCast =
+      Builder.CreateIntCast(WarpSize, Type::getInt16Ty(Ctx), /*isSigned=*/true);
   Value *ShuffleCall =
-      Builder.CreateCall(ShuffleFunc, {ElemCast, Offset, WarpSize});
+      Builder.CreateCall(ShuffleFunc, {ElemCast, Offset, WarpSizeCast});
   return castValueToType(M, OMPBuilder, ShuffleCall, IntType, AllocaIP, Loc);
 }
 
@@ -2175,17 +2178,20 @@ static void shuffleAndStore(Value *SrcAddr, Value *DstAddr, Type *ElementType,
       continue;
     // FIXME(JAN): Check if there is a function to convert from bytes to bits
     Type *IntTy = Builder.getIntNTy(IntSize*8);
-    Ptr = Builder.CreatePointerBitCastOrAddrSpaceCast(Ptr, IntTy->getPointerTo());
-    ElemPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(ElemPtr, IntTy->getPointerTo());
+    Ptr = Builder.CreatePointerBitCastOrAddrSpaceCast(
+        Ptr, IntTy->getPointerTo(), "ptrcast");
+    ElemPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
+        ElemPtr, IntTy->getPointerTo(), "elemptrcast");
 
     // FIXME(JAN): Implement loop to handle larger size
     assert(((Size / IntSize) <= 1) && "Unsupported IntSize");
     Value *Val = Builder.CreateLoad(IntTy, Ptr);
-    Value *Res = createRuntimeShuffleFunction(M, OMPBuilder, Loc, AllocaIP,
-                                              Val, IntTy, Offset);
+    Value *Res = createRuntimeShuffleFunction(M, OMPBuilder, Loc, AllocaIP, Val,
+                                              IntTy, Offset);
     Builder.CreateStore(Res, ElemPtr);
-    Ptr = Builder.CreateConstGEP1_64(ReductionArrayTy, Ptr, 1);
-    ElemPtr = Builder.CreateConstGEP1_64(ReductionArrayTy, ElemPtr, 1);
+    Ptr = Builder.CreateConstGEP1_64(ReductionArrayTy, Ptr, 1, "ptrgep");
+    ElemPtr =
+        Builder.CreateConstGEP1_64(ReductionArrayTy, ElemPtr, 1, "elemptrgep");
     Size = Size % IntSize;
   }
 }
@@ -2213,16 +2219,18 @@ emitReductionListCopy(CopyAction Action, Type *ReductionArrayTy,
     bool UpdateDestListPtr = false;
 
     // Step 1.1: Get the address for the src element in the Reduce list.
-    Value *SrcElementPtrAddr =
-      Builder.CreateConstGEP2_64(ReductionArrayTy, SrcBase, 0, En.index());
-    SrcElementAddr = Builder.CreateLoad(PtrTy, SrcElementPtrAddr);
+    Value *SrcElementPtrAddr = Builder.CreateConstGEP2_64(
+        ReductionArrayTy, SrcBase, 0, En.index(), "srcelementptraddr");
+    SrcElementAddr =
+        Builder.CreateLoad(PtrTy, SrcElementPtrAddr, "srcelementaddr");
 
     // Step 1.2: Create a temporary to store the element in the destination
     // Reduce list.
     DestElementPtrAddr = Builder.CreateInBoundsGEP(
-          ReductionArrayTy, DestBase,
-          {Builder.getInt64(0), Builder.getInt64(En.index())});
-    switch(Action) {
+        ReductionArrayTy, DestBase,
+        {Builder.getInt64(0), Builder.getInt64(En.index())},
+        "destelementptraddr");
+    switch (Action) {
     case RemoteLaneToThread: {
       OpenMPIRBuilder::InsertPointTy CurIP = Builder.saveIP();
       Builder.restoreIP(AllocaIP);
@@ -2234,7 +2242,7 @@ emitReductionListCopy(CopyAction Action, Type *ReductionArrayTy,
       break;
     }
     case ThreadCopy: {
-      DestElementAddr = Builder.CreateLoad(PtrTy, DestElementPtrAddr);
+      DestElementAddr = Builder.CreateLoad(PtrTy, DestElementPtrAddr, "destelementaddr");
       break;
     }
     }
@@ -2259,8 +2267,8 @@ emitReductionListCopy(CopyAction Action, Type *ReductionArrayTy,
     // scope and that of functions it invokes (i.e., reduce_function).
     // RemoteReduceData[i] = (void*)&RemoteElem
     if (UpdateDestListPtr) {
-      Value *CastDestAddr =
-          Builder.CreatePointerBitCastOrAddrSpaceCast(DestElementAddr, PtrTy);
+      Value *CastDestAddr = Builder.CreatePointerBitCastOrAddrSpaceCast(
+          DestElementAddr, PtrTy, "castdestaddr");
       Builder.CreateStore(CastDestAddr, DestElementPtrAddr);
     }
   }
