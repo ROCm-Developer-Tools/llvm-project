@@ -2690,30 +2690,121 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
     const LocationDescription &Loc, InsertPointTy AllocaIP,
     ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait) {
   checkReductionInfos(ReductionInfos, /*IsGPU*/ true);
-  Module *Module = Builder.GetInsertBlock()->getParent()->getParent();
+  LLVMContext &Ctx = M.getContext();
   if (!updateToLocation(Loc))
     return InsertPointTy();
-  Function *ReductionFunc = getFreshReductionFunc(*Module);
-  populateReductionFunction(ReductionFunc, ReductionInfos, Builder, true);
-  llvm::errs() << "----------- Reduction Function ----------\n";
-  ReductionFunc->dump();
 
-  llvm::errs() << "----------- Inter Warp Copy Function ----------\n";
-  Function* WcFunc = emitInterWarpCopyFunction(M, Loc, ReductionInfos, *this);
-  WcFunc->dump();
+  // Copied code from createReductions
+  BasicBlock *InsertBlock = Loc.IP.getBlock();
+  BasicBlock *ContinuationBlock =
+      InsertBlock->splitBasicBlock(Loc.IP.getPoint(), "reduce.finalize");
+  InsertBlock->getTerminator()->eraseFromParent();
+  Builder.SetInsertPoint(InsertBlock, InsertBlock->end());
 
-  llvm::errs() << "----------- Shuffle and Reduce Function ----------\n";
-  assert(ReductionInfos.size() == 1 && "More than one reduction variable");
+
   
+  Function *ReductionFunc = getFreshReductionFunc(M);
+  InsertPointTy CurIP = Builder.saveIP();
+  populateReductionFunction(ReductionFunc, ReductionInfos, Builder, true);
+  Builder.restoreIP(CurIP);
+  bool ParallelReduction = true; // FIXME(JAN)
+  bool TeamsReduction = false; // FIXME(JAN)
+
+  assert((TeamsReduction || ParallelReduction) && "No concurrent reduction");
+
+  uint32_t SrcLocStrSize;
+  Constant *SrcLocStr = getOrCreateDefaultSrcLocStr(SrcLocStrSize);
+  Value *RTLoc =
+      getOrCreateIdent(SrcLocStr, SrcLocStrSize, llvm::omp::IdentFlag(0), 0);
+
+  // 1. Build a list of reduction variables
+  auto Size = ReductionInfos.size();
+  // FIXME(JAN): skipping variably modified type storage for array size
+  Type *PtrTy = PointerType::getUnqual(Ctx);
+  Type *RedArrayTy = ArrayType::get(PtrTy, Size);
+  CurIP = Builder.saveIP();
+  Builder.restoreIP(AllocaIP);
+  Value *ReductionListAlloca = Builder.CreateAlloca(RedArrayTy, nullptr,
+                                                    ".omp.reduction.red_list");
+  Value *ReductionList =
+      Builder.CreatePointerBitCastOrAddrSpaceCast(ReductionListAlloca, PtrTy);
+  Builder.restoreIP(CurIP);
+  for (auto En : enumerate(ReductionInfos)) {
+    const ReductionInfo &RI = En.value();
+    Value *ElemPtr = Builder.CreateConstGEP1_64(RedArrayTy, ReductionList,
+                                                En.index(), "elem_ptr");
+    Value *CastElem =
+        Builder.CreatePointerBitCastOrAddrSpaceCast(RI.Variable, PtrTy);
+    Builder.CreateStore(ElemPtr, CastElem);
+  }
+
+  Value *RL =
+    Builder.CreatePointerBitCastOrAddrSpaceCast(ReductionList, PtrTy);
+  // FIXME(JAN): Compute ReductionDataSize correctly
+  Value *ReductionDataSize = Builder.getInt64(4);
+
+  CurIP = Builder.saveIP();
   Function *SarFunc =
     emitShuffleAndReduceFunction(M, Loc, ReductionInfos, ReductionFunc, *this);
-  SarFunc->dump();
+  Function* WcFunc = emitInterWarpCopyFunction(M, Loc, ReductionInfos, *this);
+  Builder.restoreIP(CurIP);
+
+  Value *Res;
+  if (ParallelReduction) {
+    Value *SarFuncCast =
+        Builder.CreatePointerBitCastOrAddrSpaceCast(SarFunc, PtrTy);
+    Value *WcFuncCast =
+        Builder.CreatePointerBitCastOrAddrSpaceCast(WcFunc, PtrTy);
+    Value *Args[] = {RTLoc, ReductionDataSize, RL, SarFuncCast, WcFuncCast};
+    Function *Pv2Ptr = getOrCreateRuntimeFunctionPtr(
+        RuntimeFunction::OMPRTL___kmpc_nvptx_parallel_reduce_nowait_v2);
+    Res = Builder.CreateCall(Pv2Ptr, Args);
+  } else {
+    assert(false && "Teams reduction not supported yet");
+  }
+
+  Function *CurFunc = Builder.GetInsertBlock()->getParent();
+  BasicBlock *ExitBB = BasicBlock::Create(Ctx, ".omp.reduction.done", CurFunc);
+  BasicBlock *ThenBB = BasicBlock::Create(Ctx, ".omp.reduction.then", CurFunc);
+  Value *Cond = Builder.CreateICmpEQ(Res, Builder.getInt32(1));
+  Builder.CreateCondBr(Cond, ThenBB, ExitBB);
+
+  Builder.SetInsertPoint(ThenBB);
+  for (auto En : enumerate(ReductionInfos)) {
+    const ReductionInfo &RI = En.value();
+    Value *InputVal = Builder.CreateLoad(RI.ElementType, RI.Variable);
+    Value *RedVal = Builder.CreateLoad(
+        RI.ElementType,
+        Builder.CreatePointerBitCastOrAddrSpaceCast(RI.PrivateVariable, PtrTy));
+    Value *sum;
+    Builder.restoreIP(RI.ReductionGen(Builder.saveIP(), InputVal, RedVal, sum));
+    Builder.CreateStore(sum, RI.Variable);
+    Builder.CreateBr(ExitBB);
+  }
+
+  Builder.SetInsertPoint(ExitBB);
+  Builder.CreateBr(ContinuationBlock);
+
+  // llvm::errs() << "----------- Reduction Function ----------\n";
+  //  ReductionFunc->dump();
+
+  //  llvm::errs() << "----------- Inter Warp Copy Function ----------\n";
+  //  Function* WcFunc = emitInterWarpCopyFunction(M, Loc, ReductionInfos, *this);
+  //  WcFunc->dump();
+
+  //  llvm::errs() << "----------- Shuffle and Reduce Function ----------\n";
+
+  //  Function *SarFunc =
+  //    emitShuffleAndReduceFunction(M, Loc, ReductionInfos, ReductionFunc, *this);
+  //  SarFunc->dump();
+
+  assert(ReductionInfos.size() == 1 && "More than one reduction variable");
+  llvm::errs() << "----------- Reductions Main  ----------\n";
+  Builder.GetInsertBlock()->getParent()->dump();
 
   llvm::errs() << "----------- Module ----------\n";
-  Module->dump();
-
-  Builder.CreateRetVoid();
-
+  M.dump();
+  Builder.SetInsertPoint(ContinuationBlock);
   return Builder.saveIP();
 }
 
