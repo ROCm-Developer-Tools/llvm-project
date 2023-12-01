@@ -7765,7 +7765,6 @@ mlir/include/mlir/Interfaces/CallInterfaces.h
 mlir/include/mlir/Interfaces/CastInterfaces.h
 mlir/include/mlir/Interfaces/ControlFlowInterfaces.h
 mlir/include/mlir/Interfaces/CopyOpInterface.h
-mlir/include/mlir/Interfaces/CSEInterfaces.h
 mlir/include/mlir/Interfaces/DataLayoutInterfaces.h
 mlir/include/mlir/Interfaces/DecodeAttributesInterfaces.h
 mlir/include/mlir/Interfaces/DerivedAttributeOpInterface.h

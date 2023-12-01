@@ -520,23 +520,3 @@ func.func @cse_recursive_effects_failure() -> (i32, i32, i32) {
   %2 = "test.op_with_memread"() : () -> (i32)
   return %0, %2, %1 : i32, i32, i32
 }
-
-// CHECK-LABEL: @no_cse_across_disabled_op
-func.func @no_cse_across_disabled_op() -> (i32) {
-  // CHECK-NEXT: %[[CONST1:.+]] = arith.constant 1 : i32
-  %0 = arith.constant 1 : i32
-
-  // CHECK-NEXT: test.no_cse_one_region_op
-  "test.no_cse_one_region_op"() ({
-    %1 = arith.constant 1 : i32
-    %2 = arith.addi %1, %1 : i32
-    "foo.yield"(%2) : (i32) -> ()
-
-    // CHECK-NEXT: %[[CONST2:.+]] = arith.constant 1 : i32
-    // CHECK-NEXT: %[[SUM:.+]] = arith.addi %[[CONST2]], %[[CONST2]] : i32
-    // CHECK-NEXT: "foo.yield"(%[[SUM]]) : (i32) -> ()
-  }) : () -> ()
-
-  // CHECK: return %[[CONST1]] : i32
-  return %0 : i32
-}

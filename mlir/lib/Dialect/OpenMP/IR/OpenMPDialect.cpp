@@ -18,8 +18,6 @@
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/OperationSupport.h"
-#include "mlir/Interfaces/CSEInterfaces.h"
-#include "mlir/Interfaces/FoldInterfaces.h"
 
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLForwardCompat.h"
@@ -53,24 +51,6 @@ struct LLVMPointerPointerLikeModel
                                             LLVM::LLVMPointerType> {
   Type getElementType(Type pointer) const { return Type(); }
 };
-
-struct OpenMPDialectCSEInterface : public DialectCSEInterface {
-  using DialectCSEInterface::DialectCSEInterface;
-
-  bool subexpressionExtractionAllowed(Operation *op) const final {
-    // Avoid extracting common subexpressions across op boundaries
-    return !isa<TargetOp>(op);
-  }
-};
-
-struct OpenMPDialectFoldInterface : public DialectFoldInterface {
-  using DialectFoldInterface::DialectFoldInterface;
-
-  bool shouldMaterializeInto(Region *region) const final {
-    // Avoid folding constants across target regions
-    return isa<TargetOp>(region->getParentOp());
-  }
-};
 } // namespace
 
 void OpenMPDialect::initialize() {
@@ -87,8 +67,6 @@ void OpenMPDialect::initialize() {
 #include "mlir/Dialect/OpenMP/OpenMPOpsTypes.cpp.inc"
       >();
 
-  addInterface<OpenMPDialectCSEInterface>();
-  addInterface<OpenMPDialectFoldInterface>();
   MemRefType::attachInterface<MemRefPointerLikeModel>(*getContext());
   LLVM::LLVMPointerType::attachInterface<LLVMPointerPointerLikeModel>(
       *getContext());

@@ -15,7 +15,6 @@
 
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/Interfaces/CSEInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/Passes.h"
@@ -62,8 +61,7 @@ namespace {
 class CSEDriver {
 public:
   CSEDriver(RewriterBase &rewriter, DominanceInfo *domInfo)
-      : rewriter(rewriter), domInfo(domInfo),
-        interfaces(rewriter.getContext()) {}
+      : rewriter(rewriter), domInfo(domInfo) {}
 
   /// Simplify all operations within the given op.
   void simplify(Operation *op, bool *changed = nullptr);
@@ -123,9 +121,6 @@ private:
   std::vector<Operation *> opsToErase;
   DominanceInfo *domInfo = nullptr;
   MemEffectsCache memEffectsCache;
-
-  /// CSE interfaces in the present context that can modify CSE behavior.
-  DialectInterfaceCollection<DialectCSEInterface> interfaces;
 
   // Various statistics.
   int64_t numCSE = 0;
@@ -294,12 +289,7 @@ void CSEDriver::simplifyBlock(ScopedMapTy &knownValues, Block *bb,
       // If this operation is isolated above, we can't process nested regions
       // with the given 'knownValues' map. This would cause the insertion of
       // implicit captures in explicit capture only regions.
-      // Also, avoid capturing known values from parent regions if this behavior
-      // is explicitly disabled for the given operation.
-      const DialectCSEInterface *cseInterface = interfaces.getInterfaceFor(&op);
-      if (op.mightHaveTrait<OpTrait::IsIsolatedFromAbove>() ||
-          LLVM_UNLIKELY(cseInterface &&
-                        !cseInterface->subexpressionExtractionAllowed(&op))) {
+      if (op.mightHaveTrait<OpTrait::IsIsolatedFromAbove>()) {
         ScopedMapTy nestedKnownValues;
         for (auto &region : op.getRegions())
           simplifyRegion(nestedKnownValues, region);
