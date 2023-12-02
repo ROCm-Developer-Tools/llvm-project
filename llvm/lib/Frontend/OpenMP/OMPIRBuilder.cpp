@@ -2296,7 +2296,6 @@ static Function *emitShuffleAndReduceFunction(
       VoidTy, {PtrTy, I16Type, I16Type, I16Type}, /* IsVarArg */ false);
   Function *SarFunc =
       Function::Create(FuncTy, GlobalVariable::InternalLinkage,
-                       M.getDataLayout().getDefaultGlobalsAddressSpace(),
                        "_omp_reduction_shuffle_and_reduce_func", &M);
   SarFunc->setDoesNotRecurse();
 
@@ -2393,6 +2392,7 @@ static Function *emitShuffleAndReduceFunction(
   Value *CA0OrCA1 = Builder.CreateOr(CondAlgo0, CondAlgo1);
   Value *CondReduce = Builder.CreateOr(CA0OrCA1, CondAlgo2);
 
+
   BasicBlock *ThenBB = BasicBlock::Create(Ctx, "then", SarFunc);
   BasicBlock *ElseBB = BasicBlock::Create(Ctx, "else", SarFunc);
   BasicBlock *MergeBB = BasicBlock::Create(Ctx, "ifcont", SarFunc);
@@ -2418,17 +2418,16 @@ static Function *emitShuffleAndReduceFunction(
   BasicBlock *CpyElseBB = BasicBlock::Create(Ctx, "cpy_else", SarFunc);
   BasicBlock *CpyMergeBB = BasicBlock::Create(Ctx, "cpy_ifcont", SarFunc);
 
-  Builder.CreateCondBr(CondCopy, ThenBB, ElseBB);
+  Builder.CreateCondBr(CondCopy, CpyThenBB, CpyElseBB);
 
   Builder.SetInsertPoint(CpyThenBB);
   emitReductionListCopy(ThreadCopy, RedListArrayTy, ReductionInfos,
-                        RemoteListAddrCast, ReduceListAddrCast, M, OMPBuilder,
+                        RemoteListAddrCast, ReduceList, M, OMPBuilder,
                         Loc, AllocaIP);
   Builder.CreateBr(CpyMergeBB);
   Builder.SetInsertPoint(CpyElseBB);
   Builder.CreateBr(CpyMergeBB);
   Builder.SetInsertPoint(CpyMergeBB);
-  
   Builder.CreateRetVoid();
 
   return SarFunc;
@@ -2448,7 +2447,6 @@ static Function *emitInterWarpCopyFunction(
       FunctionType::get(VoidTy, {PtrTy, I32Type}, /* IsVarArg */ false);
   Function *WcFunc =
       Function::Create(FuncTy, GlobalVariable::InternalLinkage,
-                       M.getDataLayout().getDefaultGlobalsAddressSpace(),
                        "_omp_reduction_inter_warp_copy_func", &M);
   WcFunc->setDoesNotRecurse();
 
@@ -2512,7 +2510,6 @@ static Function *emitInterWarpCopyFunction(
         omp::Directive::OMPD_unknown,
         /* ForceSimpleCall */ false,
         /* CheckCancelFlag */ true);
-
     BasicBlock *ThenBB = BasicBlock::Create(Ctx, "then", WcFunc);
     BasicBlock *ElseBB = BasicBlock::Create(Ctx, "else", WcFunc);
     BasicBlock *MergeBB = BasicBlock::Create(Ctx, "ifcont", WcFunc);
@@ -2584,9 +2581,9 @@ static Function *emitInterWarpCopyFunction(
 
     // W0endif
     Builder.SetInsertPoint(W0MergeBB);
-    Builder.CreateRetVoid();
   }
 
+  Builder.CreateRetVoid();
   Builder.restoreIP(OldIP);
 
   return WcFunc;
@@ -2600,7 +2597,6 @@ static Function *getFreshReductionFunc(Module &M) {
   auto *FuncTy =
       FunctionType::get(VoidTy, {Int8PtrTy, Int8PtrTy}, /* IsVarArg */ false);
   return Function::Create(FuncTy, GlobalVariable::InternalLinkage,
-                          M.getDataLayout().getDefaultGlobalsAddressSpace(),
                           ".omp.reduction.func", &M);
 }
 
@@ -2734,8 +2730,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
     Value *ElemPtr = Builder.CreateConstGEP1_64(RedArrayTy, ReductionList,
                                                 En.index(), "elem_ptr");
     Value *CastElem =
-        Builder.CreatePointerBitCastOrAddrSpaceCast(RI.Variable, PtrTy);
-    Builder.CreateStore(ElemPtr, CastElem);
+        Builder.CreatePointerBitCastOrAddrSpaceCast(RI.PrivateVariable, PtrTy);
+    Builder.CreateStore(CastElem, ElemPtr);
   }
 
   Value *RL =
@@ -2799,11 +2795,11 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   //  SarFunc->dump();
 
   assert(ReductionInfos.size() == 1 && "More than one reduction variable");
-  llvm::errs() << "----------- Reductions Main  ----------\n";
-  Builder.GetInsertBlock()->getParent()->dump();
+  //  llvm::errs() << "----------- Reductions Main  ----------\n";
+  //  Builder.GetInsertBlock()->getParent()->dump();
 
-  llvm::errs() << "----------- Module ----------\n";
-  M.dump();
+  //  llvm::errs() << "----------- Module ----------\n";
+  //  M.dump();
   Builder.SetInsertPoint(ContinuationBlock);
   return Builder.saveIP();
 }
