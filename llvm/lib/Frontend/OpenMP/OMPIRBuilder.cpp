@@ -3361,6 +3361,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::applyStaticChunkedWorkshareLoop(
       IsLastChunk, CountUntilOrigTripCount, ChunkRange, "omp_chunk.tripcount");
   Value *BackcastedChunkTC =
       Builder.CreateTrunc(ChunkTripCount, IVTy, "omp_chunk.tripcount.trunc");
+
   CLI->setTripCount(BackcastedChunkTC);
 
   // Update all uses of the induction variable except the one in the condition
@@ -3436,7 +3437,11 @@ getKmpcForStaticLoopForType(Type *Ty, OpenMPIRBuilder *OMPBuilder,
 static void createTargetLoopWorkshareCall(
     OpenMPIRBuilder *OMPBuilder, WorksharingLoopType LoopType,
     BasicBlock *InsertBlock, Value *Ident, Value *LoopBodyArg,
-    Type *ParallelTaskPtr, Value *TripCount, Function &LoopBodyFn) {
+    Type *ParallelTaskPtr, Value *TripCountOrig, Function &LoopBodyFn) {
+  // FIXME(JAN): The trip count is 1 larger than it should be, this may not be
+  // the right way to fix it, but it could be.
+  Value *TripCount = OMPBuilder.Builder.CreateSub(
+      TripCountOrig, OMPBuilder.Builder.getInt32(1));
   Type *TripCountTy = TripCount->getType();
   Module &M = OMPBuilder->M;
   IRBuilder<> &Builder = OMPBuilder->Builder;
