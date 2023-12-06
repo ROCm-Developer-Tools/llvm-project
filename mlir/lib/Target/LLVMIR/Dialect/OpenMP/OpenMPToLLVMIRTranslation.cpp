@@ -1022,14 +1022,24 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   std::optional<omp::ScheduleModifier> scheduleModifier =
       loop.getScheduleModifier();
   bool isSimd = loop.getSimdModifier();
+  // TODO: Handle distribute loop without parallel clause
   bool distributeParallelCodeGen = opInst.getParentOfType<omp::DistributeOp>();
-
-  ompBuilder->applyWorkshareLoop(
-      ompLoc.DL, loopInfo, allocaIP, !loop.getNowait(),
-      convertToScheduleKind(schedule), chunk, isSimd,
-      scheduleModifier == omp::ScheduleModifier::monotonic,
-      scheduleModifier == omp::ScheduleModifier::nonmonotonic, isOrdered,
-      distributeParallelCodeGen);
+  if (distributeParallelCodeGen) {
+    ompBuilder->applyWorkshareLoop(
+        ompLoc.DL, loopInfo, allocaIP, !loop.getNowait(),
+        convertToScheduleKind(schedule), chunk, isSimd,
+        scheduleModifier == omp::ScheduleModifier::monotonic,
+        scheduleModifier == omp::ScheduleModifier::nonmonotonic, isOrdered,
+        llvm::omp::WorksharingLoopType::DistributeForStaticLoop);
+  }
+  else {
+    ompBuilder->applyWorkshareLoop(
+        ompLoc.DL, loopInfo, allocaIP, !loop.getNowait(),
+        convertToScheduleKind(schedule), chunk, isSimd,
+        scheduleModifier == omp::ScheduleModifier::monotonic,
+        scheduleModifier == omp::ScheduleModifier::nonmonotonic, isOrdered,
+        llvm::omp::WorksharingLoopType::ForStaticLoop);
+  }
 
   // Continue building IR after the loop. Note that the LoopInfo returned by
   // `collapseLoops` points inside the outermost loop and is intended for

@@ -1706,9 +1706,9 @@ public:
     return Opcode <= TargetOpcode::COPY;
   }
 
-  virtual int getOperandLatency(const InstrItineraryData *ItinData,
-                                SDNode *DefNode, unsigned DefIdx,
-                                SDNode *UseNode, unsigned UseIdx) const;
+  virtual std::optional<unsigned>
+  getOperandLatency(const InstrItineraryData *ItinData, SDNode *DefNode,
+                    unsigned DefIdx, SDNode *UseNode, unsigned UseIdx) const;
 
   /// Compute and return the use operand latency of a given pair of def and use.
   /// In most cases, the static scheduling itinerary was enough to determine the
@@ -1718,10 +1718,10 @@ public:
   /// This is a raw interface to the itinerary that may be directly overridden
   /// by a target. Use computeOperandLatency to get the best estimate of
   /// latency.
-  virtual int getOperandLatency(const InstrItineraryData *ItinData,
-                                const MachineInstr &DefMI, unsigned DefIdx,
-                                const MachineInstr &UseMI,
-                                unsigned UseIdx) const;
+  virtual std::optional<unsigned>
+  getOperandLatency(const InstrItineraryData *ItinData,
+                    const MachineInstr &DefMI, unsigned DefIdx,
+                    const MachineInstr &UseMI, unsigned UseIdx) const;
 
   /// Compute the instruction latency of a given instruction.
   /// If the instruction has higher cost when predicated, it's returned via
@@ -1732,8 +1732,8 @@ public:
 
   virtual unsigned getPredicationCost(const MachineInstr &MI) const;
 
-  virtual int getInstrLatency(const InstrItineraryData *ItinData,
-                              SDNode *Node) const;
+  virtual unsigned getInstrLatency(const InstrItineraryData *ItinData,
+                                   SDNode *Node) const;
 
   /// Return the default expected latency for a def based on its opcode.
   unsigned defaultDefLatency(const MCSchedModel &SchedModel,
@@ -2194,8 +2194,8 @@ public:
   /// finalize-isel. Example:
   /// INLINEASM ... 262190 /* mem:m */, %stack.0.x.addr, 1, $noreg, 0, $noreg
   /// we would add placeholders for:                     ^  ^       ^  ^
-  virtual void
-  getFrameIndexOperands(SmallVectorImpl<MachineOperand> &Ops) const {
+  virtual void getFrameIndexOperands(SmallVectorImpl<MachineOperand> &Ops,
+                                     int FI) const {
     llvm_unreachable("unknown number of operands necessary");
   }
 
