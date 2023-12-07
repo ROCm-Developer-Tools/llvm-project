@@ -1979,11 +1979,20 @@ private:
                                 .getDefiningOp<mlir::omp::MapInfoOp>()
                                 .getVarPtr();
 
+      // Replace instances of omp.target block arguments used outside with their
+      // corresponding host value.
       arg.replaceUsesWithIf(hostVal, [&](mlir::OpOperand &operand) -> bool {
-        if (mlir::Operation *owner = operand.getOwner()) {
-          if (auto declareOp = llvm::dyn_cast<hlfir::DeclareOp>(owner)) {
-            auto hostDeclareOp = hostVal.getDefiningOp<hlfir::DeclareOp>();
+        // If the use is an hlfir.declare, we need to search for the matching
+        // one within host code.
+        if (auto declareOp = llvm::dyn_cast_if_present<hlfir::DeclareOp>(
+                operand.getOwner())) {
+          if (auto hostDeclareOp = hostVal.getDefiningOp<hlfir::DeclareOp>()) {
             declareOp->replaceUsesWithIf(hostDeclareOp.getResults(),
+                                         useOutsideTargetRegion);
+          } else if (auto hostBoxOp = hostVal.getDefiningOp<fir::BoxAddrOp>()) {
+            declareOp->replaceUsesWithIf(hostBoxOp.getVal()
+                                             .getDefiningOp<hlfir::DeclareOp>()
+                                             .getResults(),
                                          useOutsideTargetRegion);
           }
         }
