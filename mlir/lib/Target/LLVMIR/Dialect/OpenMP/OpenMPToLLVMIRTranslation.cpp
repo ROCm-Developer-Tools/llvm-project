@@ -1061,9 +1061,11 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   // and remove it later.
   llvm::UnreachableInst *tempTerminator = builder.CreateUnreachable();
   builder.SetInsertPoint(tempTerminator);
+  bool parallelCodeGen = opInst.getParentOfType<omp::ParallelOp>();
+  bool distribute = !parallelCodeGen;
   llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
       ompBuilder->createReductions(builder.saveIP(), allocaIP, reductionInfos,
-                                   loop.getNowait());
+                                   loop.getNowait(), distribute);
   if (!contInsertPoint.getBlock())
     return loop->emitOpError() << "failed to convert reductions";
   auto nextInsertionPoint =
@@ -1076,8 +1078,9 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
 
 /// Converts the OpenMP parallel operation to LLVM IR.
 static LogicalResult
-convertOmpParallel(omp::ParallelOp opInst, llvm::IRBuilderBase &builder,
+convertOmpParallel(Operation &opInst1, llvm::IRBuilderBase &builder,
                    LLVM::ModuleTranslation &moduleTranslation) {
+  auto opInst = cast<omp::ParallelOp>(opInst1);
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
   // TODO: support error propagation in OpenMPIRBuilder and use it instead of
   // relying on captured variables.
@@ -1144,10 +1147,12 @@ convertOmpParallel(omp::ParallelOp opInst, llvm::IRBuilderBase &builder,
       // Generate reductions from info
       llvm::UnreachableInst *tempTerminator = builder.CreateUnreachable();
       builder.SetInsertPoint(tempTerminator);
-
+      bool distributeParallelCodeGen =
+          opInst1.getParentOfType<omp::DistributeOp>();
       llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
           ompBuilder->createReductions(builder.saveIP(), allocaIP,
-                                       reductionInfos, false);
+                                       reductionInfos, false,
+                                       distributeParallelCodeGen);
       if (!contInsertPoint.getBlock()) {
         bodyGenStatus = opInst->emitOpError() << "failed to convert reductions";
         return;
@@ -3183,7 +3188,7 @@ LogicalResult OpenMPDialectLLVMIRTranslationInterface::convertOperation(
         return success();
       })
       .Case([&](omp::ParallelOp op) {
-        return convertOmpParallel(op, builder, moduleTranslation);
+        return convertOmpParallel(*op, builder, moduleTranslation);
       })
       .Case([&](omp::ReductionOp reductionOp) {
         return convertOmpReductionOp(reductionOp, builder, moduleTranslation);
