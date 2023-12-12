@@ -147,6 +147,8 @@ static bool isValidWorkshareLoopScheduleType(OMPScheduleType SchedType) {
 }
 #endif
 
+Function *GLOBAL_ReductionFunc = nullptr;
+
 static const omp::GV &getGridValue(const Triple &T, Function *Kernel) {
   if (T.isAMDGPU()) {
     StringRef Features =
@@ -3022,10 +3024,16 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   InsertBlock->getTerminator()->eraseFromParent();
   Builder.SetInsertPoint(InsertBlock, InsertBlock->end());
 
-  Function *ReductionFunc = getFreshReductionFunc(M);
-  InsertPointTy CurIP = Builder.saveIP();
-  populateReductionFunction(ReductionFunc, ReductionInfos, Builder, true);
-  Builder.restoreIP(CurIP);
+  Function *ReductionFunc = nullptr;
+  if (GLOBAL_ReductionFunc) {
+    ReductionFunc = GLOBAL_ReductionFunc;
+  } else {
+    ReductionFunc = getFreshReductionFunc(M);
+    GLOBAL_ReductionFunc= ReductionFunc;
+    InsertPointTy CurIP = Builder.saveIP();
+    populateReductionFunction(ReductionFunc, ReductionInfos, Builder, true);
+    Builder.restoreIP(CurIP);
+  }
   bool ParallelReduction = !IsDistribute; // FIXME(JAN)
   bool TeamsReduction = IsDistribute; // FIXME(JAN)
 
@@ -3041,7 +3049,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   // FIXME(JAN): skipping variably modified type storage for array size
   Type *PtrTy = PointerType::getUnqual(Ctx);
   Type *RedArrayTy = ArrayType::get(PtrTy, Size);
-  CurIP = Builder.saveIP();
+  InsertPointTy CurIP = Builder.saveIP();
   Builder.restoreIP(AllocaIP);
   Value *ReductionListAlloca = Builder.CreateAlloca(RedArrayTy, nullptr,
                                                     ".omp.reduction.red_list");
@@ -3050,7 +3058,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   Builder.restoreIP(CurIP);
   for (auto En : enumerate(ReductionInfos)) {
     const ReductionInfo &RI = En.value();
-    Value *ElemPtr = Builder.CreateConstGEP1_64(RedArrayTy, ReductionList,
+    Value *ElemPtr = Builder.CreateConstGEP2_64(RedArrayTy, ReductionList,
+                                                0,
                                                 En.index(), "elem_ptr");
     Value *CastElem =
         Builder.CreatePointerBitCastOrAddrSpaceCast(RI.PrivateVariable, PtrTy);
@@ -3060,6 +3069,14 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   Function *SarFunc = emitShuffleAndReduceFunction(M, Loc, ReductionInfos,
                                                    ReductionFunc, *this);
   Function *WcFunc = emitInterWarpCopyFunction(M, Loc, ReductionInfos, *this);
+    Function *LtGCFunc =
+        emitListToGlobalCopyFunction(M, Loc, ReductionInfos, *this);
+    Function *LtGRFunc = emitListToGlobalReduceFunction(M, Loc, ReductionInfos,
+                                                        ReductionFunc, *this);
+    Function *GtLCFunc =
+        emitGlobalToListCopyFunction(M, Loc, ReductionInfos, *this);
+    Function *GtLRFunc = emitGlobalToListReduceFunction(M, Loc, ReductionInfos,
+                                                        ReductionFunc, *this);
   Builder.restoreIP(CurIP);
 
   Value *RL =
@@ -3078,24 +3095,18 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
         RuntimeFunction::OMPRTL___kmpc_nvptx_parallel_reduce_nowait_v2);
     Res = Builder.CreateCall(Pv2Ptr, Args);
   } else {
+    errs() << "---------- Creating TEAMS Reduction ----------\n";
     CurIP = Builder.saveIP();
-    Function *LtGCFunc =
-        emitListToGlobalCopyFunction(M, Loc, ReductionInfos, *this);
-    Function *LtGRFunc = emitListToGlobalReduceFunction(M, Loc, ReductionInfos,
-                                                        ReductionFunc, *this);
-    Function *GtLCFunc =
-        emitGlobalToListCopyFunction(M, Loc, ReductionInfos, *this);
-    Function *GtLRFunc = emitGlobalToListReduceFunction(M, Loc, ReductionInfos,
-                                                        ReductionFunc, *this);
     Builder.restoreIP(CurIP);
+
     Function *RedFixedBuferFn = getOrCreateRuntimeFunctionPtr(
         RuntimeFunction::OMPRTL___kmpc_reduction_get_fixed_buffer);
 
-    auto *KernelTeamsReductionPtr =
+    Value *KernelTeamsReductionPtr =
       Builder.CreateCall(RedFixedBuferFn, {});
 
     Value *Args3[] = {RTLoc,
-                      RedFixedBuferFn,
+                      KernelTeamsReductionPtr,
                       Builder.getInt32(1024),
                       ReductionDataSize,
                       RL,
@@ -3109,6 +3120,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
     Function *TeamsReduceFn = getOrCreateRuntimeFunctionPtr(
         RuntimeFunction::OMPRTL___kmpc_nvptx_teams_reduce_nowait_v2);
     Res = Builder.CreateCall(TeamsReduceFn, Args3);
+    errs() << "---------- Creating TEAMS Reduction END ------\n";
+
   }
 
   Function *CurFunc = Builder.GetInsertBlock()->getParent();
@@ -3132,26 +3145,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
 
   Builder.SetInsertPoint(ExitBB);
   Builder.CreateBr(ContinuationBlock);
-
-  // llvm::errs() << "----------- Reduction Function ----------\n";
-  //  ReductionFunc->dump();
-
-  //  llvm::errs() << "----------- Inter Warp Copy Function ----------\n";
-  //  Function* WcFunc = emitInterWarpCopyFunction(M, Loc, ReductionInfos, *this);
-  //  WcFunc->dump();
-
-  //  llvm::errs() << "----------- Shuffle and Reduce Function ----------\n";
-
-  //  Function *SarFunc =
-  //    emitShuffleAndReduceFunction(M, Loc, ReductionInfos, ReductionFunc, *this);
-  //  SarFunc->dump();
-
   assert(ReductionInfos.size() == 1 && "More than one reduction variable");
-  //  llvm::errs() << "----------- Reductions Main  ----------\n";
-  //  Builder.GetInsertBlock()->getParent()->dump();
-
-  //  llvm::errs() << "----------- Module ----------\n";
-  //  M.dump();
   Builder.SetInsertPoint(ContinuationBlock);
   return Builder.saveIP();
 }

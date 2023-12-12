@@ -88,6 +88,8 @@ public:
 };
 } // namespace
 
+SmallVector<llvm::OpenMPIRBuilder::ReductionInfo> GLOBAL_reductionInfos;
+
 /// Find the insertion point for allocas given the current insertion point for
 /// normal operations in the builder.
 static llvm::OpenMPIRBuilder::InsertPointTy
@@ -807,7 +809,7 @@ allocReductionVars(T loop, llvm::IRBuilderBase &builder,
 /// Collect reduction info
 template <typename T>
 static void collectReductionInfo(
-    T loop, llvm::IRBuilderBase &builder,
+    T &loop, llvm::IRBuilderBase &builder,
     LLVM::ModuleTranslation &moduleTranslation,
     SmallVector<omp::ReductionDeclareOp> &reductionDecls,
     SmallVector<OwningReductionGen> &owningReductionGens,
@@ -880,6 +882,9 @@ static void getSinkableAllocas(LLVM::ModuleTranslation &moduleTranslation,
     allocasToSink.insert(llvmAlloca);
   }
 }
+
+SmallVector<OwningReductionGen> GLOBAL_owningReductionGens;
+SmallVector<OwningAtomicReductionGen> GLOBAL_owningAtomicReductionGens;
 
 /// Converts an OpenMP workshare loop into LLVM IR using OpenMPIRBuilder.
 static LogicalResult
@@ -1053,19 +1058,21 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   SmallVector<OwningAtomicReductionGen> owningAtomicReductionGens;
   SmallVector<llvm::OpenMPIRBuilder::ReductionInfo> reductionInfos;
   collectReductionInfo(loop, builder, moduleTranslation, reductionDecls,
-                       owningReductionGens, owningAtomicReductionGens,
+                       GLOBAL_owningReductionGens, GLOBAL_owningAtomicReductionGens,
                        privateReductionVariables, reductionInfos);
-
+  GLOBAL_reductionInfos = reductionInfos;
   // The call to createReductions below expects the block to have a
   // terminator. Create an unreachable instruction to serve as terminator
   // and remove it later.
   llvm::UnreachableInst *tempTerminator = builder.CreateUnreachable();
   builder.SetInsertPoint(tempTerminator);
-  bool parallelCodeGen = opInst.getParentOfType<omp::ParallelOp>();
-  bool distribute = !parallelCodeGen;
+  if(ompBuilder->Config.isGPU()) {
+    llvm::errs() << "--------------- Threads GPU Reduction ------------\n";
+  }
+
   llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
       ompBuilder->createReductions(builder.saveIP(), allocaIP, reductionInfos,
-                                   loop.getNowait(), distribute);
+                                   loop.getNowait(), /*IsDistribute*/false);
   if (!contInsertPoint.getBlock())
     return loop->emitOpError() << "failed to convert reductions";
   auto nextInsertionPoint =
@@ -1147,12 +1154,9 @@ convertOmpParallel(Operation &opInst1, llvm::IRBuilderBase &builder,
       // Generate reductions from info
       llvm::UnreachableInst *tempTerminator = builder.CreateUnreachable();
       builder.SetInsertPoint(tempTerminator);
-      bool distributeParallelCodeGen =
-          opInst1.getParentOfType<omp::DistributeOp>();
       llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
           ompBuilder->createReductions(builder.saveIP(), allocaIP,
-                                       reductionInfos, false,
-                                       distributeParallelCodeGen);
+                                       reductionInfos, false, false);
       if (!contInsertPoint.getBlock()) {
         bodyGenStatus = opInst->emitOpError() << "failed to convert reductions";
         return;
@@ -1174,10 +1178,7 @@ convertOmpParallel(Operation &opInst1, llvm::IRBuilderBase &builder,
     return codeGenIP;
   };
 
-  // TODO: Perform finalization actions for variables. This has to be
-  // called for variables which have destructors/finalizers.
   auto finiCB = [&](InsertPointTy codeGenIP) {};
-
   llvm::Value *ifCond = nullptr;
   if (auto ifExprVar = opInst.getIfExprVar())
     ifCond = moduleTranslation.lookupValue(ifExprVar);
@@ -2342,16 +2343,41 @@ convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
 
     // DistributeOp has only one region associated with it.
     builder.restoreIP(codeGenIP);
-    convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region", builder,
-                        moduleTranslation, bodyGenStatus);
+    auto regionBlock =
+        convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region",
+                            builder, moduleTranslation, bodyGenStatus);
+
+    builder.SetInsertPoint(regionBlock->getTerminator());
+
+    // FIXME(JAN): We need to know if we are inside a distribute and
+    // if there is an inner wsloop reduction, in that case we need to
+    // generate the teams reduction bits to combine everything correctly. We
+    // will try to collect the reduction info from the inner wsloop and use
+    // that instead of the reduction clause that could have been on the
+    // omp.parallel
+    auto IP = builder.saveIP();
+
+    if (ompBuilder->Config.isGPU()) {
+      bool distributeParallelCodeGen = true;
+      llvm::errs() << "--------------- TEAMS GPU Reduction ------------\n";
+      llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
+          ompBuilder->createReductions(IP, allocaIP, GLOBAL_reductionInfos,
+                                       false, distributeParallelCodeGen);
+      builder.restoreIP(contInsertPoint);
+    }
+
+    llvm::errs() << "--------------- Current Module ------------\n";
+    ompBuilder->M.dump();
+    llvm::errs() << "--------------- Current IP block ------------\n";
+    IP.getBlock()->dump();
+    llvm::errs() << "--------------- Current IP block END------------\n";
+
+    llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
+        findAllocaInsertPoint(builder, moduleTranslation);
+    llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
+    builder.restoreIP(
+        ompBuilder->createDistribute(ompLoc, allocaIP, bodyGenCB));
   };
-
-  llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
-      findAllocaInsertPoint(builder, moduleTranslation);
-  llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
-
-  builder.restoreIP(moduleTranslation.getOpenMPBuilder()->createDistribute(
-      ompLoc, allocaIP, bodyGenCB));
 
   return bodyGenStatus;
 }
