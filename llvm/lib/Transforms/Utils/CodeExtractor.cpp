@@ -1182,6 +1182,7 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
 
   StructType *StructArgTy = nullptr;
   AllocaInst *Struct = nullptr;
+  Instruction *StructSpaceCast = nullptr;
   unsigned NumAggregatedInputs = 0;
   if (AggregateArgs && !StructValues.empty()) {
     std::vector<Type *> ArgTypes;
@@ -1194,26 +1195,39 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
         StructArgTy, DL.getAllocaAddrSpace(), nullptr, "structArg",
         AllocationBlock ? &*AllocationBlock->getFirstInsertionPt()
                         : &codeReplacer->getParent()->front().front());
-
-    if (ArgsInZeroAddressSpace && DL.getAllocaAddrSpace() != 0) {
-      auto *StructSpaceCast = new AddrSpaceCastInst(
+    if (DL.getAllocaAddrSpace() != 0) {
+      StructSpaceCast = new AddrSpaceCastInst(
           Struct, PointerType ::get(Context, 0), "structArg.ascast");
       StructSpaceCast->insertAfter(Struct);
       params.push_back(StructSpaceCast);
+      // Store aggregated inputs in the struct.
+      for (unsigned i = 0, e = StructValues.size(); i != e; ++i) {
+        if (inputs.contains(StructValues[i])) {
+          Value *Idx[2];
+          Idx[0] = Constant::getNullValue(Type::getInt32Ty(Context));
+          Idx[1] = ConstantInt::get(Type::getInt32Ty(Context), i);
+          GetElementPtrInst *GEP =
+              GetElementPtrInst::Create(StructArgTy, StructSpaceCast, Idx,
+                                        "gep_" + StructValues[i]->getName());
+          GEP->insertInto(codeReplacer, codeReplacer->end());
+          new StoreInst(StructValues[i], GEP, codeReplacer);
+          NumAggregatedInputs++;
+        }
+      }
     } else {
       params.push_back(Struct);
-    }
-    // Store aggregated inputs in the struct.
-    for (unsigned i = 0, e = StructValues.size(); i != e; ++i) {
-      if (inputs.contains(StructValues[i])) {
-        Value *Idx[2];
-        Idx[0] = Constant::getNullValue(Type::getInt32Ty(Context));
-        Idx[1] = ConstantInt::get(Type::getInt32Ty(Context), i);
-        GetElementPtrInst *GEP = GetElementPtrInst::Create(
-            StructArgTy, Struct, Idx, "gep_" + StructValues[i]->getName());
-        GEP->insertInto(codeReplacer, codeReplacer->end());
-        new StoreInst(StructValues[i], GEP, codeReplacer);
-        NumAggregatedInputs++;
+      // Store aggregated inputs in the struct.
+      for (unsigned i = 0, e = StructValues.size(); i != e; ++i) {
+        if (inputs.contains(StructValues[i])) {
+          Value *Idx[2];
+          Idx[0] = Constant::getNullValue(Type::getInt32Ty(Context));
+          Idx[1] = ConstantInt::get(Type::getInt32Ty(Context), i);
+          GetElementPtrInst *GEP = GetElementPtrInst::Create(
+              StructArgTy, Struct, Idx, "gep_" + StructValues[i]->getName());
+          GEP->insertInto(codeReplacer, codeReplacer->end());
+          new StoreInst(StructValues[i], GEP, codeReplacer);
+          NumAggregatedInputs++;
+        }
       }
     }
   }
@@ -1248,7 +1262,8 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
       Idx[0] = Constant::getNullValue(Type::getInt32Ty(Context));
       Idx[1] = ConstantInt::get(Type::getInt32Ty(Context), aggIdx);
       GetElementPtrInst *GEP = GetElementPtrInst::Create(
-          StructArgTy, Struct, Idx, "gep_reload_" + outputs[i]->getName());
+          StructArgTy, StructSpaceCast ? StructSpaceCast : Struct, Idx,
+          "gep_reload_" + outputs[i]->getName());
       GEP->insertInto(codeReplacer, codeReplacer->end());
       Output = GEP;
       ++aggIdx;
