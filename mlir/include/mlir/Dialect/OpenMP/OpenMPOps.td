@@ -1462,8 +1462,17 @@ def TargetOp : OpenMP_Op<"target",[IsolatedFromAbove, OutlineableOpenMPOpInterfa
     The optional $trip_count indicates the total number of loop iterations, only if this
     target region represents a single teams+distribute+parallel worksharing loop.
 
-    The optional $nowait elliminates the implicit barrier so the parent task can make progress
+    The optional $nowait eliminates the implicit barrier so the parent task can make progress
     even if the target task is not yet completed.
+
+    The optional $num_teams_lower, $num_teams_upper and $teams_thread_limit
+    arguments represent the corresponding arguments of a directly nested TeamsOp. They
+    can be only set in this operation when representing combined or composite constructs
+    that include TARGET and TEAMS, so that they can be evaluated in the host device.
+
+    The optional $num_threads argument represents the corresponding argument of a nested
+    ParallelOp, which is only allowed if this target region contains a single (possibly
+    multi-level) nest of OpenMP operations including a ParallelOp.
 
     TODO:  is_device_ptr, depend, defaultmap, in_reduction
 
@@ -1474,7 +1483,11 @@ def TargetOp : OpenMP_Op<"target",[IsolatedFromAbove, OutlineableOpenMPOpInterfa
                        Optional<AnyInteger>:$thread_limit,
                        Optional<AnyInteger>:$trip_count,
                        UnitAttr:$nowait,
-                       Variadic<AnyType>:$map_operands);
+                       Variadic<AnyType>:$map_operands,
+                       Optional<AnyInteger>:$num_teams_lower,
+                       Optional<AnyInteger>:$num_teams_upper,
+                       Optional<AnyInteger>:$teams_thread_limit,
+                       Optional<AnyInteger>:$num_threads);
 
   let regions = (region AnyRegion:$region);
 
@@ -1485,12 +1498,25 @@ def TargetOp : OpenMP_Op<"target",[IsolatedFromAbove, OutlineableOpenMPOpInterfa
     | `trip_count` `(` $trip_count `:` type($trip_count) `)`
     | `nowait` $nowait
     | `map_entries` `(` custom<MapEntries>($map_operands, type($map_operands)) `)`
+    | `num_teams` `(` ( $num_teams_lower^ `:` type($num_teams_lower) )? `to`
+                        $num_teams_upper `:` type($num_teams_upper) `)`
+    | `teams_thread_limit` `(` $teams_thread_limit `:` type($teams_thread_limit) `)`
+    | `num_threads` `(` $num_threads `:` type($num_threads) `)`
     ) $region attr-dict
   }];
 
   let hasVerifier = 1;
 
   let extraClassDeclaration = [{
+    /// Returns the innermost OpenMP dialect operation nested inside of this
+    /// operation's region. For an operation to be detected as captured, it must
+    /// be inside a (possibly multi-level) nest of OpenMP dialect operation's
+    /// regions where none of these levels contain other operations considered
+    /// not-allowed for these purposes (i.e. only terminator operations are
+    /// allowed from the OpenMP dialect, and other dialect's operations are
+    /// allowed as long as they don't have a memory write effect).
+    Operation *getInnermostCapturedOmpOp();
+
     /// Tells whether this target region represents a single worksharing loop
     /// wrapped by omp.teams omp.distribute and omp.parallel constructs.
     bool isTargetSPMDLoop();

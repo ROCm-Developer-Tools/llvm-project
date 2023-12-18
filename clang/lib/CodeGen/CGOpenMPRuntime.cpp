@@ -5928,20 +5928,6 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
         return CGF.GenerateOpenMPCapturedStmtFunction(CS, D.getBeginLoc());
       };
 
-  // Get NumTeams and ThreadLimit attributes
-  int32_t DefaultMinTeams = -1;
-  int32_t DefaultMaxTeams = INT32_MAX;
-  int32_t DefaultMinThreads = -1;
-  int32_t DefaultMaxThreads = INT32_MAX;
-
-  computeMinAndMaxThreadsAndTeams(D, CGF, DefaultMinThreads, DefaultMaxThreads,
-                                  DefaultMinTeams, DefaultMaxTeams);
-
-  OMPBuilder.CurrentTargetInfo = llvm::OpenMPIRBuilder::TargetRegionInfo();
-  OMPBuilder.CurrentTargetInfo->NumTeams =
-      CGF.Builder.getInt32(DefaultMinTeams);
-  OMPBuilder.CurrentTargetInfo->ThreadLimit =
-      CGF.Builder.getInt32(DefaultMaxThreads);
   OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction,
                                       IsOffloadEntry, OutlinedFn, OutlinedFnID);
 

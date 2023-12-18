@@ -499,8 +499,8 @@ void OpenMPIRBuilder::getKernelArgsVector(TargetKernelArgs &KernelArgs,
 
   Value *NumTeams3D =
       Builder.CreateInsertValue(ZeroArray, KernelArgs.NumTeams, {0});
-  Value *ThreadLimit3D =
-      Builder.CreateInsertValue(ZeroArray, KernelArgs.ThreadLimit, {0});
+  Value *NumThreads3D =
+      Builder.CreateInsertValue(ZeroArray, KernelArgs.NumThreads, {0});
 
   ArgsVector = {Version,
                 PointerNum,
@@ -513,7 +513,7 @@ void OpenMPIRBuilder::getKernelArgsVector(TargetKernelArgs &KernelArgs,
                 KernelArgs.TripCount,
                 Flags,
                 NumTeams3D,
-                ThreadLimit3D,
+                NumThreads3D,
                 KernelArgs.DynCGGroupMem};
 }
 
@@ -1051,7 +1051,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::emitKernelLaunch(
   // of teams and threads so no additional calls to the runtime are required.
   // Check the error code and execute the host version if required.
   Builder.restoreIP(emitTargetKernel(Builder, AllocaIP, Return, RTLoc, DeviceID,
-                                     Args.NumTeams, Args.ThreadLimit,
+                                     Args.NumTeams, Args.NumThreads,
                                      OutlinedFnID, ArgsVector));
 
   BasicBlock *OffloadFailedBlock =
@@ -4440,10 +4440,9 @@ CallInst *OpenMPIRBuilder::createCachedThreadPrivate(
   return Builder.CreateCall(Fn, Args);
 }
 
-OpenMPIRBuilder::InsertPointTy
-OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
-                                  int32_t MinThreadsVal, int32_t MaxThreadsVal,
-                                  int32_t MinTeamsVal, int32_t MaxTeamsVal) {
+OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetInit(
+    const LocationDescription &Loc, bool IsSPMD,
+    const llvm::OpenMPIRBuilder::TargetKernelDefaultBounds &Bounds) {
   if (!updateToLocation(Loc))
     return Loc.IP;
 
@@ -4460,21 +4459,23 @@ OpenMPIRBuilder::createTargetInit(const LocationDescription &Loc, bool IsSPMD,
 
   // Manifest the launch configuration in the metadata matching the kernel
   // environment.
-  if (MinTeamsVal > 1 || MaxTeamsVal > 0)
-    writeTeamsForKernel(T, *Kernel, MinTeamsVal, MaxTeamsVal);
+  if (Bounds.MinTeams > 1 || Bounds.MaxTeams > 0)
+    writeTeamsForKernel(T, *Kernel, Bounds.MinTeams, Bounds.MaxTeams);
 
-  // For max values, < 0 means unset, == 0 means set but unknown.
-  if (MaxThreadsVal < 0)
-    MaxThreadsVal = std::max(
-        int32_t(getGridValue(T, Kernel).GV_Default_WG_Size), MinThreadsVal);
+  // If MaxThreads not set, select the maximum between the default workgroup
+  // size and the MinThreads value.
+  int32_t MaxThreadsValue = Bounds.MaxThreads;
+  if (MaxThreadsValue < 0)
+    MaxThreadsValue = std::max(
+        int32_t(getGridValue(T, Kernel).GV_Default_WG_Size), Bounds.MinThreads);
 
-  if (MaxThreadsVal > 0)
-    writeThreadBoundsForKernel(T, *Kernel, MinThreadsVal, MaxThreadsVal);
+  if (MaxThreadsValue > 0)
+    writeThreadBoundsForKernel(T, *Kernel, Bounds.MinThreads, MaxThreadsValue);
 
-  Constant *MinThreads = ConstantInt::getSigned(Int32, MinThreadsVal);
-  Constant *MaxThreads = ConstantInt::getSigned(Int32, MaxThreadsVal);
-  Constant *MinTeams = ConstantInt::getSigned(Int32, MinTeamsVal);
-  Constant *MaxTeams = ConstantInt::getSigned(Int32, MaxTeamsVal);
+  Constant *MinThreads = ConstantInt::getSigned(Int32, Bounds.MinThreads);
+  Constant *MaxThreads = ConstantInt::getSigned(Int32, MaxThreadsValue);
+  Constant *MinTeams = ConstantInt::getSigned(Int32, Bounds.MinTeams);
+  Constant *MaxTeams = ConstantInt::getSigned(Int32, Bounds.MaxTeams);
   Constant *ReductionDataSize = ConstantInt::getSigned(Int32, 0);
   Constant *ReductionBufferLength = ConstantInt::getSigned(Int32, 0);
 
@@ -4710,75 +4711,12 @@ void OpenMPIRBuilder::setOutlinedTargetRegionFunctionAttributes(
     OutlinedFn->setVisibility(GlobalValue::ProtectedVisibility);
     if (T.isAMDGCN())
       OutlinedFn->setCallingConv(CallingConv::AMDGPU_KERNEL);
-    if (!Config.TargetCPU.empty())
-      OutlinedFn->addFnAttr("target-cpu", Config.TargetCPU);
-    if (!Config.TargetFeatures.empty())
-      OutlinedFn->addFnAttr("target-features", Config.TargetFeatures);
   }
 
-  // Try to get constant values for NumTeams and ThreadLimit, and set default
-  // values if they are not constant.
-  int32_t NumTeamsValue = -1;
-  int32_t ThreadLimitValue = -1;
-
-  if (auto *NumTeamsConst =
-          dyn_cast_if_present<llvm::Constant>(CurrentTargetInfo->NumTeams))
-    NumTeamsValue = NumTeamsConst->getUniqueInteger().getSExtValue();
-  else if (CurrentTargetInfo->HasTeamsRegion)
-    NumTeamsValue = 0;
-
-  if (auto *ThreadLimitConst =
-          dyn_cast_if_present<llvm::Constant>(CurrentTargetInfo->ThreadLimit))
-    ThreadLimitValue = ThreadLimitConst->getUniqueInteger().getSExtValue();
-
-  if (NumTeamsValue > 0)
-    OutlinedFn->addFnAttr("omp_target_num_teams",
-                          std::to_string(NumTeamsValue));
-
-  if (ThreadLimitValue == -1 && Config.isGPU())
-    ThreadLimitValue = getGridValue(T, OutlinedFn).GV_Default_WG_Size;
-
-  if (ThreadLimitValue > 0) {
-    if (OutlinedFn->getCallingConv() == CallingConv::AMDGPU_KERNEL) {
-      OutlinedFn->addFnAttr("amdgpu-flat-work-group-size",
-                            "1," + llvm::utostr(ThreadLimitValue));
-    } else {
-      // Update the "maxntidx" metadata for NVIDIA, or add it.
-      NamedMDNode *MD = M.getOrInsertNamedMetadata("nvvm.annotations");
-      MDNode *ExistingOp = nullptr;
-      for (auto *Op : MD->operands()) {
-        if (Op->getNumOperands() != 3)
-          continue;
-        auto *Kernel = dyn_cast<ConstantAsMetadata>(Op->getOperand(0));
-        if (!Kernel || Kernel->getValue() != OutlinedFn)
-          continue;
-        auto *Prop = dyn_cast<MDString>(Op->getOperand(1));
-        if (!Prop || Prop->getString() != "maxntidx")
-          continue;
-        ExistingOp = Op;
-        break;
-      }
-      if (ExistingOp) {
-        auto *OldVal = dyn_cast<ConstantAsMetadata>(ExistingOp->getOperand(2));
-        int32_t OldLimit =
-            cast<ConstantInt>(OldVal->getValue())->getZExtValue();
-        ExistingOp->replaceOperandWith(
-            2, ConstantAsMetadata::get(
-                   ConstantInt::get(OldVal->getValue()->getType(),
-                                    std::min(OldLimit, ThreadLimitValue))));
-      } else {
-        LLVMContext &Ctx = M.getContext();
-        Metadata *MDVals[] = {ConstantAsMetadata::get(OutlinedFn),
-                              MDString::get(Ctx, "maxntidx"),
-                              ConstantAsMetadata::get(ConstantInt::get(
-                                  Type::getInt32Ty(Ctx), ThreadLimitValue))};
-        // Append metadata to nvvm.annotations
-        MD->addOperand(MDNode::get(Ctx, MDVals));
-      }
-    }
-    OutlinedFn->addFnAttr("omp_target_thread_limit",
-                          std::to_string(ThreadLimitValue));
-  }
+  if (!Config.TargetCPU.empty())
+    OutlinedFn->addFnAttr("target-cpu", Config.TargetCPU);
+  if (!Config.TargetFeatures.empty())
+    OutlinedFn->addFnAttr("target-features", Config.TargetFeatures);
 }
 
 Constant *OpenMPIRBuilder::createOutlinedFunctionID(Function *OutlinedFn,
@@ -5100,6 +5038,7 @@ static void replaceConstantValueUsesInFuncWithInstr(llvm::Value *Input,
 
 static Function *createOutlinedFunction(
     OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder, bool IsSPMD,
+    const OpenMPIRBuilder::TargetKernelDefaultBounds &DefaultBounds,
     StringRef FuncName, SmallVectorImpl<Value *> &Inputs,
     OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
     OpenMPIRBuilder::TargetGenArgAccessorsCallbackTy &ArgAccessorFuncCB) {
@@ -5141,7 +5080,8 @@ static Function *createOutlinedFunction(
 
   // Insert target init call in the device compilation pass.
   if (OMPBuilder.Config.isTargetDevice())
-    Builder.restoreIP(OMPBuilder.createTargetInit(Builder, IsSPMD));
+    Builder.restoreIP(
+        OMPBuilder.createTargetInit(Builder, IsSPMD, DefaultBounds));
 
   BasicBlock *UserCodeEntryBB = Builder.GetInsertBlock();
 
@@ -5203,26 +5143,32 @@ static Function *createOutlinedFunction(
 
 static void emitTargetOutlinedFunction(
     OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder, bool IsSPMD,
-    TargetRegionEntryInfo &EntryInfo, Function *&OutlinedFn,
-    Constant *&OutlinedFnID, SmallVectorImpl<Value *> &Inputs,
+    TargetRegionEntryInfo &EntryInfo,
+    const OpenMPIRBuilder::TargetKernelDefaultBounds &DefaultBounds,
+    Function *&OutlinedFn, Constant *&OutlinedFnID,
+    SmallVectorImpl<Value *> &Inputs,
     OpenMPIRBuilder::TargetBodyGenCallbackTy &CBFunc,
     OpenMPIRBuilder::TargetGenArgAccessorsCallbackTy &ArgAccessorFuncCB) {
 
   OpenMPIRBuilder::FunctionGenCallback &&GenerateOutlinedFunction =
       [&](StringRef EntryFnName) {
-        return createOutlinedFunction(OMPBuilder, Builder, IsSPMD, EntryFnName,
-                                      Inputs, CBFunc, ArgAccessorFuncCB);
+        return createOutlinedFunction(OMPBuilder, Builder, IsSPMD,
+                                      DefaultBounds, EntryFnName, Inputs,
+                                      CBFunc, ArgAccessorFuncCB);
       };
 
   OMPBuilder.emitTargetRegionFunction(EntryInfo, GenerateOutlinedFunction, true,
                                       OutlinedFn, OutlinedFnID);
 }
 
-static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
-                           OpenMPIRBuilder::InsertPointTy AllocaIP,
-                           Function *OutlinedFn, Constant *OutlinedFnID,
-                           SmallVectorImpl<Value *> &Args,
-                           OpenMPIRBuilder::GenMapInfoCallbackTy GenMapInfoCB) {
+static void
+emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
+               OpenMPIRBuilder::InsertPointTy AllocaIP,
+               const OpenMPIRBuilder::TargetKernelDefaultBounds &DefaultBounds,
+               const OpenMPIRBuilder::TargetKernelRuntimeBounds &RuntimeBounds,
+               Function *OutlinedFn, Constant *OutlinedFnID,
+               SmallVectorImpl<Value *> &Args,
+               OpenMPIRBuilder::GenMapInfoCallbackTy GenMapInfoCB) {
 
   OpenMPIRBuilder::TargetDataInfo Info(
       /*RequiresDevicePointerInfo=*/false,
@@ -5252,27 +5198,50 @@ static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
   Value *RTLoc = OMPBuilder.getOrCreateIdent(SrcLocStr, SrcLocStrSize,
                                              llvm::omp::IdentFlag(0), 0);
 
-  OpenMPIRBuilder::TargetRegionInfo &TRI = OMPBuilder.CurrentTargetInfo.value();
+  Value *TripCount = RuntimeBounds.LoopTripCount
+                         ? Builder.CreateIntCast(RuntimeBounds.LoopTripCount,
+                                                 Builder.getInt64Ty(),
+                                                 /*isSigned=*/false)
+                         : Builder.getInt64(0);
 
-  // Set to -1 if there is no teams directive, and 0 if clause unspecified.
-  Value *NumTeams = !TRI.HasTeamsRegion ? Builder.getInt32(-1)
-                    : TRI.NumTeams      ? TRI.NumTeams
-                                        : Builder.getInt32(0);
+  Value *NumTeams = RuntimeBounds.MaxTeams
+                        ? RuntimeBounds.MaxTeams
+                        : Builder.getInt32(DefaultBounds.MaxTeams);
 
-  // Set to 0 if clause unspecified.
-  Value *ThreadLimit = TRI.ThreadLimit ? TRI.ThreadLimit : Builder.getInt32(0);
+  // Calculate number of threads: 0 if no clauses specified, otherwise it is the
+  // minimum between optional THREAD_LIMIT and MAX_THREADS clauses. Perform a
+  // type cast to uint32.
+  auto InitMaxThreadsClause = [&Builder](Value *Clause) {
+    if (Clause)
+      Clause = Builder.CreateIntCast(Clause, Builder.getInt32Ty(),
+                                     /*isSigned=*/false);
+    return Clause;
+  };
 
-  // Set to 0 if this is not a teams + single distribute loop.
-  Value *TripCount = TRI.isLoop() ? TRI.LoopTripCount : nullptr;
-  if (!TripCount)
-    TripCount = Builder.getInt64(0);
+  auto CombineMaxThreadsClauses = [&Builder](Value *Clause, Value *&Result) {
+    if (Clause)
+      Result = Result
+                   ? Builder.CreateSelect(Builder.CreateICmpULT(Result, Clause),
+                                          Result, Clause)
+                   : Clause;
+  };
+
+  Value *MaxThreadsClause = InitMaxThreadsClause(RuntimeBounds.MaxThreads);
+  Value *TeamsThreadLimitClause =
+      InitMaxThreadsClause(RuntimeBounds.TeamsThreadLimit);
+  Value *NumThreads = InitMaxThreadsClause(RuntimeBounds.TargetThreadLimit);
+  CombineMaxThreadsClauses(TeamsThreadLimitClause, NumThreads);
+  CombineMaxThreadsClauses(MaxThreadsClause, NumThreads);
+
+  if (!NumThreads)
+    NumThreads = Builder.getInt32(0);
 
   // TODO: Use correct DynCGGroupMem
   Value *DynCGGroupMem = Builder.getInt32(0);
   bool HasNoWait = false;
 
   OpenMPIRBuilder::TargetKernelArgs KArgs(NumTargetItems, RTArgs, TripCount,
-                                          NumTeams, ThreadLimit, DynCGGroupMem,
+                                          NumTeams, NumThreads, DynCGGroupMem,
                                           HasNoWait);
 
   Builder.restoreIP(OMPBuilder.emitKernelLaunch(
@@ -5283,6 +5252,8 @@ static void emitTargetCall(OpenMPIRBuilder &OMPBuilder, IRBuilderBase &Builder,
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
     const LocationDescription &Loc, bool IsSPMD, InsertPointTy AllocaIP,
     InsertPointTy CodeGenIP, TargetRegionEntryInfo &EntryInfo,
+    const TargetKernelDefaultBounds &DefaultBounds,
+    const TargetKernelRuntimeBounds &RuntimeBounds,
     SmallVectorImpl<Value *> &Args, GenMapInfoCallbackTy GenMapInfoCB,
     OpenMPIRBuilder::TargetBodyGenCallbackTy CBFunc,
     OpenMPIRBuilder::TargetGenArgAccessorsCallbackTy ArgAccessorFuncCB) {
@@ -5293,11 +5264,12 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTarget(
 
   Function *OutlinedFn;
   Constant *OutlinedFnID;
-  emitTargetOutlinedFunction(*this, Builder, IsSPMD, EntryInfo, OutlinedFn,
-                             OutlinedFnID, Args, CBFunc, ArgAccessorFuncCB);
+  emitTargetOutlinedFunction(*this, Builder, IsSPMD, EntryInfo, DefaultBounds,
+                             OutlinedFn, OutlinedFnID, Args, CBFunc,
+                             ArgAccessorFuncCB);
   if (!Config.isTargetDevice())
-    emitTargetCall(*this, Builder, AllocaIP, OutlinedFn, OutlinedFnID, Args,
-                   GenMapInfoCB);
+    emitTargetCall(*this, Builder, AllocaIP, DefaultBounds, RuntimeBounds,
+                   OutlinedFn, OutlinedFnID, Args, GenMapInfoCB);
 
   return Builder.saveIP();
 }
@@ -6397,8 +6369,9 @@ OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
   BasicBlock *AllocaBB =
       splitBB(Builder, /*CreateBranch=*/true, "teams.alloca");
 
-  // Push num_teams
-  if (NumTeamsLower || NumTeamsUpper || ThreadLimit || IfExpr) {
+  // Push num_teams if generating host fallback function
+  if (!Config.isTargetDevice() &&
+      (NumTeamsLower || NumTeamsUpper || ThreadLimit || IfExpr)) {
     assert((NumTeamsLower == nullptr || NumTeamsUpper != nullptr) &&
            "if lowerbound is non-null, then upperbound must also be non-null "
            "for bounds on num_teams");
@@ -6453,42 +6426,43 @@ OpenMPIRBuilder::createTeams(const LocationDescription &Loc,
 
   // Prevent unresolved __kmpc_fork_teams when device linking
   if (!Config.isTargetDevice()) {
-  OI.PostOutlineCB = [this, Ident, ToBeDeleted](Function &OutlinedFn) mutable {
-    // The stale call instruction will be replaced with a new call instruction
-    // for runtime call with the outlined function.
+    OI.PostOutlineCB = [this, Ident,
+                        ToBeDeleted](Function &OutlinedFn) mutable {
+      // The stale call instruction will be replaced with a new call instruction
+      // for runtime call with the outlined function.
 
-    assert(OutlinedFn.getNumUses() == 1 &&
-           "there must be a single user for the outlined function");
-    CallInst *StaleCI = cast<CallInst>(OutlinedFn.user_back());
-    ToBeDeleted.push(StaleCI);
+      assert(OutlinedFn.getNumUses() == 1 &&
+             "there must be a single user for the outlined function");
+      CallInst *StaleCI = cast<CallInst>(OutlinedFn.user_back());
+      ToBeDeleted.push(StaleCI);
 
-    assert((OutlinedFn.arg_size() == 2 || OutlinedFn.arg_size() == 3) &&
-           "Outlined function must have two or three arguments only");
+      assert((OutlinedFn.arg_size() == 2 || OutlinedFn.arg_size() == 3) &&
+             "Outlined function must have two or three arguments only");
 
-    bool HasShared = OutlinedFn.arg_size() == 3;
+      bool HasShared = OutlinedFn.arg_size() == 3;
 
-    OutlinedFn.getArg(0)->setName("global.tid.ptr");
-    OutlinedFn.getArg(1)->setName("bound.tid.ptr");
-    if (HasShared)
-      OutlinedFn.getArg(2)->setName("data");
+      OutlinedFn.getArg(0)->setName("global.tid.ptr");
+      OutlinedFn.getArg(1)->setName("bound.tid.ptr");
+      if (HasShared)
+        OutlinedFn.getArg(2)->setName("data");
 
-    // Call to the runtime function for teams in the current function.
-    assert(StaleCI && "Error while outlining - no CallInst user found for the "
-                      "outlined function.");
-    Builder.SetInsertPoint(StaleCI);
-    SmallVector<Value *> Args = {
-        Ident, Builder.getInt32(StaleCI->arg_size() - 2), &OutlinedFn};
-    if (HasShared)
-      Args.push_back(StaleCI->getArgOperand(2));
-    Builder.CreateCall(getOrCreateRuntimeFunctionPtr(
-                           omp::RuntimeFunction::OMPRTL___kmpc_fork_teams),
-                       Args);
+      // Call to the runtime function for teams in the current function.
+      assert(StaleCI && "Error while outlining - no CallInst user found for "
+                        "the outlined function.");
+      Builder.SetInsertPoint(StaleCI);
+      SmallVector<Value *> Args = {
+          Ident, Builder.getInt32(StaleCI->arg_size() - 2), &OutlinedFn};
+      if (HasShared)
+        Args.push_back(StaleCI->getArgOperand(2));
+      Builder.CreateCall(getOrCreateRuntimeFunctionPtr(
+                             omp::RuntimeFunction::OMPRTL___kmpc_fork_teams),
+                         Args);
 
-    while (!ToBeDeleted.empty()) {
-      ToBeDeleted.top()->eraseFromParent();
-      ToBeDeleted.pop();
-    }
-  };
+      while (!ToBeDeleted.empty()) {
+        ToBeDeleted.top()->eraseFromParent();
+        ToBeDeleted.pop();
+      }
+    };
   };
 
   addOutlineInfo(std::move(OI));

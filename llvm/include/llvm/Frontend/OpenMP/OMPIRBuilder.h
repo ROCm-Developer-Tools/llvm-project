@@ -1603,26 +1603,28 @@ public:
           MapNamesArray(MapNamesArray) {}
   };
 
-  /// Container for target information, gathered from the target region body,
-  /// needed to populate some __tgt_target_kernel arguments.
-  struct TargetRegionInfo {
-    bool HasTeamsRegion = false;
-    int NumDistributeRegions = 0;
-    int NumParallelRegions = 0;
-    int NumLoopRegions = 0;
-    Value *NumTeams = nullptr;
-    Value *ThreadLimit = nullptr;
-    Value *LoopTripCount = nullptr;
-
-    /// Whether this target region defines a single parallel loop.
-    bool isLoop() const {
-      return NumLoopRegions == 1 && NumParallelRegions == 1 &&
-             (!HasTeamsRegion || NumDistributeRegions == 1);
-    }
+  /// Container to pass the default bounds for the number of teams and threads
+  /// with which a kernel must be launched, used to set kernel attributes and
+  /// populate associated static structures.
+  struct TargetKernelDefaultBounds {
+    int32_t MinTeams = 1;
+    int32_t MaxTeams = -1;
+    int32_t MinThreads = 1;
+    int32_t MaxThreads = -1;
   };
 
-  /// Information for the target region being currently translated.
-  std::optional<TargetRegionInfo> CurrentTargetInfo;
+  /// Container to pass the runtime SSA values or constants related to the
+  /// number of teams and threads with which the kernel must be launched, as
+  /// well as the trip count of the loop. These must be defined in the host code
+  /// prior to the call to the kernel launch OpenMP RTL function.
+  struct TargetKernelRuntimeBounds {
+    Value *LoopTripCount = nullptr;
+    Value *TargetThreadLimit = nullptr;
+    Value *TeamsThreadLimit = nullptr;
+    Value *MinTeams = nullptr;
+    Value *MaxTeams = nullptr;
+    Value *MaxThreads = nullptr;
+  };
 
   /// Data structure that contains the needed information to construct the
   /// kernel args vector.
@@ -1636,7 +1638,7 @@ public:
     /// The number of teams.
     Value *NumTeams;
     /// The number of threads.
-    Value *ThreadLimit;
+    Value *NumThreads;
     /// The size of the dynamic shared memory.
     Value *DynCGGroupMem;
     /// True if the kernel has 'no wait' clause.
@@ -1644,10 +1646,10 @@ public:
 
     /// Constructor for TargetKernelArgs
     TargetKernelArgs(unsigned NumTargetItems, TargetDataRTArgs RTArgs,
-                     Value *TripCount, Value *NumTeams, Value *ThreadLimit,
+                     Value *TripCount, Value *NumTeams, Value *NumThreads,
                      Value *DynCGGroupMem, bool HasNoWait)
         : NumTargetItems(NumTargetItems), RTArgs(RTArgs), TripCount(TripCount),
-          NumTeams(NumTeams), ThreadLimit(ThreadLimit),
+          NumTeams(NumTeams), NumThreads(NumThreads),
           DynCGGroupMem(DynCGGroupMem), HasNoWait(HasNoWait) {}
   };
 
@@ -2081,15 +2083,10 @@ public:
   ///
   /// \param Loc The insert and source location description.
   /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
-  /// \param MinThreads Minimal number of threads, or 0.
-  /// \param MaxThreads Maximal number of threads, or 0.
-  /// \param MinTeams Minimal number of teams, or 0.
-  /// \param MaxTeams Maximal number of teams, or 0.
-  InsertPointTy createTargetInit(const LocationDescription &Loc, bool IsSPMD,
-                                 int32_t MinThreadsVal = 0,
-                                 int32_t MaxThreadsVal = 0,
-                                 int32_t MinTeamsVal = 0,
-                                 int32_t MaxTeamsVal = 0);
+  /// \param Bounds The default kernel lanuch bounds.
+  InsertPointTy createTargetInit(
+      const LocationDescription &Loc, bool IsSPMD,
+      const llvm::OpenMPIRBuilder::TargetKernelDefaultBounds &Bounds);
 
   /// Create a runtime call for kmpc_target_deinit
   ///
@@ -2254,6 +2251,8 @@ public:
   /// \param CodeGenIP The insertion point where the call to the outlined
   /// function should be emitted.
   /// \param EntryInfo The entry information about the function.
+  /// \param DefaultBounds The default kernel lanuch bounds.
+  /// \param RuntimeBounds The runtime kernel lanuch bounds.
   /// \param Inputs The input values to the region that will be passed.
   /// as arguments to the outlined function.
   /// \param BodyGenCB Callback that will generate the region code.
@@ -2263,6 +2262,8 @@ public:
                              OpenMPIRBuilder::InsertPointTy AllocaIP,
                              OpenMPIRBuilder::InsertPointTy CodeGenIP,
                              TargetRegionEntryInfo &EntryInfo,
+                             const TargetKernelDefaultBounds &DefaultBounds,
+                             const TargetKernelRuntimeBounds &RuntimeBounds,
                              SmallVectorImpl<Value *> &Inputs,
                              GenMapInfoCallbackTy GenMapInfoCB,
                              TargetBodyGenCallbackTy BodyGenCB,
