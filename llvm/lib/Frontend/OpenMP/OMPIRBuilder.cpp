@@ -3034,7 +3034,8 @@ checkReductionInfos(ArrayRef<OpenMPIRBuilder::ReductionInfo> ReductionInfos,
 
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
     const LocationDescription &Loc, InsertPointTy AllocaIP,
-    ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait, bool IsDistribute) {
+    ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait,
+    bool IsTeamsReduction, bool HasDistribute) {
   checkReductionInfos(ReductionInfos, /*IsGPU*/ true);
   LLVMContext &Ctx = M.getContext();
   if (!updateToLocation(Loc))
@@ -3062,10 +3063,6 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
     populateReductionFunction(ReductionFunc, ReductionInfos, Builder, true);
     Builder.restoreIP(CurIP);
   }
-  bool ParallelReduction = !IsDistribute; // FIXME(JAN)
-  bool TeamsReduction = IsDistribute; // FIXME(JAN)
-
-  assert((TeamsReduction || ParallelReduction) && "No concurrent reduction");
 
   uint32_t SrcLocStrSize;
   Constant *SrcLocStr = getOrCreateDefaultSrcLocStr(SrcLocStrSize);
@@ -3105,7 +3102,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   Value *ReductionDataSize = Builder.getInt64(4);
 
   Value *Res;
-  if (ParallelReduction) {
+  if (!IsTeamsReduction) {
     Value *SarFuncCast =
         Builder.CreatePointerBitCastOrAddrSpaceCast(SarFunc, PtrTy);
     Value *WcFuncCast =
@@ -3150,26 +3147,30 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
     Res = Builder.CreateCall(TeamsReduceFn, Args3);
   }
 
-  Function *CurFunc = Builder.GetInsertBlock()->getParent();
-  BasicBlock *ExitBB = BasicBlock::Create(Ctx, ".omp.reduction.done", CurFunc);
-  BasicBlock *ThenBB = BasicBlock::Create(Ctx, ".omp.reduction.then", CurFunc);
-  Value *Cond = Builder.CreateICmpEQ(Res, Builder.getInt32(1));
-  Builder.CreateCondBr(Cond, ThenBB, ExitBB);
+  if (IsTeamsReduction || !HasDistribute) {
+    Function *CurFunc = Builder.GetInsertBlock()->getParent();
+    BasicBlock *ExitBB =
+        BasicBlock::Create(Ctx, ".omp.reduction.done", CurFunc);
+    BasicBlock *ThenBB =
+        BasicBlock::Create(Ctx, ".omp.reduction.then", CurFunc);
+    Value *Cond = Builder.CreateICmpEQ(Res, Builder.getInt32(1));
+    Builder.CreateCondBr(Cond, ThenBB, ExitBB);
 
-  Builder.SetInsertPoint(ThenBB);
-  for (auto En : enumerate(ReductionInfos)) {
-    const ReductionInfo &RI = En.value();
-    Value *InputVal = Builder.CreateLoad(RI.ElementType, RI.Variable);
-    Value *RedVal = Builder.CreateLoad(
-        RI.ElementType,
-        Builder.CreatePointerBitCastOrAddrSpaceCast(RI.PrivateVariable, PtrTy));
-    Value *sum;
-    Builder.restoreIP(RI.ReductionGen(Builder.saveIP(), InputVal, RedVal, sum));
-    Builder.CreateStore(sum, RI.Variable);
-    Builder.CreateBr(ExitBB);
+    Builder.SetInsertPoint(ThenBB);
+    for (auto En : enumerate(ReductionInfos)) {
+      const ReductionInfo &RI = En.value();
+      Value *InputVal = Builder.CreateLoad(RI.ElementType, RI.Variable);
+      Value *RedVal = Builder.CreateLoad(
+          RI.ElementType, Builder.CreatePointerBitCastOrAddrSpaceCast(
+                              RI.PrivateVariable, PtrTy));
+      Value *sum;
+      Builder.restoreIP(
+          RI.ReductionGen(Builder.saveIP(), InputVal, RedVal, sum));
+      Builder.CreateStore(sum, RI.Variable);
+      Builder.CreateBr(ExitBB);
+    }
+    Builder.SetInsertPoint(ExitBB);
   }
-
-  Builder.SetInsertPoint(ExitBB);
   Builder.CreateBr(ContinuationBlock);
   Builder.SetInsertPoint(ContinuationBlock);
   return Builder.saveIP();
@@ -3177,10 +3178,11 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
 
 OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
     const LocationDescription &Loc, InsertPointTy AllocaIP,
-    ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait, bool IsDistribute) {
+    ArrayRef<ReductionInfo> ReductionInfos, bool IsNoWait,
+    bool IsTeamsReduction, bool HasDistribute) {
   if (Config.isGPU())
     return createReductionsGPU(Loc, AllocaIP, ReductionInfos, IsNoWait,
-                               IsDistribute);
+                               IsTeamsReduction, HasDistribute);
 
   checkReductionInfos(ReductionInfos, /*IsGPU*/ false);
 
@@ -5638,7 +5640,12 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetInit(
           ? KernelEnvironmentGV
           : ConstantExpr::getAddrSpaceCast(KernelEnvironmentGV,
                                            KernelEnvironmentPtr);
-  Value *KernelLaunchEnvironment = Kernel->getArg(0);
+  LLVMContext &Ctx = Fn->getContext();
+  Type *PtrTy = PointerType::getUnqual(Ctx);
+  Value *KLEnv = Builder.CreateAlloca(PtrTy, nullptr, "kernel_launch_env");
+  Value *KLEnvAcast = Builder.CreatePointerBitCastOrAddrSpaceCast(KLEnv, PtrTy);
+  Builder.CreateStore(Kernel->getArg(0), KLEnvAcast);
+  Value *KernelLaunchEnvironment = Builder.CreateLoad(PtrTy, KLEnvAcast);
   CallInst *ThreadKind =
       Builder.CreateCall(Fn, {KernelEnvironment, KernelLaunchEnvironment});
 

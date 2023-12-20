@@ -1080,7 +1080,8 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
 
   llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
       ompBuilder->createReductions(builder.saveIP(), allocaIP, reductionInfos,
-                                   loop.getNowait(), /*IsDistribute*/false);
+                                   loop.getNowait(), /*IsTeamsReduction*/false,
+                                   /*HasDistribute*/distributeParallelCodeGen);
   if (!contInsertPoint.getBlock())
     return loop->emitOpError() << "failed to convert reductions";
   auto nextInsertionPoint =
@@ -1164,7 +1165,7 @@ convertOmpParallel(Operation &opInst1, llvm::IRBuilderBase &builder,
       builder.SetInsertPoint(tempTerminator);
       llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
           ompBuilder->createReductions(builder.saveIP(), allocaIP,
-                                       reductionInfos, false, false);
+                                       reductionInfos, false, false, false);
       if (!contInsertPoint.getBlock()) {
         bodyGenStatus = opInst->emitOpError() << "failed to convert reductions";
         return;
@@ -2369,10 +2370,9 @@ convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
     // omp.parallel
     auto IP = builder.saveIP();
     if (ompBuilder->Config.isGPU()) {
-      bool distributeParallelCodeGen = true;
       llvm::OpenMPIRBuilder::InsertPointTy contInsertPoint =
           ompBuilder->createReductions(IP, allocaIP, GLOBAL_reductionInfos,
-                                       false, distributeParallelCodeGen);
+                                       false, true, true);
       builder.restoreIP(contInsertPoint);
     }
   };

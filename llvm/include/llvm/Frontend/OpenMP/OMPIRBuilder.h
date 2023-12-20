@@ -1272,6 +1272,32 @@ public:
     AtomicReductionGenTy AtomicReductionGen;
   };
 
+  /// A class that manages the reduction info to facilitate lowering of
+  /// reductions at multiple levels of parallelism. For example handling teams
+  /// and parallel reductions on GPUs
+
+  /*
+  class ReductionInfoManager {
+  private:
+    SmallVector<OwningReductionGen> owningReductionGens;
+    SmallVector<OwningAtomicReductionGen> owningAtomicReductionGens;
+    SmallVector<ReductionInfo> reductionInfos;
+  public:
+    ReductionInfoManager() {};
+    clear() {
+      owningReductionGens.clear();
+      owningAtomicReductionGens.clear();
+      reductionInfos.clear();
+    }
+    addReductionInfo(Type *ElementType, Value *PrivateVariable,
+                     OwningReductionGen ReductionGen,
+                     OwningAtomicReductionGen AtomicReductionGen) {}
+    SmallVector<ReductionInfo> &getReductionInfos() {
+      return reductionInfos;
+    }
+  };
+  */
+
   /// \param Loc                The location where the reduction was
   ///                           encountered. Must be within the associate
   ///                           directive and after the last local access to the
@@ -1284,7 +1310,8 @@ public:
                                     InsertPointTy AllocaIP,
                                     ArrayRef<ReductionInfo> ReductionInfos,
                                     bool IsNoWait = false,
-                                    bool IsDistribute = false);
+                                    bool IsTeamsReduction = false,
+                                    bool HasDistribute = false);
 
   // TODO: provide atomic and non-atomic reduction generators for reduction
   // operators defined by the OpenMP specification.
@@ -1351,7 +1378,8 @@ public:
                                  InsertPointTy AllocaIP,
                                  ArrayRef<ReductionInfo> ReductionInfos,
                                  bool IsNoWait = false,
-                                 bool IsDistribute = false);
+                                 bool IsTeamsReduction = false,
+                                 bool HasDistribute = false);
 
   ///}
 
