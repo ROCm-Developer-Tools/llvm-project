@@ -2339,6 +2339,7 @@ convertOmpTargetData(Operation *op, llvm::IRBuilderBase &builder,
 static LogicalResult
 convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
                      LLVM::ModuleTranslation &moduleTranslation) {
+  llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
 
   using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
   // TODO: support error propagation in OpenMPIRBuilder and use it instead of
@@ -2377,19 +2378,12 @@ convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
     }
   };
 
-  llvm::errs() << "--------------- Current Module ------------\n";
-  ompBuilder->M.dump();
-  llvm::errs() << "--------------- Current IP block ------------\n";
-  IP.getBlock()->dump();
-  llvm::errs() << "--------------- Current IP block END------------\n";
-
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
       findAllocaInsertPoint(builder, moduleTranslation);
   llvm::OpenMPIRBuilder::LocationDescription ompLoc(builder);
   builder.restoreIP(ompBuilder->createDistribute(ompLoc, allocaIP, bodyGenCB));
-  };
 
-  return bodyGenStatus;
+  return success();
 }
 
 /// Lowers the FlagsAttr which is applied to the module on the device

@@ -2987,7 +2987,7 @@ static void populateReductionFunction(
   }
 
   unsigned NumReductions = ReductionInfos.size();
-  Type *RedArrayTy = ArrayType::get(Builder.getInt8PtrTy(), NumReductions);
+  Type *RedArrayTy = ArrayType::get(Builder.getPtrTy(), NumReductions);
 
   for (auto En : enumerate(ReductionInfos)) {
     const OpenMPIRBuilder::ReductionInfo &RI = En.value();
@@ -3820,8 +3820,8 @@ static void createTargetLoopWorkshareCall(
     Type *ParallelTaskPtr, Value *TripCountOrig, Function &LoopBodyFn) {
   // FIXME(JAN): The trip count is 1 larger than it should be, this may not be
   // the right way to fix it, but it could be.
-  Value *TripCount = OMPBuilder.Builder.CreateSub(
-      TripCountOrig, OMPBuilder.Builder.getInt32(1), "jan_modified_trip_count");
+  Value *TripCount = OMPBuilder->Builder.CreateSub(
+      TripCountOrig, OMPBuilder->Builder.getInt32(1), "jan_modified_trip_count");
   Type *TripCountTy = TripCount->getType();
   Module &M = OMPBuilder->M;
   IRBuilder<> &Builder = OMPBuilder->Builder;
