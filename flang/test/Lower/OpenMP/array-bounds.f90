@@ -40,6 +40,7 @@ module assumed_array_routines
 
 !HOST-LABEL: func.func @_QMassumed_array_routinesPassumed_shape_array(
 !HOST-SAME: %[[ARG0:.*]]: !fir.box<!fir.array<?xi32>> {fir.bindc_name = "arr_read_write"}) {
+!HOST: %[[INTERMEDIATE_ALLOCA:.*]] = fir.alloca !fir.box<!fir.array<?xi32>>
 !HOST: %[[ARG0_DECL:.*]]:2 = hlfir.declare %[[ARG0]] {fortran_attrs = #fir.var_attrs<intent_inout>, uniq_name = "_QMassumed_array_routinesFassumed_shape_arrayEarr_read_write"} : (!fir.box<!fir.array<?xi32>>) -> (!fir.box<!fir.array<?xi32>>, !fir.box<!fir.array<?xi32>>)
 !HOST: %[[C0:.*]] = arith.constant 1 : index
 !HOST: %[[C1:.*]] = arith.constant 0 : index
@@ -49,9 +50,11 @@ module assumed_array_routines
 !HOST: %[[C0_1:.*]] = arith.constant 0 : index
 !HOST: %[[DIMS1:.*]]:3 = fir.box_dims %[[ARG0_DECL]]#1, %[[C0_1]] : (!fir.box<!fir.array<?xi32>>, index) -> (index, index, index)
 !HOST: %[[BOUNDS:.*]] = omp.bounds   lower_bound(%[[C3]] : index) upper_bound(%[[C4]] : index) extent(%[[DIMS1]]#1 : index) stride(%[[DIMS0]]#2 : index) start_idx(%[[C0]] : index) {stride_in_bytes = true}
-!HOST: %[[ADDROF:.*]] = fir.box_addr %[[ARG0_DECL]]#1 : (!fir.box<!fir.array<?xi32>>) -> !fir.ref<!fir.array<?xi32>>
-!HOST: %[[MAP:.*]] = omp.map_info var_ptr(%[[ADDROF]] : !fir.ref<!fir.array<?xi32>>, !fir.array<?xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}
-!HOST: omp.target   map_entries(%[[MAP]] -> %{{.*}}, {{.*}} -> {{.*}} : !fir.ref<!fir.array<?xi32>>, !fir.ref<i32>) {
+!HOST: %[[VAR_PTR_PTR:.*]] = fir.box_offset %0 base_addr : (!fir.ref<!fir.box<!fir.array<?xi32>>>) -> !fir.llvm_ptr<!fir.ref<!fir.array<?xi32>>>
+!HOST: %[[VAR_PTR:.*]] = fir.box_addr %[[ARG0_DECL]]#1 : (!fir.box<!fir.array<?xi32>>) -> !fir.ref<!fir.array<?xi32>>
+!HOST: %[[MAP_INFO_MEMBER:.*]] = omp.map_info var_ptr(%[[VAR_PTR]] : !fir.ref<!fir.array<?xi32>>, !fir.array<?xi32>) var_ptr_ptr(%[[VAR_PTR_PTR]] : !fir.llvm_ptr<!fir.ref<!fir.array<?xi32>>>) map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}
+!HOST: %[[MAP:.*]] = omp.map_info var_ptr(%[[INTERMEDIATE_ALLOCA]] : !fir.ref<!fir.box<!fir.array<?xi32>>>, !fir.box<!fir.array<?xi32>>) map_clauses(tofrom) capture(ByRef) members(%[[MAP_INFO_MEMBER]] : !fir.ref<!fir.array<?xi32>>) -> !fir.ref<!fir.box<!fir.array<?xi32>>> {name = "arr_read_write(2:5)"}
+!HOST: omp.target   map_entries(%[[MAP]] -> %{{.*}}, {{.*}} -> {{.*}} : !fir.ref<!fir.box<!fir.array<?xi32>>>, !fir.ref<i32>) {
     subroutine assumed_shape_array(arr_read_write)
             integer, intent(inout) :: arr_read_write(:)
 
@@ -60,7 +63,7 @@ module assumed_array_routines
                 arr_read_write(i) = i
             end do
         !$omp end target
-        end subroutine assumed_shape_array
+    end subroutine assumed_shape_array
 
 
 !HOST-LABEL: func.func @_QMassumed_array_routinesPassumed_size_array(
@@ -76,17 +79,16 @@ module assumed_array_routines
 !HOST: %[[BOUNDS:.*]]  = omp.bounds   lower_bound(%[[C1]] : index) upper_bound(%[[C2]] : index) extent(%[[EXT]] : index) stride(%[[C0]] : index) start_idx(%[[C0]] : index)
 !HOST: %[[MAP:.*]] = omp.map_info var_ptr(%[[ARG0_DECL]]#1 : !fir.ref<!fir.array<?xi32>>, !fir.array<?xi32>)   map_clauses(tofrom) capture(ByRef) bounds(%[[BOUNDS]]) -> !fir.ref<!fir.array<?xi32>> {name = "arr_read_write(2:5)"}
 !HOST: omp.target map_entries(%[[MAP]] -> %{{.*}}, {{.*}} -> {{.*}} : !fir.ref<!fir.array<?xi32>>, !fir.ref<i32>) {
-        subroutine assumed_size_array(arr_read_write)
-            integer, intent(inout) :: arr_read_write(*)
+    subroutine assumed_size_array(arr_read_write)
+        integer, intent(inout) :: arr_read_write(*)
 
-        !$omp target map(tofrom:arr_read_write(2:5))
-            do i = 2, 5
-                arr_read_write(i) = i
-            end do
-        !$omp end target
-        end subroutine assumed_size_array
-    end module assumed_array_routines
-
+    !$omp target map(tofrom:arr_read_write(2:5))
+        do i = 2, 5
+            arr_read_write(i) = i
+        end do
+    !$omp end target
+    end subroutine assumed_size_array
+end module assumed_array_routines
 
 !HOST-LABEL:func.func @_QPcall_assumed_shape_and_size_array() {
 !HOST: %[[C20:.*]] = arith.constant 20 : index
