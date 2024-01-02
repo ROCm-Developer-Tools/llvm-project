@@ -21,7 +21,8 @@ namespace Fortran::runtime::io {
 static inline bool IsCharValueSeparator(const DataEdit &edit, char32_t ch) {
   char32_t comma{
       edit.modes.editingFlags & decimalComma ? char32_t{';'} : char32_t{','}};
-  return ch == ' ' || ch == '\t' || ch == '/' || ch == comma;
+  return ch == ' ' || ch == '\t' || ch == comma || ch == '/' ||
+      (edit.IsNamelist() && (ch == '&' || ch == '$'));
 }
 
 static bool CheckCompleteListDirectedField(
@@ -244,7 +245,16 @@ bool EditIntegerInput(
     value = -value;
   }
   if (any || !io.GetConnectionState().IsAtEOF()) {
-    std::memcpy(n, &value, kind); // a blank field means zero
+    // The value is stored in the lower order bits on big endian platform.
+    // When memcpy, shift the value to the higher order bit.
+    auto shft{static_cast<int>(sizeof(value.low())) - kind};
+    // For kind==8 (i.e. shft==0), the value is stored in low_ in big endian.
+    if (!isHostLittleEndian && shft >= 0) {
+      auto l{value.low() << (8 * shft)};
+      std::memcpy(n, &l, kind);
+    } else {
+      std::memcpy(n, &value, kind); // a blank field means zero
+    }
   }
   return any;
 }
@@ -478,6 +488,9 @@ static void RaiseFPExceptions(decimal::ConversionResultFlags flags) {
   if (flags & decimal::ConversionResultFlags::Overflow) {
     RAISE(FE_OVERFLOW);
   }
+  if (flags & decimal::ConversionResultFlags::Underflow) {
+    RAISE(FE_UNDERFLOW);
+  }
   if (flags & decimal::ConversionResultFlags::Inexact) {
     RAISE(FE_INEXACT);
   }
@@ -640,20 +653,30 @@ decimal::ConversionToBinaryResult<binaryPrecision> ConvertHexadecimal(
   }
   // Package & return result
   constexpr RawType significandMask{(one << RealType::significandBits) - 1};
+  int flags{(roundingBit | guardBit) ? decimal::Inexact : decimal::Exact};
   if (!fraction) {
     expo = 0;
   } else if (expo == 1 && !(fraction >> (binaryPrecision - 1))) {
     expo = 0; // subnormal
+    flags |= decimal::Underflow;
   } else if (expo >= RealType::maxExponent) {
-    expo = RealType::maxExponent; // +/-Inf
-    fraction = 0;
+    if (rounding == decimal::RoundToZero ||
+        (rounding == decimal::RoundDown && !isNegative) ||
+        (rounding == decimal::RoundUp && isNegative)) {
+      expo = RealType::maxExponent - 1; // +/-HUGE()
+      fraction = significandMask;
+    } else {
+      expo = RealType::maxExponent; // +/-Inf
+      fraction = 0;
+      flags |= decimal::Overflow;
+    }
   } else {
     fraction &= significandMask; // remove explicit normalization unless x87
   }
   return decimal::ConversionToBinaryResult<binaryPrecision>{
       RealType{static_cast<RawType>(signBit |
           static_cast<RawType>(expo) << RealType::significandBits | fraction)},
-      (roundingBit | guardBit) ? decimal::Inexact : decimal::Exact};
+      static_cast<decimal::ConversionResultFlags>(flags)};
 }
 
 template <int KIND>
@@ -894,6 +917,10 @@ static bool EditListDirectedCharacterInput(
     case '\t':
     case '/':
       isSep = true;
+      break;
+    case '&':
+    case '$':
+      isSep = edit.IsNamelist();
       break;
     case ',':
       isSep = !(edit.modes.editingFlags & decimalComma);

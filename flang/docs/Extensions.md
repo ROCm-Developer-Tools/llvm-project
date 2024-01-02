@@ -315,6 +315,9 @@ end
 * When a file included via an `INCLUDE` line or `#include` directive
   has a continuation marker at the end of its last line in free form,
   Fortran line continuation works.
+* A `NAMELIST` input group may omit its trailing `/` character if
+  it is followed by another `NAMELIST` input group.
+* A `NAMELIST` input group may begin with either `&` or `$`.
 
 ### Extensions supported when enabled by options
 
@@ -640,6 +643,10 @@ module m
   end
 end
 ```
+
+* When an intrinsic procedure appears in the specification part of a module
+  only in function references, but not an explicit `INTRINSIC` statement,
+  its name is not brought into other scopes by a `USE` statement.
 
 ## De Facto Standard Features
 
