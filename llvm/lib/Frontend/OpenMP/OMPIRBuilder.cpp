@@ -2490,7 +2490,7 @@ static Function *emitInterWarpCopyFunction(
   Type *Arg1Type = Arg1->getType();
   Value *ReduceListAlloca =
       Builder.CreateAlloca(Arg0Type, nullptr, Arg0->getName() + ".addr");
-  Value *NumWarpsAlloca =
+  Instruction *NumWarpsAlloca =
       Builder.CreateAlloca(Arg1Type, nullptr, Arg1->getName() + ".addr");
   Value *ReduceListAddrCast = Builder.CreatePointerBitCastOrAddrSpaceCast(
       ReduceListAlloca, Arg0Type, ReduceListAlloca->getName() + ".acast");
@@ -2509,91 +2509,132 @@ static Function *emitInterWarpCopyFunction(
       Builder.CreateLoad(PtrTy, ReduceListAddrCast, "reduce_list_arg");
 
   for (auto En : enumerate(ReductionInfos)) {
+    const OpenMPIRBuilder::ReductionInfo &RI = En.value();
+    Type *ElementTy = RI.ElementType;
+    unsigned NumTypeBits = M.getDataLayout().getTypeSizeInBits(ElementTy);
+    unsigned RealTySize = divideCeil(NumTypeBits, 8);
+    for (unsigned TySize = 4; TySize > 0 && RealTySize > 0; TySize /= 2) {
+      unsigned NumIters = RealTySize/TySize;
+      if (NumIters == 0)
+        continue;
+      //      Type *CopyTy = Builder.getIntNTy(TySize);
+      Type *Int32Ty = Builder.getInt32Ty();
+      Value *Cnt = nullptr;
+      Value *CntAddrAcast = nullptr;
+      BasicBlock *PrecondBB = nullptr;
+      BasicBlock *ExitBB = nullptr;
 
-    // FIXME(JAN): This loop needs to be added later
-    // for (unsigned TySize = 4; TySize > 0 && RealTySize > 0; TySize /=2) {
-    //    const OpenMPIRBuilder::ReductionInfo &RI = En.value();
-    OMPBuilder.createBarrier(
-        OpenMPIRBuilder::LocationDescription(Builder.saveIP(), Loc.DL),
-        omp::Directive::OMPD_unknown,
-        /* ForceSimpleCall */ false,
-        /* CheckCancelFlag */ true);
-    BasicBlock *ThenBB = BasicBlock::Create(Ctx, "then", WcFunc);
-    BasicBlock *ElseBB = BasicBlock::Create(Ctx, "else", WcFunc);
-    BasicBlock *MergeBB = BasicBlock::Create(Ctx, "ifcont", WcFunc);
+      if (NumIters > 1) {
+        OpenMPIRBuilder::InsertPointTy CurrIP = Builder.saveIP();
+        Builder.SetInsertPoint(NumWarpsAlloca);
+        Value *CntAddr = Builder.CreateAlloca(Int32Ty, nullptr, ".cnt.addr");
+        Builder.restoreIP(CurrIP);
+        CntAddrAcast = Builder.CreatePointerBitCastOrAddrSpaceCast(
+            CntAddr, PtrTy, CntAddr->getName() + ".acast");
+        Builder.CreateStore(Constant::getNullValue(Int32Ty), CntAddrAcast);
+        PrecondBB = BasicBlock::Create(Ctx, "precond", WcFunc);
+        ExitBB = BasicBlock::Create(Ctx, "exit", WcFunc);
+        BasicBlock *BodyBB = BasicBlock::Create(Ctx, "body", WcFunc);
+        Builder.CreateBr(PrecondBB);
+        Builder.SetInsertPoint(PrecondBB);
+        Cnt = Builder.CreateLoad(Int32Ty, CntAddrAcast, "cnt");
+        Value *Cmp = Builder.CreateICmpULT(Cnt, Builder.getInt32(NumIters));
+        Builder.CreateCondBr(Cmp, BodyBB, ExitBB);
+        Builder.SetInsertPoint(BodyBB);
+      }
 
-    // if (lane_id  == 0)
-    Value *IsWarpMaster = Builder.CreateIsNull(LaneID, "warp_master");
-    Builder.CreateCondBr(IsWarpMaster, ThenBB, ElseBB);
+      OMPBuilder.createBarrier(
+          OpenMPIRBuilder::LocationDescription(Builder.saveIP(), Loc.DL),
+          omp::Directive::OMPD_unknown,
+          /* ForceSimpleCall */ false,
+          /* CheckCancelFlag */ true);
+      BasicBlock *ThenBB = BasicBlock::Create(Ctx, "then", WcFunc);
+      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "else", WcFunc);
+      BasicBlock *MergeBB = BasicBlock::Create(Ctx, "ifcont", WcFunc);
 
-    // then
-    // Reduce element = LocalReduceList[i]
-    Builder.SetInsertPoint(ThenBB);
-    // FIXME(JAN): Should array type be passed in?
-    auto *RedListArrayTy = ArrayType::get(PtrTy, 1);
-    // FIXME(JAN): maybe it should be 0,0 and not use En.index()
-    Value *ReduceListElementPtrPtr = Builder.CreateConstInBoundsGEP2_64(
-        RedListArrayTy, ReduceListArg, 0, En.index());
-    Value *ReduceListElementPtr = Builder.CreateLoad(
-        PtrTy, ReduceListElementPtrPtr, "reduce_list_element_ptr");
-    Value *TransferElemAddr = Builder.CreateInBoundsGEP(
-        ArrayTy, TransferMedium, {Builder.getInt64(0), WarpID});
-    Value *ReduceListElement = Builder.CreateLoad(I32Type, ReduceListElementPtr,
-                                                  "reduce_list_element");
-    Builder.CreateStore(ReduceListElement, TransferElemAddr,
-                        /*IsVolatile*/ true);
-    Builder.CreateBr(MergeBB);
+      // if (lane_id  == 0)
+      Value *IsWarpMaster = Builder.CreateIsNull(LaneID, "warp_master");
+      Builder.CreateCondBr(IsWarpMaster, ThenBB, ElseBB);
 
-    // else
-    Builder.SetInsertPoint(ElseBB);
-    Builder.CreateBr(MergeBB);
+      // then
+      // Reduce element = LocalReduceList[i]
+      Builder.SetInsertPoint(ThenBB);
+      // FIXME(JAN): Should array type be passed in?
+      auto *RedListArrayTy = ArrayType::get(PtrTy, 1);
+      // FIXME(JAN): maybe it should be 0,0 and not use En.index()
+      Value *ReduceListElementPtrPtr = Builder.CreateConstInBoundsGEP2_64(
+          RedListArrayTy, ReduceListArg, 0, En.index());
+      Value *ReduceListElementPtr = Builder.CreateLoad(
+          PtrTy, ReduceListElementPtrPtr, "reduce_list_element_ptr");
+      if (NumIters > 1)
+        ReduceListElementPtr = Builder.CreateGEP(Int32Ty, ReduceListElementPtr, Cnt);
 
-    // endif
-    Builder.SetInsertPoint(MergeBB);
-    OMPBuilder.createBarrier(
-        OpenMPIRBuilder::LocationDescription(Builder.saveIP(), Loc.DL),
-        omp::Directive::OMPD_unknown,
-        /* ForceSimpleCall */ false,
-        /* CheckCancelFlag */ true);
+      Value *TransferElemAddr = Builder.CreateInBoundsGEP(
+          ArrayTy, TransferMedium, {Builder.getInt64(0), WarpID});
+      Value *ReduceListElement = Builder.CreateLoad(
+          I32Type, ReduceListElementPtr, "reduce_list_element");
+      Builder.CreateStore(ReduceListElement, TransferElemAddr,
+                          /*IsVolatile*/ true);
+      Builder.CreateBr(MergeBB);
 
-    // Warp 0 copies reduce element from transfer medium
-    BasicBlock *W0ThenBB = BasicBlock::Create(Ctx, "w0then", WcFunc);
-    BasicBlock *W0ElseBB = BasicBlock::Create(Ctx, "w0else", WcFunc);
-    BasicBlock *W0MergeBB = BasicBlock::Create(Ctx, "w0ifcont", WcFunc);
+      // else
+      Builder.SetInsertPoint(ElseBB);
+      Builder.CreateBr(MergeBB);
 
-    Value *NumWarpsVal =
+      // endif
+      Builder.SetInsertPoint(MergeBB);
+      OMPBuilder.createBarrier(
+          OpenMPIRBuilder::LocationDescription(Builder.saveIP(), Loc.DL),
+          omp::Directive::OMPD_unknown,
+          /* ForceSimpleCall */ false,
+          /* CheckCancelFlag */ true);
+
+      // Warp 0 copies reduce element from transfer medium
+      BasicBlock *W0ThenBB = BasicBlock::Create(Ctx, "w0then", WcFunc);
+      BasicBlock *W0ElseBB = BasicBlock::Create(Ctx, "w0else", WcFunc);
+      BasicBlock *W0MergeBB = BasicBlock::Create(Ctx, "w0ifcont", WcFunc);
+
+      Value *NumWarpsVal =
         Builder.CreateLoad(I32Type, NumWarpsAddrCast, "num_warps");
-    Value *IsActiveThread =
+      Value *IsActiveThread =
         Builder.CreateICmpULT(ThreadID, NumWarpsVal, "is_active_thread");
-    Builder.CreateCondBr(IsActiveThread, W0ThenBB, W0ElseBB);
+      Builder.CreateCondBr(IsActiveThread, W0ThenBB, W0ElseBB);
 
-    // W0then
-    // SecMEdiumPtr = &medium[tid]
-    Builder.SetInsertPoint(W0ThenBB);
-    Value *SrcMediumPtrVal = Builder.CreateInBoundsGEP(
-        ArrayTy, TransferMedium, {Builder.getInt64(0), ThreadID});
-    // SrcMediumVal = *SrcMediumPtr
-    // TODO(JAN): Bitcast here, but no load? skipping for now
-    Value *TargetElementPtrPtr = Builder.CreateConstInBoundsGEP2_64(
-        RedListArrayTy, ReduceListArg, 0, En.index());
-    Value *TargetElementPtr =
-        Builder.CreateLoad(PtrTy, TargetElementPtrPtr);
-    Value *SrcMediumValue =
-        Builder.CreateLoad(I32Type, SrcMediumPtrVal, /*IsVolatile*/ true);
-    Builder.CreateStore(SrcMediumValue, TargetElementPtr);
-    Builder.CreateBr(W0MergeBB);
+      // W0then
+      // SecMEdiumPtr = &medium[tid]
+      Builder.SetInsertPoint(W0ThenBB);
+      Value *SrcMediumPtrVal = Builder.CreateInBoundsGEP(
+          ArrayTy, TransferMedium, {Builder.getInt64(0), ThreadID});
+      // SrcMediumVal = *SrcMediumPtr
+      // TODO(JAN): Bitcast here, but no load? skipping for now
+      Value *TargetElementPtrPtr = Builder.CreateConstInBoundsGEP2_64(
+          RedListArrayTy, ReduceListArg, 0, En.index());
+      Value *TargetElementPtr = Builder.CreateLoad(PtrTy, TargetElementPtrPtr);
+      if (NumIters > 1)
+        TargetElementPtr = Builder.CreateGEP(Int32Ty, TargetElementPtr, Cnt);
 
-    // W0else
-    Builder.SetInsertPoint(W0ElseBB);
-    Builder.CreateBr(W0MergeBB);
+      Value *SrcMediumValue =
+          Builder.CreateLoad(I32Type, SrcMediumPtrVal, /*IsVolatile*/ true);
+      Builder.CreateStore(SrcMediumValue, TargetElementPtr);
+      Builder.CreateBr(W0MergeBB);
 
-    // W0endif
-    Builder.SetInsertPoint(W0MergeBB);
+      // W0else
+      Builder.SetInsertPoint(W0ElseBB);
+      Builder.CreateBr(W0MergeBB);
+
+      // W0endif
+      Builder.SetInsertPoint(W0MergeBB);
+      if (NumIters > 1) {
+        Cnt = Builder.CreateNSWAdd(Cnt, Builder.getInt32(1));
+        Builder.CreateStore(Cnt, CntAddrAcast);
+        Builder.CreateBr(PrecondBB);
+        Builder.SetInsertPoint(ExitBB);
+      }
+    }
   }
 
   Builder.CreateRetVoid();
   Builder.restoreIP(OldIP);
-
   return WcFunc;
 }
 
@@ -2645,7 +2686,8 @@ static Function *emitListToGlobalCopyFunction(
       ReduceListArgAlloca, PtrTy, ReduceListArgAlloca->getName() + ".acast");
   // FIXME(JAN): Assume a single globalized variable for now, this should be
   // passed in
-  Type* TypeArgs[] = {Builder.getInt32Ty()};
+  Type *SingleReductionTy = ReductionInfos.begin()->ElementType;
+  Type *TypeArgs[] = {SingleReductionTy};
   StructType *ReductionsBufferTy =
       StructType::create(Ctx, TypeArgs, "_globalized_locals_ty");
 
@@ -2728,7 +2770,8 @@ static Function *emitGlobalToListCopyFunction(
       ReduceListArgAlloca, PtrTy, ReduceListArgAlloca->getName() + ".acast");
   // FIXME(JAN): Assume a single globalized variable for now, this should be
   // passed in
-  Type* TypeArgs[] = {Builder.getInt32Ty()};
+  Type *SingleReductionTy = ReductionInfos.begin()->ElementType;
+  Type *TypeArgs[] = {SingleReductionTy};
   StructType *ReductionsBufferTy =
       StructType::create(Ctx, TypeArgs, "_globalized_locals_ty");
 
@@ -2823,7 +2866,8 @@ static Function *emitListToGlobalReduceFunction(
       LocalReduceList, PtrTy, LocalReduceList->getName() + ".acast");
   // FIXME(JAN): Assume a single globalized variable for now, this should be
   // passed in
-  Type* TypeArgs[] = {Builder.getInt32Ty()};
+  Type *SingleReductionTy = ReductionInfos.begin()->ElementType;
+  Type *TypeArgs[] = {SingleReductionTy};
   StructType *ReductionsBufferTy =
       StructType::create(Ctx, TypeArgs, "_globalized_locals_ty");
 
@@ -2912,7 +2956,8 @@ static Function *emitGlobalToListReduceFunction(
       LocalReduceList, PtrTy, LocalReduceList->getName() + ".acast");
   // FIXME(JAN): Assume a single globalized variable for now, this should be
   // passed in
-  Type* TypeArgs[] = {Builder.getInt32Ty()};
+  Type *SingleReductionTy = ReductionInfos.begin()->ElementType;
+  Type *TypeArgs[] = {SingleReductionTy};
   StructType *ReductionsBufferTy =
       StructType::create(Ctx, TypeArgs, "_globalized_locals_ty");
 
