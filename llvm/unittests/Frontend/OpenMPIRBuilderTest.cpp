@@ -5846,6 +5846,7 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
 }
 
 TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
+  M->setTargetTriple("amdgcn-amd-amdhsa");
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.setConfig(
       OpenMPIRBuilderConfig(true, false, false, false, false, false, false));
