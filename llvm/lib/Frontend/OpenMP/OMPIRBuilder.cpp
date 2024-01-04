@@ -3865,11 +3865,16 @@ static void createTargetLoopWorkshareCall(
     Type *ParallelTaskPtr, Value *TripCountOrig, Function &LoopBodyFn) {
   // FIXME(JAN): The trip count is 1 larger than it should be, this may not be
   // the right way to fix it, but it could be.
-  Value *TripCount = OMPBuilder->Builder.CreateSub(
-      TripCountOrig, OMPBuilder->Builder.getInt32(1), "jan_modified_trip_count");
-  Type *TripCountTy = TripCount->getType();
   Module &M = OMPBuilder->M;
   IRBuilder<> &Builder = OMPBuilder->Builder;
+  Value *TripCount = TripCountOrig;
+  if (OMPBuilder->Config.isGPU()) {
+    if (LoopType != WorksharingLoopType::DistributeStaticLoop)
+      Builder.restoreIP({InsertBlock, std::prev(InsertBlock->end())});
+    TripCount = Builder.CreateSub(TripCountOrig, Builder.getInt32(1),
+                                  "jan_modified_trip_count");
+  }
+  Type *TripCountTy = TripCount->getType();
   FunctionCallee RTLFn =
       getKmpcForStaticLoopForType(TripCountTy, OMPBuilder, LoopType);
   SmallVector<Value *, 8> RealArgs;
