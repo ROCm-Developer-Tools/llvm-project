@@ -2351,7 +2351,7 @@ calculateTripCount(Fortran::lower::AbstractConverter &converter,
   };
 
   // Start with signless i32 by default.
-  auto tripCount = b.createIntegerConstant(loc, b.getI64Type(), 1);
+  auto tripCount = b.createIntegerConstant(loc, b.getI32Type(), 1);
 
   for (auto [origLb, origUb, origStep] : llvm::zip(lbs, ubs, steps)) {
     auto tmpS0 = b.createIntegerConstant(loc, origStep.getType(), 0);

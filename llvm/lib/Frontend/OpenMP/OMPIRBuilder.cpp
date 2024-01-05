@@ -3531,11 +3531,11 @@ CanonicalLoopInfo *OpenMPIRBuilder::createCanonicalLoop(
     Incr = Builder.CreateSelect(IsNeg, Builder.CreateNeg(Step), Step);
     Value *LB = Builder.CreateSelect(IsNeg, Stop, Start);
     Value *UB = Builder.CreateSelect(IsNeg, Start, Stop);
-    Span = Builder.CreateSub(UB, LB, "span", false, true);
+    Span = Builder.CreateSub(UB, LB, "", false, true);
     ZeroCmp = Builder.CreateICmp(
         InclusiveStop ? CmpInst::ICMP_SLT : CmpInst::ICMP_SLE, UB, LB);
   } else {
-    Span = Builder.CreateSub(Stop, Start, "span", true);
+    Span = Builder.CreateSub(Stop, Start, "", true);
     ZeroCmp = Builder.CreateICmp(
         InclusiveStop ? CmpInst::ICMP_ULT : CmpInst::ICMP_ULE, Stop, Start);
   }
@@ -3618,7 +3618,7 @@ OpenMPIRBuilder::applyStaticWorkshareLoop(DebugLoc DL, CanonicalLoopInfo *CLI,
   Constant *Zero = ConstantInt::get(IVTy, 0);
   Constant *One = ConstantInt::get(IVTy, 1);
   Builder.CreateStore(Zero, PLowerBound);
-  Value *UpperBound = Builder.CreateSub(CLI->getTripCount(), One, "upper_bound");
+  Value *UpperBound = Builder.CreateSub(CLI->getTripCount(), One);
   Builder.CreateStore(UpperBound, PUpperBound);
   Builder.CreateStore(One, PStride);
 
@@ -3714,8 +3714,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::applyStaticChunkedWorkshareLoop(
   Constant *SchedulingType = ConstantInt::get(
       I32Type, static_cast<int>(OMPScheduleType::UnorderedStaticChunked));
   Builder.CreateStore(Zero, PLowerBound);
-  Value *OrigUpperBound =
-      Builder.CreateSub(CastedTripCount, One, "orig_upper_bound");
+  Value *OrigUpperBound = Builder.CreateSub(CastedTripCount, One);
   Builder.CreateStore(OrigUpperBound, PUpperBound);
   Builder.CreateStore(One, PStride);
 
@@ -3776,7 +3775,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::applyStaticChunkedWorkshareLoop(
   Value *IsLastChunk =
       Builder.CreateICmpUGE(ChunkEnd, CastedTripCount, "omp_chunk.is_last");
   Value *CountUntilOrigTripCount =
-    Builder.CreateSub(CastedTripCount, DispatchCounter, "count_until_org");
+      Builder.CreateSub(CastedTripCount, DispatchCounter);
   Value *ChunkTripCount = Builder.CreateSelect(
       IsLastChunk, CountUntilOrigTripCount, ChunkRange, "omp_chunk.tripcount");
   Value *BackcastedChunkTC =
