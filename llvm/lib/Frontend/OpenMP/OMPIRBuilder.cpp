@@ -58,8 +58,6 @@
 
 #define DEBUG_TYPE "openmp-ir-builder"
 
-#define FIXME_JAN_GPU_WARP_SIZE 32
-
 using namespace llvm;
 using namespace omp;
 
@@ -2077,16 +2075,15 @@ static Value *getGPUNumThreads(Module &M, OpenMPIRBuilder &OMPBuilder) {
 }
 
 static Value *getNVPTXWarpID(Module &M, OpenMPIRBuilder &OMPIRBuilder) {
-   unsigned LaneIDBits =
-      llvm::Log2_32(FIXME_JAN_GPU_WARP_SIZE);
-  return OMPIRBuilder.Builder.CreateAShr(
-      getGPUThreadID(M, OMPIRBuilder),
-      LaneIDBits, "nvptx_warp_id");
+  unsigned LaneIDBits =
+      llvm::Log2_32(OMPIRBuilder.Config.getGridValue().GV_Warp_Size);
+  return OMPIRBuilder.Builder.CreateAShr(getGPUThreadID(M, OMPIRBuilder),
+                                         LaneIDBits, "nvptx_warp_id");
 }
 
 static Value *getNVPTXLaneID(Module &M, OpenMPIRBuilder &OMPIRBuilder) {
    unsigned LaneIDBits =
-      llvm::Log2_32(FIXME_JAN_GPU_WARP_SIZE);
+     llvm::Log2_32(OMPIRBuilder.Config.getGridValue().GV_Warp_Size);
   assert(LaneIDBits < 32 && "Invalid LaneIDBits size in NVPTX device.");
   unsigned LaneIDMask = ~0u >> (32u - LaneIDBits);
   return OMPIRBuilder.Builder.CreateAnd(
@@ -2465,9 +2462,7 @@ static Function *emitInterWarpCopyFunction(
   Arg1->setName("num_warps");
 
   // Ensure data transfer storage
-  unsigned WarpSize =
-      FIXME_JAN_GPU_WARP_SIZE; /*FIXME(Jan):
-                                  CGF.getTarget().getGridValue().GV_Warp_Size;*/
+  unsigned WarpSize = OMPBuilder.Config.getGridValue().GV_Warp_Size;
   // FIXME(Jan): Not sure about the array type here, but it is I32 in Clang
   auto *ArrayTy = ArrayType::get(I32Type, WarpSize);
   StringRef TransferMediumName =
@@ -5614,6 +5609,9 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetInit(
   Constant *DebugIndentionLevelVal = ConstantInt::getSigned(Int16, 0);
 
   Function *Kernel = Builder.GetInsertBlock()->getParent();
+
+  // Set the grid value in the config needed for lowering later on
+  Config.setGridValue(getGridValue(T,Kernel));
 
   // Manifest the launch configuration in the metadata matching the kernel
   // environment.

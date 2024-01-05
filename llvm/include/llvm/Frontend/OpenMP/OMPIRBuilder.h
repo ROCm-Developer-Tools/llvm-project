@@ -16,6 +16,7 @@
 
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
+#include "llvm/Frontend/OpenMP/OMPGridValues.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/Allocator.h"
@@ -103,6 +104,9 @@ public:
   /// Separator used between all of the rest consecutive parts of s name
   std::optional<StringRef> Separator;
 
+  // Grid Value for the GPU target
+  std::optional<omp::GV> GridValue;
+
   OpenMPIRBuilderConfig();
   OpenMPIRBuilderConfig(bool IsTargetDevice, bool IsGPU,
                         bool OpenMPOffloadMandatory,
@@ -126,6 +130,11 @@ public:
     assert(OpenMPOffloadMandatory.has_value() &&
            "OpenMPOffloadMandatory is not set");
     return *OpenMPOffloadMandatory;
+  }
+
+  omp::GV getGridValue() const {
+    assert(GridValue.has_value() && "GridValue is not set");
+    return *GridValue;
   }
 
   bool hasRequiresFlags() const { return RequiresFlags; }
@@ -163,6 +172,7 @@ public:
   void setOpenMPOffloadMandatory(bool Value) { OpenMPOffloadMandatory = Value; }
   void setFirstSeparator(StringRef FS) { FirstSeparator = FS; }
   void setSeparator(StringRef S) { Separator = S; }
+  void setGridValue(omp::GV G) { GridValue = G; }
 
   void setHasRequiresReverseOffload(bool Value);
   void setHasRequiresUnifiedAddress(bool Value);
