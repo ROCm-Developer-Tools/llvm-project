@@ -2742,10 +2742,6 @@ def TestCSEOfSingleBlockOp : TEST_Op<"cse_of_single_block_op",
   }];
 }
 
-def NoCSEOneRegionOp : TEST_Op<"no_cse_one_region_op", []> {
-  let regions = (region AnyRegion);
-}
-
 //===----------------------------------------------------------------------===//
 // Test Ops to upgrade base on the dialect versions
 //===----------------------------------------------------------------------===//
