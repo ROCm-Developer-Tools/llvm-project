@@ -147,13 +147,22 @@ static bool isValidWorkshareLoopScheduleType(OMPScheduleType SchedType) {
 
 Function *GLOBAL_ReductionFunc = nullptr;
 
+static const omp::GV &getGridValue(const Triple &T, StringRef Features) {
+  if (T.isAMDGPU()) {
+    if (Features.count("+wavefrontsize64"))
+      return omp::getAMDGPUGridValues<64>();
+    return omp::getAMDGPUGridValues<32>();
+  }
+  if (T.isNVPTX())
+    return omp::NVPTXGridValues;
+  llvm_unreachable("No grid value available for this architecture!");
+}
+
 static const omp::GV &getGridValue(const Triple &T, Function *Kernel) {
   if (T.isAMDGPU()) {
     StringRef Features =
         Kernel->getFnAttribute("target-features").getValueAsString();
-    if (Features.count("+wavefrontsize64"))
-      return omp::getAMDGPUGridValues<64>();
-    return omp::getAMDGPUGridValues<32>();
+    return getGridValue(T, Features);
   }
   if (T.isNVPTX())
     return omp::NVPTXGridValues;
@@ -5610,7 +5619,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetInit(
   Function *Kernel = Builder.GetInsertBlock()->getParent();
 
   // Set the grid value in the config needed for lowering later on
-  Config.setGridValue(getGridValue(T,Kernel));
+  Config.setGridValue(getGridValue(T, Config.TargetFeatures));
 
   // Manifest the launch configuration in the metadata matching the kernel
   // environment.
