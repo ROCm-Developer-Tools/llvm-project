@@ -5632,9 +5632,10 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createTargetInit(
   Constant *MaxThreads = ConstantInt::getSigned(Int32, MaxThreadsValue);
   Constant *MinTeams = ConstantInt::getSigned(Int32, Bounds.MinTeams);
   Constant *MaxTeams = ConstantInt::getSigned(Int32, Bounds.MaxTeams);
-  // FIXME(JAN): Remove hard coded constant for data size
-  Constant *ReductionDataSize = ConstantInt::getSigned(Int32, 4);
-  Constant *ReductionBufferLength = ConstantInt::getSigned(Int32, 1024);
+  Constant *ReductionDataSize =
+      ConstantInt::getSigned(Int32, Bounds.ReductionDataSize);
+  Constant *ReductionBufferLength =
+      ConstantInt::getSigned(Int32, Bounds.ReductionBufferLength);
 
   // We need to strip the debug prefix to get the correct kernel name.
   StringRef KernelName = Kernel->getName();

@@ -1703,6 +1703,8 @@ public:
     int32_t MaxTeams = -1;
     int32_t MinThreads = 1;
     int32_t MaxThreads = -1;
+    int32_t ReductionDataSize = 0;
+    int32_t ReductionBufferLength = 0;
   };
 
   /// Container to pass the runtime SSA values or constants related to the

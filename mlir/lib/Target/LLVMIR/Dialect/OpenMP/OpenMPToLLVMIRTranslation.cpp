@@ -2663,7 +2663,8 @@ static OpTy castOrGetParentOfType(Operation *op, bool immediateParent = false) {
 static void initTargetDefaultBounds(
     omp::TargetOp targetOp,
     llvm::OpenMPIRBuilder::TargetKernelDefaultBounds &bounds,
-    bool isTargetDevice) {
+    bool isTargetDevice,
+    bool isGPU) {
   // TODO Handle constant IF clauses
   Operation *innermostCapturedOmpOp = targetOp.getInnermostCapturedOmpOp();
 
@@ -2746,11 +2747,35 @@ static void initTargetDefaultBounds(
       (maxThreadsVal >= 0 && maxThreadsVal < combinedMaxThreadsVal))
     combinedMaxThreadsVal = maxThreadsVal;
 
+  // Calculate reduction data size, limited to single reduction variable
+  // for now.
+  int32_t reductionDataSize = 0;
+  if (isGPU && innermostCapturedOmpOp) {
+    if (auto wsLoopOp =
+            mlir::dyn_cast<mlir::omp::WsLoopOp>(innermostCapturedOmpOp)) {
+      if (wsLoopOp.getNumReductionVars() > 0) {
+        assert(wsLoopOp.getNumReductionVars() &&
+               "Only 1 reduction variable currently supported");
+        mlir::Value reductionVar = wsLoopOp.getReductionVars()[0];
+        DataLayout dl =
+            DataLayout(innermostCapturedOmpOp->getParentOfType<ModuleOp>());
+
+        mlir::Type reductionVarTy = reductionVar.getType();
+        uint64_t sizeInBits = dl.getTypeSizeInBits(reductionVarTy);
+        uint64_t sizeInBytes = sizeInBits / 8;
+        reductionDataSize = sizeInBytes;
+      }
+    }
+  }
+
   // Update kernel bounds structure for the `OpenMPIRBuilder` to use.
   bounds.MinTeams = minTeamsVal;
   bounds.MaxTeams = maxTeamsVal;
   bounds.MinThreads = 1;
   bounds.MaxThreads = combinedMaxThreadsVal;
+  bounds.ReductionDataSize = reductionDataSize;
+  if (bounds.ReductionDataSize != 0)
+    bounds.ReductionBufferLength = 1024;
 }
 
 /// Gather LLVM runtime values for all clauses evaluated in the host that are
@@ -2788,6 +2813,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
 
   llvm::OpenMPIRBuilder *ompBuilder = moduleTranslation.getOpenMPBuilder();
   bool isTargetDevice = ompBuilder->Config.isTargetDevice();
+  bool isGPU = ompBuilder->Config.isGPU();
   auto targetOp = cast<omp::TargetOp>(opInst);
   auto &targetRegion = targetOp.getRegion();
   DataLayout dl = DataLayout(opInst.getParentOfType<ModuleOp>());
@@ -2890,7 +2916,7 @@ convertOmpTarget(Operation &opInst, llvm::IRBuilderBase &builder,
   }
 
   llvm::OpenMPIRBuilder::TargetKernelDefaultBounds defaultBounds;
-  initTargetDefaultBounds(targetOp, defaultBounds, isTargetDevice);
+  initTargetDefaultBounds(targetOp, defaultBounds, isTargetDevice, isGPU);
 
   if (Value targetThreadLimit = targetOp.getThreadLimit())
     runtimeBounds.TargetThreadLimit =
