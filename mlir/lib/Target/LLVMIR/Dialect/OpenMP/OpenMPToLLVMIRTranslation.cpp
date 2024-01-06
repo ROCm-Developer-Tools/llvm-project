@@ -888,7 +888,6 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
         moduleTranslation.lookupValue(loop.getScheduleChunkVar());
     chunk = builder.CreateSExtOrTrunc(chunkVar, ivType);
   }
-
   SmallVector<omp::ReductionDeclareOp> reductionDecls;
   collectReductionDecls(loop, reductionDecls);
   llvm::OpenMPIRBuilder::InsertPointTy allocaIP =
@@ -1053,6 +1052,9 @@ convertOmpWsLoop(Operation &opInst, llvm::IRBuilderBase &builder,
   tempTerminator->eraseFromParent();
   builder.restoreIP(nextInsertionPoint);
 
+  if (!ompBuilder->Config.isGPU())
+    ompBuilder->RIManager.clear();
+
   return success();
 }
 
@@ -1167,6 +1169,9 @@ convertOmpParallel(Operation &opInst1, llvm::IRBuilderBase &builder,
   builder.restoreIP(
       ompBuilder->createParallel(ompLoc, allocaIP, bodyGenCB, privCB, finiCB,
                                  ifCond, numThreads, pbKind, isCancellable));
+
+  if (!ompBuilder->Config.isGPU())
+    ompBuilder->RIManager.clear();
 
   return bodyGenStatus;
 }
@@ -2315,7 +2320,6 @@ convertOmpDistribute(Operation &opInst, llvm::IRBuilderBase &builder,
     // DistributeOp has only one region associated with it.
     builder.restoreIP(codeGenIP);
     ompBuilder->RIManager.setPrivateVarAllocaIP(allocaIP);
-
     auto regionBlock =
         convertOmpOpRegions(opInst.getRegion(0), "omp.distribute.region",
                             builder, moduleTranslation, bodyGenStatus);
