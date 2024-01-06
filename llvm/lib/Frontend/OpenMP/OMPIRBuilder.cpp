@@ -147,6 +147,15 @@ static bool isValidWorkshareLoopScheduleType(OMPScheduleType SchedType) {
 
 Function *GLOBAL_ReductionFunc = nullptr;
 
+static uint64_t getTypeSizeInBytes(Module &M, Type *Type) {
+  return divideCeil(M.getDataLayout().getTypeSizeInBits(Type), 8);
+}
+
+static Value *getTypeSizeInBytesValue(IRBuilder<> &Builder, Module &M,
+                                      Type *Type) {
+  return Builder.getInt64(getTypeSizeInBytes(M, Type));
+}
+
 static const omp::GV &getGridValue(const Triple &T, StringRef Features) {
   if (T.isAMDGPU()) {
     if (Features.count("+wavefrontsize64"))
@@ -3147,8 +3156,8 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
 
   Value *RL =
     Builder.CreatePointerBitCastOrAddrSpaceCast(ReductionList, PtrTy);
-  // FIXME(JAN): Compute ReductionDataSize correctly
-  Value *ReductionDataSize = Builder.getInt64(4);
+  Value *ReductionDataSize =
+      getTypeSizeInBytesValue(Builder, M, ReductionInfos.begin()->ElementType);
 
   Value *Res;
   if (!IsTeamsReduction) {
