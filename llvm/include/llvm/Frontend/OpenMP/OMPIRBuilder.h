@@ -16,6 +16,7 @@
 
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
+#include "llvm/Frontend/OpenMP/OMPGridValues.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/Allocator.h"
@@ -103,6 +104,9 @@ public:
   /// Separator used between all of the rest consecutive parts of s name
   std::optional<StringRef> Separator;
 
+  // Grid Value for the GPU target
+  std::optional<omp::GV> GridValue;
+
   OpenMPIRBuilderConfig();
   OpenMPIRBuilderConfig(bool IsTargetDevice, bool IsGPU,
                         bool OpenMPOffloadMandatory,
@@ -126,6 +130,11 @@ public:
     assert(OpenMPOffloadMandatory.has_value() &&
            "OpenMPOffloadMandatory is not set");
     return *OpenMPOffloadMandatory;
+  }
+
+  omp::GV getGridValue() const {
+    assert(GridValue.has_value() && "GridValue is not set");
+    return *GridValue;
   }
 
   bool hasRequiresFlags() const { return RequiresFlags; }
@@ -163,6 +172,7 @@ public:
   void setOpenMPOffloadMandatory(bool Value) { OpenMPOffloadMandatory = Value; }
   void setFirstSeparator(StringRef FS) { FirstSeparator = FS; }
   void setSeparator(StringRef S) { Separator = S; }
+  void setGridValue(omp::GV G) { GridValue = G; }
 
   void setHasRequiresReverseOffload(bool Value);
   void setHasRequiresUnifiedAddress(bool Value);
@@ -1229,18 +1239,26 @@ public:
   getTargetEntryUniqueInfo(FileIdentifierInfoCallbackTy CallBack,
                            StringRef ParentName = "");
 
+  // using ReductionGenTy =
+  //     function_ref<InsertPointTy(InsertPointTy, Value *, Value *, Value *&)>;
+
+  // using AtomicReductionGenTy =
+  //     function_ref<InsertPointTy(InsertPointTy, Type *, Value *, Value *)>;
+
+  /// Owning equivalents of OpenMPIRBuilder::(Atomic)ReductionGen that are used
+  /// to
+  /// store lambdas with capture.
   /// Functions used to generate reductions. Such functions take two Values
   /// representing LHS and RHS of the reduction, respectively, and a reference
   /// to the value that is updated to refer to the reduction result.
-  using ReductionGenTy =
-      function_ref<InsertPointTy(InsertPointTy, Value *, Value *, Value *&)>;
-
+  using ReductionGenTy = std::function<OpenMPIRBuilder::InsertPointTy(
+      OpenMPIRBuilder::InsertPointTy, Value *, Value *, Value *&)>;
   /// Functions used to generate atomic reductions. Such functions take two
   /// Values representing pointers to LHS and RHS of the reduction, as well as
   /// the element type of these pointers. They are expected to atomically
   /// update the LHS to the reduced value.
-  using AtomicReductionGenTy =
-      function_ref<InsertPointTy(InsertPointTy, Type *, Value *, Value *)>;
+  using AtomicReductionGenTy = std::function<OpenMPIRBuilder::InsertPointTy(
+      OpenMPIRBuilder::InsertPointTy, Type *, Value *, Value *)>;
 
   /// Information about an OpenMP reduction.
   struct ReductionInfo {
@@ -1250,6 +1268,10 @@ public:
         : ElementType(ElementType), Variable(Variable),
           PrivateVariable(PrivateVariable), ReductionGen(ReductionGen),
           AtomicReductionGen(AtomicReductionGen) {}
+    ReductionInfo(Value *PrivateVariable)
+        : ElementType(nullptr), Variable(nullptr),
+          PrivateVariable(PrivateVariable), ReductionGen(),
+          AtomicReductionGen() {}
 
     /// Reduction element type, must match pointee type of variable.
     Type *ElementType;
@@ -1271,6 +1293,71 @@ public:
     /// along with the appropriate synchronization mechanisms.
     AtomicReductionGenTy AtomicReductionGen;
   };
+
+  /// A class that manages the reduction info to facilitate lowering of
+  /// reductions at multiple levels of parallelism. For example handling teams
+  /// and parallel reductions on GPUs
+
+  class ReductionInfoManager {
+  private:
+    SmallVector<ReductionInfo> ReductionInfos;
+    std::optional<InsertPointTy> PrivateVarAllocaIP;
+
+  public:
+    ReductionInfoManager() {};
+    void clear() {
+      ReductionInfos.clear();
+      PrivateVarAllocaIP.reset();
+    }
+
+    Value *allocatePrivateReductionVar(
+        IRBuilderBase &builder,
+        llvm::OpenMPIRBuilder::InsertPointTy &allocaIP,
+        Type *VarType) {
+      llvm::Type *ptrTy = llvm::PointerType::getUnqual(builder.getContext());
+      llvm::Value *var = builder.CreateAlloca(VarType);
+      var->setName("private_redvar");
+      llvm::Value *castVar =
+        builder.CreatePointerBitCastOrAddrSpaceCast(var, ptrTy);
+      ReductionInfos.push_back(ReductionInfo(castVar));
+      return castVar;
+    }
+
+    ReductionInfo getReductionInfo(unsigned Index) {
+      return ReductionInfos[Index];
+    }
+    ReductionInfo setReductionInfo(unsigned Index, ReductionInfo &RI) {
+      return ReductionInfos[Index] = RI;
+    }
+    Value *getPrivateReductionVariable(unsigned Index) {
+      return ReductionInfos[Index].PrivateVariable;
+    }
+    SmallVector<ReductionInfo> &getReductionInfos() {
+      return ReductionInfos;
+    }
+
+    bool hasPrivateVarAllocaIP() { return PrivateVarAllocaIP.has_value(); }
+    InsertPointTy getPrivateVarAllocaIP() {
+      assert(PrivateVarAllocaIP.has_value() && "AllocaIP not set");
+      return *PrivateVarAllocaIP;
+    }
+    void setPrivateVarAllocaIP(InsertPointTy IP) { PrivateVarAllocaIP = IP; }
+  };
+
+  /// \param Loc                The location where the reduction was
+  ///                           encountered. Must be within the associate
+  ///                           directive and after the last local access to the
+  ///                           reduction variables.
+  /// \param AllocaIP           An insertion point suitable for allocas usable
+  ///                           in reductions.
+  /// \param ReductionInfos     A list of info on each reduction variable.
+  /// \param IsNoWait           A flag set if the reduction is marked as nowait.
+  InsertPointTy createReductionsGPU(const LocationDescription &Loc,
+                                    InsertPointTy AllocaIP,
+                                    ArrayRef<ReductionInfo> ReductionInfos,
+                                    bool IsNoWait = false,
+                                    bool IsTeamsReduction = false,
+                                    bool HasDistribute = false);
 
   // TODO: provide atomic and non-atomic reduction generators for reduction
   // operators defined by the OpenMP specification.
@@ -1336,7 +1423,9 @@ public:
   InsertPointTy createReductions(const LocationDescription &Loc,
                                  InsertPointTy AllocaIP,
                                  ArrayRef<ReductionInfo> ReductionInfos,
-                                 bool IsNoWait = false);
+                                 bool IsNoWait = false,
+                                 bool IsTeamsReduction = false,
+                                 bool HasDistribute = false);
 
   ///}
 
@@ -1477,6 +1566,9 @@ public:
   /// Info manager to keep track of target regions.
   OffloadEntriesInfoManager OffloadInfoManager;
 
+  /// Info manager to keep track of reduction information;
+  ReductionInfoManager RIManager;
+
   /// The target triple of the underlying module.
   const Triple T;
 
@@ -1611,6 +1703,8 @@ public:
     int32_t MaxTeams = -1;
     int32_t MinThreads = 1;
     int32_t MaxThreads = -1;
+    int32_t ReductionDataSize = 0;
+    int32_t ReductionBufferLength = 0;
   };
 
   /// Container to pass the runtime SSA values or constants related to the
