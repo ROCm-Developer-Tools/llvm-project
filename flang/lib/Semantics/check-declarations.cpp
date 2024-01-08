@@ -1121,9 +1121,9 @@ void CheckHelper::CheckArraySpec(
   bool isCUDAShared{
       GetCUDADataAttr(&symbol).value_or(common::CUDADataAttr::Device) ==
       common::CUDADataAttr::Shared};
+  bool isCrayPointee{symbol.test(Symbol::Flag::CrayPointee)};
   std::optional<parser::MessageFixedText> msg;
-  if (symbol.test(Symbol::Flag::CrayPointee) && !isExplicit &&
-      !canBeAssumedSize) {
+  if (isCrayPointee && !isExplicit && !canBeAssumedSize) {
     msg =
         "Cray pointee '%s' must have explicit shape or assumed size"_err_en_US;
   } else if (IsAllocatableOrPointer(symbol) && !canBeDeferred &&
@@ -1150,13 +1150,14 @@ void CheckHelper::CheckArraySpec(
     }
   } else if (canBeAssumedShape && !canBeDeferred) {
     msg = "Assumed-shape array '%s' must be a dummy argument"_err_en_US;
-  } else if (canBeAssumedSize && !canBeImplied && !isCUDAShared) { // C833
-    msg = "Assumed-size array '%s' must be a dummy argument"_err_en_US;
   } else if (isAssumedRank) { // C837
     msg = "Assumed-rank array '%s' must be a dummy argument"_err_en_US;
+  } else if (canBeAssumedSize && !canBeImplied && !isCUDAShared &&
+      !isCrayPointee) { // C833
+    msg = "Assumed-size array '%s' must be a dummy argument"_err_en_US;
   } else if (canBeImplied) {
     if (!IsNamedConstant(symbol) && !isCUDAShared &&
-        !symbol.test(Symbol::Flag::CrayPointee)) { // C835, C836
+        !isCrayPointee) { // C835, C836
       msg = "Implied-shape array '%s' must be a named constant or a "
             "dummy argument"_err_en_US;
     }
@@ -1165,7 +1166,8 @@ void CheckHelper::CheckArraySpec(
       msg = "Named constant '%s' array must have constant or"
             " implied shape"_err_en_US;
     }
-  } else if (!IsAllocatableOrPointer(symbol) && !isExplicit) {
+  } else if (!isExplicit &&
+      !(IsAllocatableOrPointer(symbol) || isCrayPointee)) {
     if (symbol.owner().IsDerivedType()) { // C749
       msg = "Component array '%s' without ALLOCATABLE or POINTER attribute must"
             " have explicit shape"_err_en_US;
