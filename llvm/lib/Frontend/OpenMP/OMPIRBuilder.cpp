@@ -4045,7 +4045,7 @@ OpenMPIRBuilder::applyWorkshareLoopTarget(DebugLoc DL, CanonicalLoopInfo *CLI,
   // We need to model loop body region as the function f(cnt, loop_arg).
   // That's why we replace loop induction variable by the new counter
   // which will be one of loop body function argument
-  std::vector<User *> Users(CLI->getIndVar()->user_begin(),
+  SmallVector<User *> Users(CLI->getIndVar()->user_begin(),
                             CLI->getIndVar()->user_end());
   for (auto Use : Users) {
     if (Instruction *Inst = dyn_cast<Instruction>(Use)) {
