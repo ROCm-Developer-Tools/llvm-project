@@ -1295,7 +1295,7 @@ unsigned RISCVAsmParser::checkTargetMatchPredicate(MCInst &Inst) {
   const MCInstrDesc &MCID = MII.get(Inst.getOpcode());
 
   for (unsigned I = 0; I < MCID.NumOperands; ++I) {
-    if (MCID.operands()[I].RegClass == RISCV::GPRPF64RegClassID) {
+    if (MCID.operands()[I].RegClass == RISCV::GPRPairRegClassID) {
       const auto &Op = Inst.getOperand(I);
       assert(Op.isReg());
 
@@ -2035,9 +2035,8 @@ ParseStatus RISCVAsmParser::parseCallSymbol(OperandVector &Operands) {
 
   SMLoc E = SMLoc::getFromPointer(S.getPointer() + Identifier.size());
 
-  RISCVMCExpr::VariantKind Kind = RISCVMCExpr::VK_RISCV_CALL;
-  if (Identifier.consume_back("@plt"))
-    Kind = RISCVMCExpr::VK_RISCV_CALL_PLT;
+  RISCVMCExpr::VariantKind Kind = RISCVMCExpr::VK_RISCV_CALL_PLT;
+  (void)Identifier.consume_back("@plt");
 
   MCSymbol *Sym = getContext().getOrCreateSymbol(Identifier);
   Res = MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
